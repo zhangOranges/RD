@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
+  pull_request:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------
+  # 1) TypeScript / Frontend: install deps, type-check, build frontend
+  # ------------------------------------------------------------
+  frontend:
+    name: Frontend · tsc + vite build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm deps
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: TypeScript type-check (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      - name: Build frontend (vite build)
+        run: npm run build
+
+  # ------------------------------------------------------------
+  # 2) Rust backend: cargo check / clippy / fmt (Ubuntu)
+  # ------------------------------------------------------------
+  rust-lint:
+    name: Rust · check + clippy + fmt
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      - name: cargo fmt (check)
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --locked
+
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  # ------------------------------------------------------------
+  # 3) Rust backend: cargo check on Windows (native target for Tauri)
+  # ------------------------------------------------------------
+  rust-windows-check:
+    name: Rust (Windows) · cargo check
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain (stable-x86_64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      - name: cargo check --target x86_64-pc-windows-msvc
+        run: cargo check --locked --target x86_64-pc-windows-msvc

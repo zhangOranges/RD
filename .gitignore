@@ -1,0 +1,73 @@
+# ---- Node / Vite / Frontend ----
+node_modules
+dist
+dist-ssr
+*.local
+
+# Build outputs and generated assets
+src-tauri/target
+src-tauri/gen/schemas
+
+# ---- Logs ----
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+crash_log.txt
+
+# ---- Editor / OS ----
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.sw?
+
+# Visual Studio / Windows-specific
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ---- Project-local / Trae specs / drafts ----
+# Spec docs and task plans are part of the project; keep them tracked.
+# Only ignore editor scratch files.
+.trae/**/*.tmp
+.trae/**/.tmp
+
+# ---- Local icons / design source (optional, per project choice) ----
+# Uncomment if you want to ignore original icon source files:
+# RD.png
+# RD_square.png
+
+# ---- Credentials / sensitive runtime data ----
+# Windows: credentials.json stores base64-encoded passwords/private keys.
+# NEVER commit this file.
+**/credentials.json
+**/*.rd_credentials
+
+# ---- Tauri dev & bundle sidecars ----
+src-tauri/bundle
+src-tauri/wix
+src-tauri/nsis
+src-tauri/*.msi
+src-tauri/*.exe
+src-tauri/*.msix
+src-tauri/*.appx
+src-tauri/*.dmg
+src-tauri/*.deb
+src-tauri/*.rpm
+src-tauri/*.AppImage
+
+# ---- Tauri webview cache (Windows AppData-level usually outside repo; belt & suspenders) ----
+src-tauri/**/.tauri-cache
+
+# ---- Environment / local config ----
+.env
+.env.*
+!.env.example
+tauri.conf.local.json
+*.local.json

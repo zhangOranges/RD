@@ -1,0 +1,40 @@
+[package]
+name = "rd-app"
+version = "0.1.0"
+description = "RD - SSH/SFTP Remote Desktop"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "tauri_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+russh = "0.45"
+russh-sftp = "2.0"
+async-trait = "0.1"
+keyring = "3"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "1"
+dirs = "5"
+base64 = "0.22"
+sha2 = "0.10"
+hex = "0.4"
+futures-util = "0.3"
+tauri-plugin-clipboard-manager = "2.3.2"
+

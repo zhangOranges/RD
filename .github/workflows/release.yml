@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ------------------------------------------------------------
+  # 三平台矩阵构建：Windows / Linux / macOS
+  # ------------------------------------------------------------
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x64
+            artifact-dir: artifacts-windows
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            label: linux-x64
+            artifact-dir: artifacts-linux
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-arm64
+            artifact-dir: artifacts-macos
+
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install npm deps
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+
+      - name: Tauri build
+        run: npm run tauri -- build --target ${{ matrix.target }} --verbose
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      # ------------------------------------------------------------
+      # 收集产物（各平台分别处理）
+      # ------------------------------------------------------------
+      - name: Collect artifacts (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $bundle = "src-tauri/target/${{ matrix.target }}/release/bundle"
+          $out = "${{ matrix.artifact-dir }}"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          if (Test-Path "$bundle/msi")   { Copy-Item "$bundle/msi/*.msi"   -Destination $out -ErrorAction SilentlyContinue }
+          if (Test-Path "$bundle/nsis")  { Copy-Item "$bundle/nsis/*.exe"  -Destination $out -ErrorAction SilentlyContinue }
+          # portable exe
+          if (Test-Path "src-tauri/target/${{ matrix.target }}/release/rd_app.exe") {
+            Copy-Item "src-tauri/target/${{ matrix.target }}/release/rd_app.exe" -Destination $out
+          }
+          Write-Host "=== Artifacts ==="
+          Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
+
+      - name: Collect artifacts (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+          out="${{ matrix.artifact-dir }}"
+          mkdir -p "$out"
+          # deb
+          find "$bundle/deb" -name '*.deb' -exec cp {} "$out/" 2>/dev/null || true
+          # rpm
+          find "$bundle/rpm" -name '*.rpm' -exec cp {} "$out/" 2>/dev/null || true
+          # AppImage
+          find "$bundle/appimage" -name '*.AppImage' -exec cp {} "$out/" 2>/dev/null || true
+          echo "=== Artifacts ==="
+          ls -lh "$out"
+
+      - name: Collect artifacts (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+          out="${{ matrix.artifact-dir }}"
+          mkdir -p "$out"
+          # dmg
+          find "$bundle/dmg" -name '*.dmg' -exec cp {} "$out/" 2>/dev/null || true
+          # app (tar.gz for upload)
+          if [ -d "$bundle/macos" ]; then
+            tar -czf "$out/RD.app.tar.gz" -C "$bundle/macos" .
+          fi
+          echo "=== Artifacts ==="
+          ls -lh "$out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rd-app-${{ matrix.label }}
+          path: ${{ matrix.artifact-dir }}/*
+
+      - name: Upload release assets to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact-dir }}/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
