@@ -83,17 +83,21 @@ jobs:
         with:
           workspaces: 'src-tauri -> target'
 
-      - name: Write signing key file
+      - name: Verify signing key secret (debug)
         shell: bash
         run: |
-          echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" > /tmp/tauri-signing.key
-          echo "Key file written, size:"
-          wc -c /tmp/tauri-signing.key
+          KEY="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
+          if [ -z "$KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is EMPTY. Please configure it in GitHub Secrets."
+            exit 1
+          fi
+          echo "Key length: ${#KEY} chars"
+          echo "Key prefix (first 40 chars): ${KEY:0:40}..."
 
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} --verbose
         env:
-          TAURI_SIGNING_PRIVATE_KEY_PATH: /tmp/tauri-signing.key
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Verify bundle output (Linux)
