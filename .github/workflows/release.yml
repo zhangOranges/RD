@@ -323,6 +323,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repo (for Gitee tag push)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -403,6 +408,7 @@ jobs:
           cat latest.json
 
       - name: Create GitHub Release
+        id: gh_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -428,3 +434,79 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ------------------------------------------------------------
+      # 同步到 Gitee Release
+      # 1) 推送 tag 到 Gitee（确保 Gitee 上存在该 tag）
+      # 2) 通过 Gitee API 创建 Release
+      # 3) 逐个上传所有安装包文件到 Gitee Release
+      # ------------------------------------------------------------
+      - name: Sync to Gitee Release
+        shell: bash
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: orange_half
+          GITEE_REPO: RD
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          GITEE_API="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+
+          echo "=== 1. Push tag ${TAG} to Gitee ==="
+          git config --global user.email "ci@github-actions"
+          git config --global user.name "GitHub Actions"
+          git remote add gitee "https://oauth2:${GITEE_TOKEN}@gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git" 2>/dev/null || true
+          git push gitee "${TAG}" 2>&1 || echo "(tag may already exist on Gitee, continuing...)"
+
+          echo ""
+          echo "=== 2. Create Gitee Release ==="
+          # 先检查是否已存在同名 release（避免重复创建）
+          EXISTING=$(curl -sf -X GET "${GITEE_API}/releases/tags/${TAG}" \
+            -H "Content-Type: application/json" \
+            -d "{\"access_token\": \"${GITEE_TOKEN}\"}" 2>/dev/null || true)
+
+          if echo "$EXISTING" | grep -q '"id"'; then
+            RELEASE_ID=$(echo "$EXISTING" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.id)" 2>/dev/null)
+            echo "Release already exists on Gitee, ID: ${RELEASE_ID}"
+          else
+            CREATE_RESP=$(curl -sf -X POST "${GITEE_API}/releases" \
+              -H "Content-Type: application/json" \
+              -d "{\"access_token\": \"${GITEE_TOKEN}\", \"tag_name\": \"${TAG}\", \"name\": \"${TAG}\", \"body\": \"Release ${VERSION}\", \"target_commitish\": \"main\"}" 2>&1)
+            echo "Create response: $CREATE_RESP"
+            RELEASE_ID=$(echo "$CREATE_RESP" | node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(d.id)" 2>/dev/null)
+          fi
+
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "undefined" ]; then
+            echo "::error::Failed to get Gitee release ID"
+            exit 1
+          fi
+          echo "Gitee Release ID: ${RELEASE_ID}"
+
+          echo ""
+          echo "=== 3. Upload files to Gitee Release ==="
+          cd all-artifacts
+          UPLOADED=0
+          FAILED=0
+          for f in *.exe *.msi *.deb *.AppImage *.dmg *.tar.gz *.sig latest.json; do
+            [ -f "$f" ] || continue
+            echo "  Uploading: $f ($(du -h "$f" | cut -f1))"
+            UPLOAD_RESP=$(curl -sf -X POST "${GITEE_API}/releases/${RELEASE_ID}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "name=${f}" \
+              -F "file=@${f}" 2>&1)
+            if [ $? -eq 0 ]; then
+              echo "    OK"
+              UPLOADED=$((UPLOADED + 1))
+            else
+              echo "    FAILED: $UPLOAD_RESP"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+
+          echo ""
+          echo "=== Gitee Sync Complete ==="
+          echo "Uploaded: ${UPLOADED} files"
+          echo "Failed: ${FAILED} files"
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::Some files failed to upload to Gitee"
+          fi
