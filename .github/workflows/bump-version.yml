@@ -1,0 +1,142 @@
+name: Bump Version
+
+# 手动触发：在 Actions 页面运行，选择递增类型（patch / minor / major）。
+# 工作流会同步更新 package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json
+# 三处版本号，提交到 main 分支并打上对应 git tag，tag 随后触发 release.yml 构建发布。
+#
+# 使用方式：
+#   1. GitHub 仓库 → Actions 标签页 → 左侧选择 "Bump Version"
+#   2. 点击 "Run workflow" → 选择分支（main）→ 选择 bump 类型 → Run
+#   3. 等待该工作流完成（约 10 秒），release.yml 会被 tag 自动触发
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: '版本递增类型'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: Bump & Tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要 fetch-depth: 0 才能拿到完整历史用于提交
+          fetch-depth: 0
+          # 使用 GITHUB_TOKEN 触发后续 release.yml 时，默认不会再次触发工作流
+          # （防止递归触发）。这里用 PAT 才能让 tag push 触发 release.yml。
+          # 若无 PAT，可改为让 release.yml 监听 workflow_run 事件。
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read current version & compute next
+        id: ver
+        run: |
+          set -euo pipefail
+          # 以 package.json 为基准读取当前版本号
+          CUR=$(node -p "require('./package.json').version")
+          echo "当前版本: $CUR"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CUR"
+          BUMP="${{ inputs.bump }}"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+            *) echo "未知 bump 类型: $BUMP"; exit 1 ;;
+          esac
+          NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          echo "下一版本: $NEXT"
+          echo "current=$CUR" >> "$GITHUB_OUTPUT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = './package.json';
+            const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+            j.version = '${{ steps.ver.outputs.next }}';
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+            console.log('package.json -> ${{ steps.ver.outputs.next }}');
+          "
+
+      - name: Bump src-tauri/Cargo.toml
+        run: |
+          # 仅替换 [package] 段下的 version 字段，避免误伤其他依赖的 version
+          sed -i -E '0,/^version = ".*"/s/^version = ".*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.toml
+          grep -m1 '^version' src-tauri/Cargo.toml
+
+      - name: Bump src-tauri/tauri.conf.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = './src-tauri/tauri.conf.json';
+            const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+            j.version = '${{ steps.ver.outputs.next }}';
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
+            console.log('tauri.conf.json -> ${{ steps.ver.outputs.next }}');
+          "
+
+      - name: Verify version consistency
+        run: |
+          V_PKG=$(node -p "require('./package.json').version")
+          V_TF=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          V_CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          echo "package.json:      $V_PKG"
+          echo "tauri.conf.json:   $V_TF"
+          echo "Cargo.toml:        $V_CARGO"
+          if [ "$V_PKG" != "$V_TF" ] || [ "$V_PKG" != "$V_CARGO" ]; then
+            echo "::error::三处版本号不一致"
+            exit 1
+          fi
+          if [ "$V_PKG" != "${{ steps.ver.outputs.next }}" ]; then
+            echo "::error::版本号未正确更新"
+            exit 1
+          fi
+          echo "版本号一致性校验通过"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit & tag
+        run: |
+          TAG="v${{ steps.ver.outputs.next }}"
+          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git commit -m "chore(release): ${{ steps.ver.outputs.next }}
+
+          bump: ${{ inputs.bump }} (${{ steps.ver.outputs.current }} → ${{ steps.ver.outputs.next }})
+          由 Bump Version 工作流自动生成。"
+          git tag "$TAG"
+          git push origin "$GITHUB_REF_NAME"
+          git push origin "$TAG"
+          echo "已推送 tag: $TAG"
+
+      - name: Summary
+        run: |
+          echo "## 版本递增完成 ✅" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 项目 | 值 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-----|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 上一版本 | ${{ steps.ver.outputs.current }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 新版本 | ${{ steps.ver.outputs.next }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 递增类型 | ${{ inputs.bump }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`v${{ steps.ver.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "tag 推送后将自动触发 **Release** 工作流构建三平台产物。" >> "$GITHUB_STEP_SUMMARY"
