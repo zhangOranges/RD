@@ -95,7 +95,7 @@ jobs:
           echo "Key prefix (first 40 chars): ${KEY:0:40}..."
 
       - name: Tauri build
-        run: npm run tauri -- build --target ${{ matrix.target }} --verbose
+        run: npm run tauri -- build --verbose
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -120,19 +120,33 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $bundle = "src-tauri/target/${{ matrix.target }}/release/bundle"
           $out = "${{ matrix.artifact-dir }}"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Write-Host "=== Bundle dir ==="
-          Get-ChildItem $bundle -Recurse -Depth 3 2>$null | ForEach-Object { Write-Host $_.FullName }
-          # 收集所有产物 + 对应 .sig
-          Get-ChildItem -Path $bundle -Recurse -File -Include *.msi,*.exe,*.sig | ForEach-Object {
-            Write-Host "Copying $($_.Name)"
-            Copy-Item $_.FullName -Destination $out
+          # 两个路径都检查（原生构建 vs --target 指定构建）
+          $bundlePaths = @(
+            "src-tauri/target/release/bundle",
+            "src-tauri/target/${{ matrix.target }}/release/bundle"
+          )
+          foreach ($bundle in $bundlePaths) {
+            if (Test-Path $bundle) {
+              Write-Host "=== Found bundle dir: $bundle ==="
+              Get-ChildItem $bundle -Recurse -Depth 3 2>$null | ForEach-Object { Write-Host $_.FullName }
+              Get-ChildItem -Path $bundle -Recurse -File -Include *.msi,*.exe,*.sig | ForEach-Object {
+                Write-Host "Copying $($_.Name)"
+                Copy-Item $_.FullName -Destination $out
+              }
+            }
           }
           # portable exe
-          if (Test-Path "src-tauri/target/${{ matrix.target }}/release/rd_app.exe") {
-            Copy-Item "src-tauri/target/${{ matrix.target }}/release/rd_app.exe" -Destination $out
+          $portablePaths = @(
+            "src-tauri/target/release/rd_app.exe",
+            "src-tauri/target/${{ matrix.target }}/release/rd_app.exe"
+          )
+          foreach ($p in $portablePaths) {
+            if (Test-Path $p) {
+              Copy-Item $p -Destination $out
+              break
+            }
           }
           # 选定 updater 主包（优先 nsis exe，其次 msi）
           $updaterFile = Get-ChildItem $out -Filter "*.exe" | Where-Object { $_.Name -notlike "*portable*" } | Select-Object -First 1
@@ -195,13 +209,16 @@ jobs:
         id: collect-macos
         if: matrix.platform == 'macos-latest'
         run: |
-          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
-          echo "=== Bundle dir (full tree) ==="
-          find "$bundle" -type f 2>/dev/null || echo "No bundle dir"
-          # 收集 Tauri 自动生成的所有产物：dmg(安装包) + app.tar.gz(updater包) + sig(签名)
-          find "$bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
+          # 两个路径都检查（原生构建 vs --target 指定构建）
+          for bundle in "src-tauri/target/release/bundle" "src-tauri/target/${{ matrix.target }}/release/bundle"; do
+            if [ -d "$bundle" ]; then
+              echo "=== Found bundle dir: $bundle ==="
+              find "$bundle" -type f 2>/dev/null
+              find "$bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
+            fi
+          done
           # updater 主包用 dmg（用户点击安装的就是 dmg）
           UPDATER_FILE=$(ls "$out"/*.dmg 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
           UPDATER_FORMAT="dmg"
