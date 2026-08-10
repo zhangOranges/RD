@@ -363,9 +363,9 @@ jobs:
       - name: Generate latest.json updater manifest
         run: |
           cd all-artifacts
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"  # strip leading v
-          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          export TAG="${GITHUB_REF_NAME}"
+          export VERSION="${TAG#v}"  # strip leading v
+          export PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           node <<'NODEEOF' > latest.json
           const fs = require('fs');
