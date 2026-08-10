@@ -149,20 +149,15 @@ jobs:
           bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
-          echo "=== Bundle dir ==="
-          find "$bundle" -maxdepth 4 -type f 2>/dev/null || echo "No bundle dir"
-          # 收集 dmg / .tar.gz / .sig
-          find "$bundle" -type f \( -name '*.dmg' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
-          # .app 打包 tar.gz（updater 主包用 .app 压缩包或 dmg，优先用 dmg）
-          if find "$bundle" -type d -name '*.app' -maxdepth 4 | head -1 | grep -q .; then
-            APP_PATH=$(find "$bundle" -type d -name '*.app' -maxdepth 4 | head -1)
-            echo "Found app: $APP_PATH"
-            tar -czf "$out/RD-macos.tar.gz" -C "$(dirname "$APP_PATH")" "$(basename "$APP_PATH")"
-          fi
-          # 选定 updater 主包（优先 dmg，其次 tar.gz）
+          echo "=== Bundle dir (full tree) ==="
+          find "$bundle" -type f 2>/dev/null || echo "No bundle dir"
+          # 收集 Tauri 自动生成的所有产物：dmg(安装包) + app.tar.gz(updater包) + sig(签名)
+          find "$bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
+          # updater 主包用 dmg（用户点击安装的就是 dmg）
           UPDATER_FILE=$(ls "$out"/*.dmg 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
           UPDATER_FORMAT="dmg"
           if [ -z "$UPDATER_FILE" ]; then
+            # fallback: 如果 dmg 没生成，用 .app.tar.gz 作为 updater 包
             UPDATER_FILE=$(ls "$out"/*.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
             UPDATER_FORMAT="app"
           fi
