@@ -5,6 +5,7 @@ import { StatusBar } from './components/StatusBar';
 import { ContentArea } from './components/ContentArea';
 import { TerminalPanel } from './components/TerminalPanel';
 import { SettingsDialog } from './components/SettingsDialog';
+import { UpdateDialog } from './components/UpdateDialog';
 import { ToastContainer } from './components/Toast';
 import { RightPanel } from './components/RightPanel';
 import { useHostStore } from './store/hostStore';
@@ -242,6 +243,7 @@ function App() {
 
       <ToastContainer />
       <SettingsDialog />
+      <UpdateDialog />
 
       {/* 启动加载遮罩 */}
       {!appReady && (

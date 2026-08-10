@@ -76,8 +76,8 @@ function UpdateBadge() {
       <button
         type="button"
         className="statusbar-item update-badge is-available"
-        onClick={() => updater.install()}
-        title={`发现新版本 v${updater.availableVersion}，点击下载并安装`}
+        onClick={() => updater.showDialog()}
+        title={`发现新版本 v${updater.availableVersion}，点击查看更新内容`}
       >
         <Sparkles size={11} />
         <span>更新 v{updater.availableVersion} 可用</span>
@@ -86,9 +86,13 @@ function UpdateBadge() {
   }
 
   if (updater.status === 'downloading' || updater.status === 'installing') {
+    const hasTotal = updater.totalMB && updater.totalMB > 0;
+    const sizeText = hasTotal
+      ? `${updater.downloadedMB || 0}/${updater.totalMB}MB`
+      : `${updater.downloadedMB || 0}MB`;
     const label =
       updater.status === 'downloading'
-        ? `下载中 ${updater.progressPct || 0}% · ${updater.downloadedMB || 0}MB`
+        ? `下载中 ${updater.progressPct || 0}% · ${sizeText}`
         : '安装中…';
     return (
       <span className="statusbar-item update-badge is-downloading" title={label}>

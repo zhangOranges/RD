@@ -5,6 +5,12 @@ import { X, Check } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
+import {
+  UPDATE_MIRROR_OPTIONS,
+  getUpdateMirror,
+  setUpdateMirror,
+  type UpdateMirror,
+} from '../hooks/useAppUpdater';
 
 /**
  * 设置弹窗（Finder 风格模态）。
@@ -27,6 +33,7 @@ export function SettingsDialog() {
   const [rememberDirGlobal, setRememberDirGlobal] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [updateMirror, setUpdateMirrorState] = useState<UpdateMirror>('github');
 
   // 弹窗打开时加载设置
   useEffect(() => {
@@ -39,6 +46,8 @@ export function SettingsDialog() {
         if (cancelled) return;
         // "true"/"false" 字符串 → boolean；非 "false" 视为 true
         setRememberDirGlobal(val !== 'false');
+        // 加载已保存的更新源（localStorage）
+        setUpdateMirrorState(getUpdateMirror());
       } catch (err) {
         if (!cancelled) {
           pushToast('error', `读取设置失败：${formatErr(err)}`);
@@ -154,6 +163,37 @@ export function SettingsDialog() {
                 {loading ? '加载中…' : saving ? '保存中…' : rememberDirGlobal ? '开启' : '关闭'}
               </span>
             </label>
+          </div>
+
+          <div className="settings-section-title">更新</div>
+
+          <div className="settings-update-mirror-desc">
+            检查更新和下载安装包时使用的下载源。国内网络建议选择镜像以加速下载。
+          </div>
+          <div className="settings-mirror-grid">
+            {UPDATE_MIRROR_OPTIONS.map((opt) => {
+              const selected = updateMirror === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={`mirror-card ${selected ? 'is-selected' : ''}`}
+                  onClick={() => {
+                    setUpdateMirrorState(opt.id as UpdateMirror);
+                    setUpdateMirror(opt.id as UpdateMirror);
+                    pushToast('success', `已切换下载源：${opt.name}`);
+                  }}
+                  aria-pressed={selected}
+                  disabled={loading}
+                >
+                  <div className="mirror-card-header">
+                    <span className="mirror-card-name">{opt.name}</span>
+                    {selected && <Check size={14} className="mirror-card-check" />}
+                  </div>
+                  <div className="mirror-card-desc">{opt.desc}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
 

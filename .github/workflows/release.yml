@@ -261,7 +261,7 @@ jobs:
 
       # ------------------------------------------------------------
       # 写入本平台 manifest（给发布 job 汇总成 latest.json）
-      # manifest = { key, url_filename, signature, format }
+      # manifest = { key, url_filename, signature, format, size }
       # ------------------------------------------------------------
       - name: Write platform manifest
         id: write-manifest
@@ -280,6 +280,17 @@ jobs:
             SIG_CONTENT=$(cat "$OUTDIR/${UPDATER_FILE}.sig")
           fi
 
+          # 计算文件实际大小（字节，用于前端进度条显示）
+          SIZE="0"
+          if [ -n "$UPDATER_FILE" ] && [ -f "$OUTDIR/${UPDATER_FILE}" ]; then
+            # 跨平台：stat 命令在 macOS/Linux 参数不同，用 wc -c 更稳
+            SIZE=$(wc -c < "$OUTDIR/${UPDATER_FILE}" | tr -d ' ')
+            # Windows (Git Bash) 的 wc -c 可能输出空行/带空格，兜底用 ls
+            if [ -z "$SIZE" ] || [ "$SIZE" = "0" ]; then
+              SIZE=$(ls -l "$OUTDIR/${UPDATER_FILE}" | awk '{print $5}')
+            fi
+          fi
+
           # URL 格式：GitHub Release 资产下载 URL
           # 注意：GitHub Release 的 assets URL 是
           #   https://github.com/<owner>/<repo>/releases/download/<tag>/<filename>
@@ -288,13 +299,19 @@ jobs:
           # 组装 JSON（通过临时文件 + node 或 jq 编码，避免 shell 转义问题）
           mkdir -p manifests
           MANIFEST_FILE="manifests/${{ matrix.label }}.json"
+          # 将签名中的换行转成 \n，避免 JSON 解析出错
+          ESCAPED_SIG=$(printf '%s' "$SIG_CONTENT" | awk '{printf "%s\\n", $0}' | sed 's/\\n$//')
+          # 如果 awk 没输出（空签名），兜底用空字符串
+          if [ -z "$ESCAPED_SIG" ]; then ESCAPED_SIG=""; fi
+
           cat > "$MANIFEST_FILE" <<JSONEOF
           {
             "key": "${KEY}",
             "url_filename": "${UPDATER_FILE}",
             "url": "${URL}",
             "signature": "$(echo -n "$SIG_CONTENT" | sed ':a;N;$!ba;s/\n/\\n/g')",
-            "format": "${UPDATER_FORMAT}"
+            "format": "${UPDATER_FORMAT}",
+            "size": ${SIZE:-0}
           }
           JSONEOF
           cat "$MANIFEST_FILE"
@@ -323,6 +340,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # 先 checkout 仓库（CHANGELOG.md 需要读取）
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -362,6 +382,12 @@ jobs:
           export VERSION="${TAG#v}"  # strip leading v
           export PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+          # 读取工作区根目录的 CHANGELOG.md（需要 checkout 代码，但这里在 all-artifacts 目录，
+          # 所以 CHANGELOG 放在上一级或通过 GITHUB_WORKSPACE 引用）
+          export CHANGELOG_PATH="${GITHUB_WORKSPACE}/CHANGELOG.md"
+          echo "Looking for CHANGELOG.md at: $CHANGELOG_PATH"
+          ls -la "$CHANGELOG_PATH" 2>/dev/null || echo "(no CHANGELOG.md found)"
+
           node <<'NODEEOF' > latest.json
           const fs = require('fs');
           const path = require('path');
@@ -370,6 +396,74 @@ jobs:
           const version = process.env.VERSION;
           const pubDate = process.env.PUB_DATE;
           const repo = process.env.GITHUB_REPOSITORY;
+          const changelogPath = process.env.CHANGELOG_PATH;
+
+          /**
+           * 解析 CHANGELOG.md，提取指定版本的更新说明。
+           * 支持两种常见格式：
+           *   ## [x.y.z] - 2024-01-01
+           *   ## x.y.z
+           *   ## vx.y.z
+           *   - 或 tag == v1.2.3 时，搜索 [1.2.3] / 1.2.3 / v1.2.3 三种
+           * 返回字符串（纯 markdown，未转义）
+           */
+          function extractChangelog(filePath, targetVersion) {
+            if (!filePath || !fs.existsSync(filePath)) return null;
+            try {
+              const content = fs.readFileSync(filePath, 'utf8');
+              const lines = content.replace(/\r\n/g, '\n').split('\n');
+
+              // 构造候选的标题匹配文本
+              const candidates = new Set([
+                `[${targetVersion}]`,
+                `${targetVersion}`,
+                `v${targetVersion}`,
+                `[v${targetVersion}]`,
+              ]);
+
+              // 找到起始行：形如 "## xxx" 的 markdown H2
+              let startIdx = -1;
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                const m = line.match(/^##\s+(.+?)\s*$/);
+                if (!m) continue;
+                const heading = m[1].trim();
+                // heading 可能形如 "[1.2.3] - 2025-01-01"，先去掉前缀的 [] 或 纯版本
+                // 取空白/连字符前的第一个 token 比较
+                const firstToken = heading.split(/\s|-|—/)[0].trim()
+                  .replace(/^\[/, '').replace(/\].*$/, '');
+                if (candidates.has(firstToken) || candidates.has(heading) || candidates.has(heading.replace(/^\[(.*)\].*$/, '$1'))) {
+                  startIdx = i + 1;
+                  break;
+                }
+                // 兜底：整段 heading 包含版本号字符串也匹配
+                for (const c of candidates) {
+                  if (c.length >= 3 && heading.includes(c.replace(/[\[\]]/g, ''))) {
+                    startIdx = i + 1;
+                    break;
+                  }
+                }
+                if (startIdx >= 0) break;
+              }
+
+              if (startIdx < 0) return null;
+
+              // 找到结束行：下一个 ## H2 或文件尾
+              let endIdx = lines.length;
+              for (let i = startIdx; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (/^##\s+/.test(line)) {
+                  endIdx = i;
+                  break;
+                }
+              }
+              const section = lines.slice(startIdx, endIdx).join('\n').trim();
+              return section.length > 0 ? section : null;
+            } catch (e) {
+              console.error('Error parsing CHANGELOG:', e.message);
+              return null;
+            }
+          }
 
           const manifestsDir = 'manifests';
           const platforms = {};
@@ -382,17 +476,28 @@ jobs:
                 console.error(`Skipping incomplete manifest: ${f}`, m);
                 continue;
               }
-              platforms[m.key] = {
+              const entry = {
                 signature: m.signature,
                 url: m.url,
-                format: m.format || undefined,
               };
+              if (m.format) entry.format = m.format;
+              // 写入 size（字节），用于客户端精确计算下载进度
+              if (typeof m.size === 'number' && m.size > 0) {
+                entry.size = m.size;
+              }
+              platforms[m.key] = entry;
             }
+          }
+
+          // 从 CHANGELOG.md 取更新说明；无则回退默认
+          let notes = extractChangelog(changelogPath, version);
+          if (!notes) {
+            notes = `## 版本 ${version}\n\n- 更新至最新版 RD 应用。\n- 详细更新记录请前往 GitHub Release 页面查看。`;
           }
 
           const manifest = {
             version,
-            notes: `Release ${version}`,
+            notes,
             pub_date: pubDate,
             platforms,
           };
@@ -402,11 +507,20 @@ jobs:
           echo "=== latest.json ==="
           cat latest.json
 
+          # 同时将 notes 写入单独文件，供后续 Create GitHub Release 步骤作为 body 使用（避免重复解析）
+          node -e '
+            const j = JSON.parse(require("fs").readFileSync("latest.json","utf8"));
+            require("fs").writeFileSync("release_body.md", j.notes || "", "utf8");
+          ' || true
+          echo "=== release_body.md (first 20 lines) ==="
+          head -20 release_body.md 2>/dev/null || true
+
       - name: Create GitHub Release
         id: gh_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          body_path: all-artifacts/release_body.md
           files: |
             all-artifacts/*.exe
             all-artifacts/*.msi
@@ -424,7 +538,7 @@ jobs:
             all-artifacts/*/*.tar.gz
             all-artifacts/*/*.sig
             all-artifacts/*/latest.json
-          generate_release_notes: true
+          generate_release_notes: false
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
         env:
