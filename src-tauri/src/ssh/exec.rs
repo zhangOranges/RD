@@ -94,7 +94,7 @@ fn parse_proc_stat_first_line(out: &str) -> Option<(u64, u64)> {
     }
     let nums: Vec<u64> = parts[1..]
         .iter()
-        .map(|s| s.parse::<u64>().unwrap_or(0))
+        .map(|s| s.parse::<u64>().unwrap_or_default())
         .collect();
     // nums: [user, nice, system, idle, iowait, irq, softirq, steal, ...]
     let idle = nums.get(3).copied().unwrap_or(0) + nums.get(4).copied().unwrap_or(0);
@@ -142,7 +142,7 @@ pub async fn get_server_stats(
                 let dt = t2.saturating_sub(t1) as f64;
                 let di = i2.saturating_sub(i1) as f64;
                 if dt > 0.0 {
-                    ((dt - di) / dt * 100.0).max(0.0).min(100.0)
+                    ((dt - di) / dt * 100.0).clamp(0.0, 100.0)
                 } else {
                     0.0
                 }

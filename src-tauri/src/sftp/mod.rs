@@ -204,7 +204,7 @@ fn format_permissions(perm: Option<u32>) -> String {
 }
 
 /// Sort entries: directories first, then by name (case-sensitive ascending).
-fn sort_entries(entries: &mut Vec<FileEntry>) {
+fn sort_entries(entries: &mut [FileEntry]) {
     entries.sort_by(|a, b| match b.is_dir.cmp(&a.is_dir) {
         std::cmp::Ordering::Equal => a.name.cmp(&b.name),
         other => other,
@@ -439,9 +439,7 @@ fn mkdir_p_helper(path: &str) -> Vec<String> {
     let mut out = Vec::with_capacity(parts.len());
     let mut acc = String::new();
     for (i, part) in parts.iter().enumerate() {
-        if i == 0 && is_absolute {
-            acc.push('/');
-        } else if i > 0 {
+        if i > 0 || is_absolute {
             acc.push('/');
         }
         acc.push_str(part);
@@ -476,9 +474,8 @@ pub async fn sftp_mkdir_all(
                     // that's fine (covers AlreadyExists, PermissionDenied on
                     // an existing dir, weird server StatusCode::Failure with
                     // "file exists" text, etc.).
-                    match sftp.try_exists(dir.clone()).await {
-                        Ok(true) => break,
-                        _ => {}
+                    if let Ok(true) = sftp.try_exists(dir.clone()).await {
+                        break;
                     }
                     if is_session_closed(&mapped) && attempt == 0 {
                         sftp_state.invalidate(&host_id).await;
@@ -602,6 +599,7 @@ fn collect_remote_entries(
 }
 
 /// 分块读取远程文件 -> 写到本地文件；每 256KB 或每完成一个文件 emit 一次进度。
+#[allow(clippy::too_many_arguments)]
 async fn download_single_file(
     sftp: Arc<SftpSession>,
     remote_path: &str,
@@ -944,6 +942,7 @@ pub async fn sftp_download_dir(
 /// - 后续片: 使用 `CREATE | WRITE | APPEND` 追加；不截断不覆盖。
 /// - 每片写完都通过 `transfer-progress` 事件上报当前累计字节。
 /// - 支持取消: 每次调用前都会检查 `CANCELLED_TASKS`，命中则返回错误并清理。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn sftp_upload_chunk(
     host_id: String,

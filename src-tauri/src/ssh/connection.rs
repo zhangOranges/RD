@@ -85,12 +85,11 @@ impl ConnectionHandle {
         let addr = (params.host.as_str(), params.port);
 
         // --- russh client config -------------------------------------------------
-        let mut config = client::Config::default();
-        // Keepalive: send a keepalive every 15s; after 3 unanswered keepalives
-        // russh will tear the session down (which fires our `disconnected`
-        // handler → frontend event).
-        config.keepalive_interval = Some(std::time::Duration::from_secs(15));
-        config.keepalive_max = 3;
+        let config = client::Config {
+            keepalive_interval: Some(std::time::Duration::from_secs(15)),
+            keepalive_max: 3,
+            ..Default::default()
+        };
 
         let handler = ClientHandler::new(params.host_id.clone(), host_port.clone(), app_handle);
         let shared = handler.shared_state();
@@ -139,7 +138,7 @@ impl ConnectionHandle {
                 handle
                     .authenticate_password(&params.username, &password)
                     .await
-                    .map_err(|e| SshError::Ssh(e))?
+                    .map_err(SshError::Ssh)?
             }
             "key" => {
                 let key_str = params
@@ -156,7 +155,7 @@ impl ConnectionHandle {
                 handle
                     .authenticate_publickey(&params.username, Arc::new(key_pair))
                     .await
-                    .map_err(|e| SshError::Ssh(e))?
+                    .map_err(SshError::Ssh)?
             }
             other => {
                 let _ = handle
