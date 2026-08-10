@@ -1,10 +1,98 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ArrowUp, ArrowDown, Activity } from 'lucide-react';
+import {
+  ArrowUp,
+  ArrowDown,
+  Activity,
+  Download,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  Sparkles,
+} from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
 import { useTransferStore, formatSpeed } from '../store/transferStore';
 import { version } from '../../package.json';
+import { useAppUpdater } from '../hooks/useAppUpdater';
+
+function UpdateBadge() {
+  const updater = useAppUpdater();
+
+  if (updater.status === 'idle' || updater.status === 'checking') {
+    return (
+      <button
+        type="button"
+        className={`statusbar-item update-badge ${
+          updater.status === 'checking' ? 'is-checking' : ''
+        }`}
+        onClick={() => updater.check()}
+        title="检查更新"
+      >
+        <RefreshCw size={11} className={updater.status === 'checking' ? 'spin' : ''} />
+        <span>检查更新</span>
+      </button>
+    );
+  }
+
+  if (updater.status === 'error') {
+    return (
+      <button
+        type="button"
+        className="statusbar-item update-badge is-error"
+        onClick={() => updater.check()}
+        title={`更新失败：${updater.errorMsg ?? ''}（点击重试）`}
+      >
+        <AlertTriangle size={11} />
+        <span>更新错误</span>
+      </button>
+    );
+  }
+
+  if (updater.status === 'done') {
+    return (
+      <span className="statusbar-item update-badge is-done" title="已完成更新">
+        <CheckCircle2 size={11} />
+        <span>已更新</span>
+      </span>
+    );
+  }
+
+  if (updater.status === 'available') {
+    return (
+      <button
+        type="button"
+        className="statusbar-item update-badge is-available"
+        onClick={() => updater.install()}
+        title={`发现新版本 v${updater.availableVersion}，点击下载并安装`}
+      >
+        <Sparkles size={11} />
+        <span>更新 v{updater.availableVersion} 可用</span>
+      </button>
+    );
+  }
+
+  if (updater.status === 'downloading' || updater.status === 'installing') {
+    const label =
+      updater.status === 'downloading'
+        ? `下载中 ${updater.progressPct || 0}%`
+        : '安装中…';
+    return (
+      <span className="statusbar-item update-badge is-downloading" title={label}>
+        <Download size={11} />
+        <span>{label}</span>
+        <span className="update-progress">
+          <span
+            className="update-progress-fill"
+            style={{ width: `${updater.progressPct || 0}%` }}
+          />
+        </span>
+      </span>
+    );
+  }
+
+  return null;
+}
 
 export function StatusBar() {
   const hosts = useHostStore((s) => s.hosts);
@@ -28,7 +116,6 @@ export function StatusBar() {
           ? '未连接'
           : '空闲';
 
-  // 实时上传/下载速率：累加所有 running 任务的速度
   const uploadSpeed = tasks
     .filter((t) => t.kind === 'upload' && t.status === 'running')
     .reduce((sum, t) => sum + t.speedBytesPerSec, 0);
@@ -36,7 +123,6 @@ export function StatusBar() {
     .filter((t) => t.kind === 'download' && t.status === 'running')
     .reduce((sum, t) => sum + t.speedBytesPerSec, 0);
 
-  // 网络延迟：每 5 秒通过 sftp_resolve_path 往返时间测量
   const [latency, setLatency] = useState<number | null>(null);
   const isConnected = connState === 'connected';
 
@@ -80,6 +166,7 @@ export function StatusBar() {
     <footer className="statusbar" role="status" aria-live="polite">
       <div className="statusbar-section">
         <span className="statusbar-item statusbar-version">v{version}</span>
+        <UpdateBadge />
         <span className="statusbar-item">
           主机 {connectedCount}/{hosts.length}
         </span>

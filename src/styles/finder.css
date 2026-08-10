@@ -2234,3 +2234,65 @@ html[data-theme="dark"] body {
 .statusbar-latency.latency-bad {
   color: var(--danger);
 }
+
+/* ---------- 状态栏：更新检查按钮 ---------- */
+.update-badge {
+  padding: 1px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  font-size: 10px;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  flex: 0 0 auto;
+}
+.update-badge:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+}
+.update-badge.is-checking svg {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.update-badge.is-available {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 600;
+}
+.update-badge.is-available:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.update-badge.is-downloading {
+  color: var(--text-primary);
+  cursor: default;
+}
+.update-badge.is-downloading:hover {
+  background: transparent;
+}
+.update-badge.is-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.update-badge.is-done {
+  color: var(--state-connected);
+}
+.update-progress {
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-tertiary) 20%, transparent);
+  overflow: hidden;
+  display: inline-block;
+  margin-left: 4px;
+}
+.update-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.25s ease;
+}

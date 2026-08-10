@@ -11,7 +11,10 @@ permissions:
 jobs:
   # ------------------------------------------------------------
   # 三平台构建：Windows / Linux / macOS (Apple Silicon)
-  # 每个 job 只上传 artifact，不直接操作 GitHub Release
+  # 每个 job：
+  #   1) Tauri build（自动生成 .sig 签名文件）
+  #   2) 上传产物 artifact（附带 .sig 文件）
+  #   3) 输出本平台 platform-manifest.json（给汇总 job 生成 latest.json 用）
   # ------------------------------------------------------------
   build:
     strategy:
@@ -21,18 +24,26 @@ jobs:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             label: windows-x64
+            updater-key: windows-x86_64
+            updater-format: nsis
             artifact-dir: artifacts-windows
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             label: linux-x64
+            updater-key: linux-x86_64
+            updater-format: appimage
             artifact-dir: artifacts-linux
           - platform: macos-latest
             target: aarch64-apple-darwin
             label: macos-arm64
+            updater-key: darwin-aarch64
+            updater-format: app
             artifact-dir: artifacts-macos
 
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
+    outputs:
+      manifest: ${{ steps.write-manifest.outputs.manifest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -72,75 +83,152 @@ jobs:
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} --verbose
         env:
-          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       # ------------------------------------------------------------
       # 收集产物（各平台分别处理）
+      # 同时将 .sig 文件一起收集进来（后续 latest.json 会用到签名内容）
       # ------------------------------------------------------------
       - name: Collect artifacts (Windows)
+        id: collect-windows
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
           $bundle = "src-tauri/target/${{ matrix.target }}/release/bundle"
           $out = "${{ matrix.artifact-dir }}"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          # 列出 bundle 目录
-          Write-Host "=== Bundle dir contents ==="
-          Get-ChildItem $bundle -Recurse -Depth 2 2>$null | ForEach-Object { Write-Host $_.FullName }
-          # 收集所有产物
-          Get-ChildItem -Path $bundle -Recurse -File -Include *.msi,*.exe | ForEach-Object {
+          Write-Host "=== Bundle dir ==="
+          Get-ChildItem $bundle -Recurse -Depth 3 2>$null | ForEach-Object { Write-Host $_.FullName }
+          # 收集所有产物 + 对应 .sig
+          Get-ChildItem -Path $bundle -Recurse -File -Include *.msi,*.exe,*.sig | ForEach-Object {
             Write-Host "Copying $($_.Name)"
             Copy-Item $_.FullName -Destination $out
           }
-          Write-Host "=== Final Artifacts ==="
+          # portable exe
+          if (Test-Path "src-tauri/target/${{ matrix.target }}/release/rd_app.exe") {
+            Copy-Item "src-tauri/target/${{ matrix.target }}/release/rd_app.exe" -Destination $out
+          }
+          # 选定 updater 主包（优先 nsis exe，其次 msi）
+          $updaterFile = Get-ChildItem $out -Filter "*.exe" | Where-Object { $_.Name -notlike "*portable*" } | Select-Object -First 1
+          if (-not $updaterFile) { $updaterFile = Get-ChildItem $out -Filter "*.msi" | Select-Object -First 1 }
+          if ($updaterFile) {
+            echo "UPDATER_FILE=$($updaterFile.Name)" >> $env:GITHUB_OUTPUT
+            echo "UPDATER_FORMAT=nsis" >> $env:GITHUB_OUTPUT
+          }
+          Write-Host "=== Artifacts ==="
           Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
 
       - name: Collect artifacts (Linux)
+        id: collect-linux
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
-          # 列出 bundle 目录以便调试
           echo "=== Bundle dir ==="
-          find "$bundle" -maxdepth 3 -type f 2>/dev/null || echo "No bundle dir"
-          # 收集所有包
-          find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' \) -exec cp {} "$out/" 2>/dev/null || true
+          find "$bundle" -maxdepth 4 -type f 2>/dev/null || echo "No bundle dir"
+          # 收集所有包 + 对应 .sig
+          find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
+          # 选定 updater 主包（优先 AppImage）
+          UPDATER_FILE=$(ls "$out"/*.AppImage 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
+          UPDATER_FORMAT="appimage"
+          if [ -z "$UPDATER_FILE" ]; then
+            UPDATER_FILE=$(ls "$out"/*.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
+            UPDATER_FORMAT="deb"
+          fi
+          echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
+          echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
           echo "=== Artifacts ==="
           ls -lh "$out"
 
       - name: Collect artifacts (macOS)
+        id: collect-macos
         if: matrix.platform == 'macos-latest'
         run: |
           bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
-          # 列出 bundle 目录以便调试
           echo "=== Bundle dir ==="
-          find "$bundle" -maxdepth 3 -type f 2>/dev/null || echo "No bundle dir"
-          # 收集 dmg
-          find "$bundle" -type f -name '*.dmg' -exec cp {} "$out/" 2>/dev/null || true
-          # 收集 .app 或 .app.tar.gz
+          find "$bundle" -maxdepth 4 -type f 2>/dev/null || echo "No bundle dir"
+          # 收集 dmg / .tar.gz / .sig
+          find "$bundle" -type f \( -name '*.dmg' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
+          # .app 打包 tar.gz（updater 主包用 .app 压缩包或 dmg，优先用 dmg）
           if find "$bundle" -type d -name '*.app' -maxdepth 4 | head -1 | grep -q .; then
             APP_PATH=$(find "$bundle" -type d -name '*.app' -maxdepth 4 | head -1)
             echo "Found app: $APP_PATH"
             tar -czf "$out/RD-macos.tar.gz" -C "$(dirname "$APP_PATH")" "$(basename "$APP_PATH")"
           fi
+          # 选定 updater 主包（优先 dmg，其次 tar.gz）
+          UPDATER_FILE=$(ls "$out"/*.dmg 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
+          UPDATER_FORMAT="dmg"
+          if [ -z "$UPDATER_FILE" ]; then
+            UPDATER_FILE=$(ls "$out"/*.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
+            UPDATER_FORMAT="app"
+          fi
+          echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
+          echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
           echo "=== Artifacts ==="
           ls -lh "$out"
 
       # ------------------------------------------------------------
-      # 仅上传 artifact（不再直接操作 GitHub Release）
+      # 写入本平台 manifest（给发布 job 汇总成 latest.json）
+      # manifest = { key, url_filename, signature, format }
+      # ------------------------------------------------------------
+      - name: Write platform manifest
+        id: write-manifest
+        shell: bash
+        run: |
+          OUTDIR="${{ matrix.artifact-dir }}"
+          UPDATER_FILE="${{ steps.collect-windows.outputs.UPDATER_FILE }}${{ steps.collect-linux.outputs.UPDATER_FILE }}${{ steps.collect-macos.outputs.UPDATER_FILE }}"
+          UPDATER_FORMAT="${{ steps.collect-windows.outputs.UPDATER_FORMAT }}${{ steps.collect-linux.outputs.UPDATER_FORMAT }}${{ steps.collect-macos.outputs.UPDATER_FORMAT }}"
+          KEY="${{ matrix.updater-key }}"
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${GITHUB_REPOSITORY}"  # e.g. zhangOranges/RD
+
+          # 读签名内容（.sig 文件）：signature 字段必须是 .sig 的文本内容，不能是 URL
+          SIG_CONTENT=""
+          if [ -n "$UPDATER_FILE" ] && [ -f "$OUTDIR/${UPDATER_FILE}.sig" ]; then
+            SIG_CONTENT=$(cat "$OUTDIR/${UPDATER_FILE}.sig")
+          fi
+
+          # URL 格式：GitHub Release 资产下载 URL
+          # 注意：GitHub Release 的 assets URL 是
+          #   https://github.com/<owner>/<repo>/releases/download/<tag>/<filename>
+          URL="https://github.com/${REPO}/releases/download/${TAG}/${UPDATER_FILE}"
+
+          # 组装 JSON（通过临时文件 + node 或 jq 编码，避免 shell 转义问题）
+          mkdir -p manifests
+          MANIFEST_FILE="manifests/${{ matrix.label }}.json"
+          cat > "$MANIFEST_FILE" <<JSONEOF
+          {
+            "key": "${KEY}",
+            "url_filename": "${UPDATER_FILE}",
+            "url": "${URL}",
+            "signature": "$(echo -n "$SIG_CONTENT" | sed ':a;N;$!ba;s/\n/\\n/g')",
+            "format": "${UPDATER_FORMAT}"
+          }
+          JSONEOF
+          cat "$MANIFEST_FILE"
+          # 设置 step output：JSON 字符串（单行转义）
+          echo "manifest=$(cat "$MANIFEST_FILE" | tr -d '\n' | sed 's/"/\\"/g')" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------
+      # 上传 artifact：包括平台 manifest
       # ------------------------------------------------------------
       - uses: actions/upload-artifact@v4
         with:
           name: rd-app-${{ matrix.label }}
-          path: ${{ matrix.artifact-dir }}/*
+          path: |
+            ${{ matrix.artifact-dir }}/*
+            manifests/*.json
           retention-days: 30
 
   # ------------------------------------------------------------
-  # 汇总发布：下载所有 artifact，一次性创建 GitHub Release
+  # 汇总发布：
+  #   1) 下载所有 artifact
+  #   2) 组装 latest.json（Tauri updater manifest）
+  #   3) 创建 GitHub Release（包含 latest.json + 所有平台产物 + .sig）
   # ------------------------------------------------------------
   release:
     name: Publish Release
@@ -158,12 +246,70 @@ jobs:
         run: |
           echo "=== Downloaded artifacts ==="
           ls -lh all-artifacts/
+          echo "=== manifests dir ==="
+          ls -lh all-artifacts/manifests/ 2>/dev/null || echo "(no manifests)"
+          cat all-artifacts/manifests/*.json 2>/dev/null || true
+
+      - name: Generate latest.json updater manifest
+        run: |
+          cd all-artifacts
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"  # strip leading v
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          node <<'NODEEOF' > latest.json
+          const fs = require('fs');
+          const path = require('path');
+
+          const tag = process.env.TAG;
+          const version = process.env.VERSION;
+          const pubDate = process.env.PUB_DATE;
+          const repo = process.env.GITHUB_REPOSITORY;
+
+          const manifestsDir = 'manifests';
+          const platforms = {};
+
+          if (fs.existsSync(manifestsDir)) {
+            for (const f of fs.readdirSync(manifestsDir)) {
+              if (!f.endsWith('.json')) continue;
+              const m = JSON.parse(fs.readFileSync(path.join(manifestsDir, f), 'utf8'));
+              if (!m.key || !m.url_filename || !m.signature) {
+                console.error(`Skipping incomplete manifest: ${f}`, m);
+                continue;
+              }
+              platforms[m.key] = {
+                signature: m.signature,
+                url: m.url,
+                format: m.format || undefined,
+              };
+            }
+          }
+
+          const manifest = {
+            version,
+            notes: `Release ${version}`,
+            pub_date: pubDate,
+            platforms,
+          };
+          process.stdout.write(JSON.stringify(manifest, null, 2));
+          NODEEOF
+
+          echo "=== latest.json ==="
+          cat latest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: all-artifacts/**
+          files: |
+            all-artifacts/*.exe
+            all-artifacts/*.msi
+            all-artifacts/*.deb
+            all-artifacts/*.AppImage
+            all-artifacts/*.dmg
+            all-artifacts/*.tar.gz
+            all-artifacts/*.sig
+            all-artifacts/latest.json
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
