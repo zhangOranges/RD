@@ -44,6 +44,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Read current version & compute next
         id: ver
         run: |
@@ -81,6 +84,12 @@ jobs:
           sed -i -E '0,/^version = ".*"/s/^version = ".*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.toml
           grep -m1 '^version' src-tauri/Cargo.toml
 
+      - name: Update Cargo.lock
+        run: |
+          cd src-tauri
+          cargo generate-lockfile
+          grep -A2 'name = "rd-app"' Cargo.lock | head -3
+
       - name: Bump src-tauri/tauri.conf.json
         run: |
           node -e "
@@ -97,11 +106,17 @@ jobs:
           V_PKG=$(node -p "require('./package.json').version")
           V_TF=$(node -p "require('./src-tauri/tauri.conf.json').version")
           V_CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          V_LOCK=$(grep -A2 'name = "rd-app"' src-tauri/Cargo.lock | grep 'version' | sed -E 's/.*"(.*)".*/\1/')
           echo "package.json:      $V_PKG"
           echo "tauri.conf.json:   $V_TF"
           echo "Cargo.toml:        $V_CARGO"
+          echo "Cargo.lock rd-app: $V_LOCK"
           if [ "$V_PKG" != "$V_TF" ] || [ "$V_PKG" != "$V_CARGO" ]; then
-            echo "::error::三处版本号不一致"
+            echo "::error::版本号不一致"
+            exit 1
+          fi
+          if [ "$V_PKG" != "$V_LOCK" ]; then
+            echo "::error::Cargo.lock 中 rd-app 版本号未同步"
             exit 1
           fi
           if [ "$V_PKG" != "${{ steps.ver.outputs.next }}" ]; then
@@ -118,7 +133,7 @@ jobs:
       - name: Commit & tag
         run: |
           TAG="v${{ steps.ver.outputs.next }}"
-          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
           git commit -m "chore(release): ${{ steps.ver.outputs.next }}
 
           bump: ${{ inputs.bump }} (${{ steps.ver.outputs.current }} → ${{ steps.ver.outputs.next }})
