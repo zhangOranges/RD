@@ -1762,7 +1762,7 @@ html[data-theme="dark"] body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 200;
+  z-index: 100000;
   pointer-events: none;
 }
 

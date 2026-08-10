@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
+import { create } from 'zustand';
 import { getVersion } from '@tauri-apps/api/app';
 import {
   check as checkUpdater,
@@ -230,136 +231,144 @@ function detectPlatformKey(): string | null {
   return null;
 }
 
-export function useAppUpdater() {
-  const [state, setState] = useState<AppUpdaterState>(() => ({
-    ...DEFAULT_STATE,
-    mirror: getUpdateMirror(),
-  }));
-  const updateRef = useRef<Update | null>(null);
-  const installingRef = useRef(false);
-  const platformSizesRef = useRef<Record<string, number>>({});
+// ---- 模块级变量（不触发 re-render，全组件共享）----
+let updateRef: Update | null = null;
+let installingRef = false;
+let platformSizesRef: Record<string, number> = {};
+let autoCheckDone = false;
 
-  const changeMirror = useCallback((m: UpdateMirror) => {
+// ---- Zustand store ----
+interface AppUpdaterStore extends AppUpdaterState {
+  changeMirror: (m: UpdateMirror) => void;
+  hideDialog: () => void;
+  showDialog: () => void;
+  check: () => void;
+  install: () => void;
+  dismissError: () => void;
+  isDev: boolean;
+}
+
+const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
+  ...DEFAULT_STATE,
+  mirror: getUpdateMirror(),
+  isDev: isDevProfile(),
+
+  changeMirror: (m: UpdateMirror) => {
     setUpdateMirror(m);
-    setState((s) => ({ ...s, mirror: m }));
-  }, []);
+    set({ mirror: m });
+  },
 
-  const hideDialog = useCallback(() => {
-    setState((s) => ({ ...s, dialogVisible: false }));
-  }, []);
+  hideDialog: () => set({ dialogVisible: false }),
 
-  const showDialog = useCallback(() => {
-    setState((s) => (s.status === 'available' ? { ...s, dialogVisible: true } : s));
-  }, []);
+  showDialog: () => {
+    if (get().status === 'available') set({ dialogVisible: true });
+  },
 
-  const doCheck = useCallback(
-    async (showNoUpdateToast = false) => {
-      if (installingRef.current) return;
+  dismissError: () =>
+    set((s) => ({
+      status: s.status === 'error' ? 'idle' : s.status,
+      errorMsg: null,
+    })),
 
-      let cur = state.currentVersion;
-      if (!cur && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-        try {
-          cur = await getVersion();
-        } catch {
-          cur = null;
-        }
+  check: async () => {
+    if (installingRef) return;
+
+    let cur = get().currentVersion;
+    if (!cur && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      try {
+        cur = await getVersion();
+      } catch {
+        cur = null;
       }
+    }
 
-      setState((s) => {
-        if (s.status === 'checking' || s.status === 'downloading') return s;
-        return {
+    set((s) => {
+      if (s.status === 'checking' || s.status === 'downloading') return s;
+      return {
+        ...DEFAULT_STATE,
+        mirror: s.mirror,
+        status: 'checking',
+        currentVersion: s.currentVersion || cur || null,
+      };
+    });
+
+    try {
+      const defaultEndpoints = [
+        'https://github.com/zhangOranges/RD/releases/latest/download/latest.json',
+      ];
+      const tauriEndpoints: readonly string[] =
+        (window as unknown as { __TAURI_UPDATER_ENDPOINTS__?: readonly string[] })
+          .__TAURI_UPDATER_ENDPOINTS__ ?? defaultEndpoints;
+      const endpoints =
+        tauriEndpoints && tauriEndpoints.length > 0 ? tauriEndpoints : defaultEndpoints;
+
+      // 自动检查更新时测速选最优镜像（手动点击检查也走此逻辑）
+      const userMirror = getUpdateMirror();
+      const fastestMirror = await pickFastestMirror(endpoints, userMirror);
+      // 更新 state 中的 mirror 为测速结果，用户可在对话框/设置中手动覆盖
+      set({ mirror: fastestMirror });
+
+      const { sizes, notes, version: metaVersion } = await fetchLatestMeta(
+        endpoints,
+        fastestMirror,
+      );
+      platformSizesRef = sizes;
+
+      const update = await checkUpdater({ timeout: 8000 });
+      if (!update) {
+        set((s) => ({
           ...DEFAULT_STATE,
           mirror: s.mirror,
-          status: 'checking',
+          status: 'idle',
           currentVersion: s.currentVersion || cur || null,
-        };
-      });
-
-      try {
-        const defaultEndpoints = [
-          'https://github.com/zhangOranges/RD/releases/latest/download/latest.json',
-        ];
-        const tauriEndpoints: readonly string[] =
-          (window as unknown as { __TAURI_UPDATER_ENDPOINTS__?: readonly string[] })
-            .__TAURI_UPDATER_ENDPOINTS__ ?? defaultEndpoints;
-        const endpoints =
-          tauriEndpoints && tauriEndpoints.length > 0 ? tauriEndpoints : defaultEndpoints;
-
-        // 自动检查更新时测速选最优镜像（手动点击检查也走此逻辑）
-        const userMirror = getUpdateMirror();
-        const fastestMirror = await pickFastestMirror(endpoints, userMirror);
-        // 更新 state 中的 mirror 为测速结果，用户可在对话框/设置中手动覆盖
-        setState((s) => ({ ...s, mirror: fastestMirror }));
-
-        const { sizes, notes, version: metaVersion } = await fetchLatestMeta(
-          endpoints,
-          fastestMirror,
-        );
-        platformSizesRef.current = sizes;
-
-        const update = await checkUpdater({ timeout: 8000 });
-        if (!update) {
-          setState((s) => ({
-            ...DEFAULT_STATE,
-            mirror: s.mirror,
-            status: 'idle',
-            currentVersion: s.currentVersion || cur || null,
-          }));
-          if (showNoUpdateToast) {
-            showToast({ type: 'info', message: '已经是最新版本', duration: 2500 });
-          }
-          return;
-        }
-        updateRef.current = update;
-
-        setState((s) => ({
-          ...s,
-          status: 'available',
-          currentVersion: s.currentVersion || cur || update.currentVersion || null,
-          availableVersion: update.version || metaVersion || null,
-          releaseNotes: notes,
-          dialogVisible: true,
-          errorMsg: null,
-          downloadedMB: 0,
-          progressPct: 0,
         }));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setState((s) => ({
-          ...s,
-          status: 'error',
-          errorMsg: msg,
-          downloadedMB: 0,
-          progressPct: 0,
-        }));
-        if (showNoUpdateToast) {
-          showToast({ type: 'error', message: `检查更新失败：${msg}`, duration: 5000 });
-        }
+        showToast({ type: 'info', message: '已经是最新版本', duration: 2500 });
+        return;
       }
-    },
-    [state.currentVersion],
-  );
+      updateRef = update;
 
-  const doDownloadAndInstall = useCallback(async () => {
-    const update = updateRef.current;
-    if (!update || installingRef.current) return;
-    installingRef.current = true;
+      set((s) => ({
+        ...s,
+        status: 'available',
+        currentVersion: s.currentVersion || cur || update.currentVersion || null,
+        availableVersion: update.version || metaVersion || null,
+        releaseNotes: notes,
+        dialogVisible: true,
+        errorMsg: null,
+        downloadedMB: 0,
+        progressPct: 0,
+      }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({
+        status: 'error',
+        errorMsg: msg,
+        downloadedMB: 0,
+        progressPct: 0,
+      });
+      showToast({ type: 'error', message: `检查更新失败：${msg}`, duration: 5000 });
+    }
+  },
 
-    setState((s) => ({
-      ...s,
+  install: async () => {
+    const update = updateRef;
+    if (!update || installingRef) return;
+    installingRef = true;
+
+    set({
       dialogVisible: false,
       status: 'downloading',
       errorMsg: null,
       downloadedMB: 0,
       progressPct: 0,
-    }));
+    });
 
     try {
       // 1. 计算/查找本次更新的真实文件大小（字节）
       const platformKey = detectPlatformKey();
       const realSize =
-        platformKey && platformSizesRef.current[platformKey]
-          ? platformSizesRef.current[platformKey]
+        platformKey && platformSizesRef[platformKey]
+          ? platformSizesRef[platformKey]
           : null;
 
       // 默认估算：没取到真实 size 时用一个保守值，避免进度"看起来太慢"
@@ -371,10 +380,9 @@ export function useAppUpdater() {
       };
       const hasRealSize = realSize && realSize > 0;
       const totalMB = hasRealSize ? (realSize as number) / (1024 * 1024) : null;
-      setState((s) => ({
-        ...s,
+      set({
         totalMB: totalMB ? Math.round(totalMB * 10) / 10 : null,
-      }));
+      });
 
       let downloaded = 0;
       // clProvided 放在回调外层，Started 回调中更新，Progress 中读取
@@ -399,12 +407,11 @@ export function useAppUpdater() {
                 cl && cl > 0 ? cl : currentTotalRef.v;
               currentTotalRef.v = finalTotal;
               const finalMB = finalTotal / (1024 * 1024);
-              setState((s) => ({
-                ...s,
+              set({
                 downloadedMB: 0,
                 progressPct: 0,
                 totalMB: Math.round(finalMB * 10) / 10,
-              }));
+              });
               break;
             }
             case 'Progress': {
@@ -418,26 +425,24 @@ export function useAppUpdater() {
                 ceiling,
                 Math.max(1, Math.round((downloaded / total) * 100)),
               );
-              setState((s) => ({
-                ...s,
+              set((s) => ({
                 downloadedMB: Math.round(mb * 10) / 10,
                 progressPct: Math.max(s.progressPct, pct),
               }));
               break;
             }
             case 'Finished':
-              setState((s) => ({
-                ...s,
+              set({
                 status: 'installing',
                 progressPct: 100,
-              }));
+              });
               break;
           }
         },
         { timeout: 5 * 60 * 1000 },
       );
 
-      setState((s) => ({ ...s, status: 'done', progressPct: 100 }));
+      set({ status: 'done', progressPct: 100 });
       showToast({
         type: 'success',
         message: '更新完成，程序即将自动重启',
@@ -445,33 +450,26 @@ export function useAppUpdater() {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setState((s) => ({ ...s, status: 'error', errorMsg: msg }));
+      set({ status: 'error', errorMsg: msg });
       showToast({ type: 'error', message: `更新失败：${msg}`, duration: 5000 });
-      installingRef.current = false;
+      installingRef = false;
     }
-  }, []);
+  },
+}));
 
-  // 启动自动检查（仅 release 打包后环境）
+/** 兼容旧接口的 hook 包装 */
+export function useAppUpdater() {
+  const store = useUpdaterStore();
+
+  // 启动自动检查（仅 release 打包后环境，仅一次）
   useEffect(() => {
+    if (autoCheckDone) return;
+    autoCheckDone = true;
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
     if (isDevProfile()) return;
-    void doCheck(false);
+    void store.check();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return {
-    ...state,
-    check: () => doCheck(true),
-    install: doDownloadAndInstall,
-    dismissError: () =>
-      setState((s) => ({
-        ...s,
-        status: s.status === 'error' ? 'idle' : s.status,
-        errorMsg: null,
-      })),
-    hideDialog,
-    showDialog,
-    changeMirror,
-    isDev: isDevProfile(),
-  };
+  return store;
 }
