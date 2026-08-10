@@ -87,11 +87,8 @@ jobs:
         shell: bash
         run: |
           echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" > /tmp/tauri-signing.key
-          echo "Key file written:"
-          head -c 100 /tmp/tauri-signing.key
-          echo "..."
+          echo "Key file written, size:"
           wc -c /tmp/tauri-signing.key
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
 
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} --verbose
