@@ -245,7 +245,7 @@ export const useHostStore = create<HostState>((set, get) => ({
         fingerprints: { ...s.fingerprints, [id]: result.fingerprint },
         connectionStates: { ...s.connectionStates, [id]: CONNECTED },
       }));
-      useToastStore.getState().push('success', `已连接：${host.name}`);
+      // 连接成功：静默不弹，仅通过连接状态圆点/右上角信息区反馈
     } catch (err) {
       get().setConnectionState(id, DISCONNECTED);
       useToastStore.getState().push('error', `连接失败：${formatErr(err)}`);

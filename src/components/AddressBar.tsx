@@ -121,9 +121,10 @@ export function AddressBar({ hostId, currentPath }: AddressBarProps) {
   async function openTerminalAndCd() {
     try {
       setTerminalVisible(hostId, true);
-      await invoke('pty_open', { hostId });
+      const activeTab = useUIStore.getState().getActiveTerminalTab(hostId);
+      await invoke('pty_open', { hostId, tabId: activeTab });
       if (currentPath) {
-        await invoke('pty_cd', { hostId, path: currentPath });
+        await invoke('pty_cd', { hostId, tabId: activeTab, path: currentPath });
       }
     } catch (err) {
       pushToast('error', `打开终端失败：${formatErr(err)}`);
@@ -133,9 +134,10 @@ export function AddressBar({ hostId, currentPath }: AddressBarProps) {
   async function dispatchCommand(command: string) {
     try {
       setTerminalVisible(hostId, true);
-      await invoke('pty_open', { hostId });
+      const activeTab = useUIStore.getState().getActiveTerminalTab(hostId);
+      await invoke('pty_open', { hostId, tabId: activeTab });
       const data = commandToBytes(command);
-      await invoke('pty_write', { hostId, data });
+      await invoke('pty_write', { hostId, tabId: activeTab, data });
     } catch (err) {
       pushToast('error', `命令投递失败：${formatErr(err)}`);
     }

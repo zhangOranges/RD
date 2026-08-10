@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Plus,
@@ -14,8 +15,16 @@ import {
   Power,
   PowerOff,
   Copy,
+  FolderTree,
+  SquareTerminal,
+  Network,
+  Terminal,
+  KeyRound,
+  Puzzle,
+  Search,
 } from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
+import { useUIStore, type ToolType } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { HostDialog } from './HostDialog';
 import type { HostConfig, CategoryConfig, HostFormValues } from '../types';
@@ -45,6 +54,12 @@ export function Sidebar() {
   const toggleCategory = useHostStore((s) => s.toggleCategory);
   const pushToast = useToastStore((s) => s.push);
 
+  // UI store：搜索框、工具菜单
+  const sidebarSearch = useUIStore((s) => s.sidebarSearch);
+  const setSidebarSearch = useUIStore((s) => s.setSidebarSearch);
+  const activeTool = useUIStore((s) => s.activeTool);
+  const setActiveTool = useUIStore((s) => s.setActiveTool);
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<HostConfig | null>(null);
   // HostDialog 新增主机时预设的 category_id
@@ -64,6 +79,34 @@ export function Sidebar() {
   const [newCategoryOpen, setNewCategoryOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
 
+  // ========== 搜索框 ==========
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Ctrl+K / Cmd+K 全局快捷键聚焦搜索框
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // ========== 工具菜单配置 ==========
+  const tools: { id: ToolType; label: string; icon: typeof FolderTree }[] = [
+    { id: 'sftp', label: 'SFTP', icon: FolderTree },
+    { id: 'terminal', label: 'SSH 终端', icon: SquareTerminal },
+    { id: 'port-forward', label: '端口转发', icon: Network },
+    { id: 'remote-cmd', label: '远程命令', icon: Terminal },
+    { id: 'keys', label: '密钥管理', icon: KeyRound },
+    { id: 'plugins', label: '插件中心', icon: Puzzle },
+  ];
+
+  // ========== 底部连接信息概览（已移至右上角 ServerInfo） ==========
+
   // 关闭面板菜单（小按钮触发的）
   useEffect(() => {
     if (!menuHostId && !menuCategoryId) return;
@@ -77,7 +120,7 @@ export function Sidebar() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [menuHostId, menuCategoryId]);
 
-  // 关闭右键菜单
+  // 关闭右键菜单 & 边界检测
   useEffect(() => {
     if (!ctxMenu) return;
     function onDocClick(e: MouseEvent) {
@@ -94,6 +137,26 @@ export function Sidebar() {
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onKey);
     };
+  }, [ctxMenu]);
+
+  // 菜单渲染后做边界检测，靠近视口右/下边缘时向上/左偏移，避免溢出导致离鼠标过远
+  useEffect(() => {
+    if (!ctxMenu || !ctxMenuRef.current) return;
+    const el = ctxMenuRef.current;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    let shiftX = 0;
+    let shiftY = 0;
+    if (rect.right > window.innerWidth - margin) {
+      shiftX = rect.right - (window.innerWidth - margin);
+    }
+    if (rect.bottom > window.innerHeight - margin) {
+      shiftY = rect.bottom - (window.innerHeight - margin);
+    }
+    if (shiftX !== 0 || shiftY !== 0) {
+      el.style.left = `${ctxMenu.x - shiftX}px`;
+      el.style.top = `${ctxMenu.y - shiftY}px`;
+    }
   }, [ctxMenu]);
 
   function closeContextMenu() {
@@ -253,13 +316,22 @@ export function Sidebar() {
     });
   }
 
-  // 按分类分组的主机
+  // 按分类分组的主机（按搜索关键词过滤）
   const grouped = useMemo(() => {
+    const q = sidebarSearch.trim().toLowerCase();
+    const filteredHosts = q
+      ? hosts.filter(
+          (h) =>
+            h.name.toLowerCase().includes(q) ||
+            h.host.toLowerCase().includes(q),
+        )
+      : hosts;
+
     const map = new Map<string, HostConfig[]>();
     for (const cat of categories) {
       map.set(cat.id, []);
     }
-    for (const h of hosts) {
+    for (const h of filteredHosts) {
       const cid = h.category_id || 'default';
       if (!map.has(cid)) map.set(cid, []);
       map.get(cid)!.push(h);
@@ -269,7 +341,7 @@ export function Sidebar() {
       category: cat,
       hosts: (map.get(cat.id) ?? []).sort((a, b) => a.name.localeCompare(b.name)),
     }));
-  }, [hosts, categories]);
+  }, [hosts, categories, sidebarSearch]);
 
   const ctxCategory = ctxMenu?.categoryId
     ? categories.find((c) => c.id === ctxMenu.categoryId)
@@ -289,7 +361,7 @@ export function Sidebar() {
       }}
     >
       <div className="sidebar-header">
-        <span className="sidebar-title">主机</span>
+        <span className="sidebar-title">连接管理</span>
         <div className="sidebar-header-actions">
           <button
             className="sidebar-add-btn"
@@ -312,6 +384,22 @@ export function Sidebar() {
           >
             <Plus size={14} />
           </button>
+        </div>
+      </div>
+
+      <div className="sidebar-search">
+        <div className="sidebar-search-wrap">
+          <Search size={12} className="sidebar-search-icon" />
+          <input
+            ref={searchInputRef}
+            className="sidebar-search-input"
+            type="text"
+            placeholder="搜索主机或 IP (Ctrl+K)"
+            value={sidebarSearch}
+            onChange={(e) => setSidebarSearch(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+          />
         </div>
       </div>
 
@@ -593,16 +681,35 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* ========== 统一右键菜单 ========== */}
-      {ctxMenu && (
+      {/* ========== 工具菜单 ========== */}
+      <div className="sidebar-tools">
+        {tools.map((t) => {
+          const Icon = t.icon;
+          const active = activeTool === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className={`sidebar-tool-item ${active ? 'active' : ''}`}
+              onClick={() => setActiveTool(t.id)}
+            >
+              <Icon size={14} />
+              <span>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ========== 统一右键菜单（通过 Portal 挂载到 body，避免 sidebar 的 backdrop-filter
+           导致 position:fixed 失效及 overflow:hidden 裁剪） ========== */}
+      {ctxMenu && createPortal(
         <div
           className="host-menu sidebar-context-menu"
           ref={ctxMenuRef}
           style={{
             position: 'fixed',
-            top: 0,
-            left: 0,
-            transform: `translate(${ctxMenu.x}px, ${ctxMenu.y}px)`,
+            top: ctxMenu.y,
+            left: ctxMenu.x,
           }}
           role="menu"
           onContextMenu={(e) => e.preventDefault()}
@@ -751,7 +858,8 @@ export function Sidebar() {
               </button>
             </>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
 
       {dialogOpen && (

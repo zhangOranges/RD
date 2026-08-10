@@ -4,7 +4,16 @@ import { FitAddon } from '@xterm/addon-fit';
 import { invoke } from '@tauri-apps/api/core';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { Eraser, X, SquareTerminal, RefreshCw, Unplug } from 'lucide-react';
+import {
+  Eraser,
+  X,
+  SquareTerminal,
+  RefreshCw,
+  Unplug,
+  Plus,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
 import { useFileStore, lastPtyCdPath } from '../store/fileStore';
@@ -12,17 +21,27 @@ import { useToastStore } from './Toast';
 import '@xterm/xterm/css/xterm.css';
 import '../styles/terminal.css';
 
-/* PTY 事件 payload 形状（与 Rust 端约定） */
+/* PTY 事件 payload 形状（与 Rust 端约定，Task 8 新增 tab_id） */
 interface PtyDataPayload {
   host_id: string;
+  tab_id: string;
   data: number[];
 }
 interface PtyCwdPayload {
   host_id: string;
+  tab_id: string;
   path: string;
 }
 interface PtyClosedPayload {
   host_id: string;
+  tab_id: string;
+}
+
+/** 每个标签对应的 xterm 实例 + 辅助对象 */
+interface TabInstance {
+  term: Terminal;
+  fitAddon: FitAddon;
+  container: HTMLDivElement;
 }
 
 function formatErr(err: unknown): string {
@@ -35,6 +54,11 @@ function formatErr(err: unknown): string {
   }
 }
 
+/** 每标签快照 / 同步状态的复合 key */
+function makeTabKey(hostId: string, tabId: string): string {
+  return `${hostId}__${tabId}`;
+}
+
 /** 保存 xterm 当前可见缓冲区的所有行，去除尾部空行 */
 function saveTerminalSnapshot(term: Terminal): string[] {
   const buffer = term.buffer.active;
@@ -45,7 +69,6 @@ function saveTerminalSnapshot(term: Terminal): string[] {
       lines.push(line.translateToString(true));
     }
   }
-  // 去除尾部连续空行，避免恢复时光标在最后一行下方
   while (lines.length > 0 && lines[lines.length - 1] === '') {
     lines.pop();
   }
@@ -62,35 +85,63 @@ function restoreTerminalSnapshot(term: Terminal, lines: string[] | undefined) {
   term.write(lines[lines.length - 1]);
 }
 
+const EMPTY_TABS: string[] = [];
+
+/** xterm 主题（Tokyo Night） */
+const TERMINAL_THEME = {
+  background: '#1a1b26',
+  foreground: '#a9b1d6',
+  cursor: '#c0caf5',
+  cursorAccent: '#1a1b26',
+  selectionBackground: 'rgba(122, 162, 247, 0.3)',
+  black: '#32344a',
+  red: '#f7768e',
+  green: '#9ece6a',
+  yellow: '#e0af68',
+  blue: '#7aa2f7',
+  magenta: '#bb9af7',
+  cyan: '#7dcfff',
+  white: '#c0caf5',
+  brightBlack: '#565f89',
+  brightRed: '#f7768e',
+  brightGreen: '#9ece6a',
+  brightYellow: '#e0af68',
+  brightBlue: '#7aa2f7',
+  brightMagenta: '#bb9af7',
+  brightCyan: '#7dcfff',
+  brightWhite: '#acb0d0',
+} as const;
+
 /**
- * 终端面板：Xterm.js + Tauri PTY 集成。
+ * 终端面板：Xterm.js + Tauri PTY 集成（Task 8 多标签）。
  *
- * 生命周期：
- * - 组件 mount：创建 Terminal / FitAddon，open 到容器；
- *   若 selectedHostId 存在且已连接，invoke pty_open 并注册 pty://* 事件监听。
- * - hostId / 连接状态变化：先 pty_close 旧的并清理监听，再 pty_open 新的。
- * - 组件 unmount：pty_close + 取消监听 + dispose 终端实例。
- *
- * 该组件无 props，全部状态来自 hostStore / uiStore。
+ * 每个主机的每个标签对应一个独立 xterm 实例和 PTY 会话。
+ * - 标签管理状态在 uiStore（terminalTabs / activeTerminalTab）。
+ * - xterm 实例用 Map<tabId, TabInstance> 管理，切换标签时用 CSS display 切换可见性，
+ *   保留所有 PTY 会话不卸载。
+ * - 全局事件监听在 mount 时注册一次，按 host_id + tab_id 分发到对应 xterm。
  */
 export function TerminalPanel() {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  // tabId -> 实例（仅当前主机的标签）
+  const tabsRef = useRef<Map<string, TabInstance>>(new Map());
   const roRef = useRef<ResizeObserver | null>(null);
   const fitRafRef = useRef<number | null>(null);
-  // 当前已打开 PTY 的 hostId（用于在 cleanup 时关闭正确的会话）
-  const openedHostRef = useRef<string | null>(null);
-  // 标记是否忽略下一个 cwd-changed 事件（终端刚打开时的初始 cwd 不应覆盖文件浏览器）
-  const ignoreFirstCwdRef = useRef<boolean>(false);
-  // 标记 PTY 是否刚打开，用于过滤旧会话的 pty://closed 事件
-  const justOpenedRef = useRef<boolean>(false);
-  // 每个主机的终端内容快照：切换主机时保存旧主机输出，切回时恢复
-  const termSnapshotsRef = useRef<Map<string, string[]>>(new Map());
-  // 每个主机是否已完成初始路径同步（PTY 刚打开时忽略 cwd 事件，等 pty_cd 完成后再放行）
-  const initCwdSyncedRef = useRef<Map<string, boolean>>(new Map());
+  // 当前已打开的主机（用于事件分发与 cleanup）
+  const currentHostRef = useRef<string | null>(null);
 
-  const [disconnected, setDisconnected] = useState(false);
+  // 每个标签的终端内容快照（切换主机时保存，切回时恢复）
+  const snapshotsRef = useRef<Map<string, string[]>>(new Map());
+  // 每个标签是否已完成初始路径同步
+  const initCwdSyncedRef = useRef<Map<string, boolean>>(new Map());
+  // 标记忽略下一个 cwd-changed 事件（终端刚打开时的初始 cwd 不应覆盖文件浏览器）
+  const ignoreFirstCwdRef = useRef<Set<string>>(new Set());
+  // 标记 PTY 是否刚打开，用于过滤旧会话的 pty://closed 事件
+  const justOpenedRef = useRef<Set<string>>(new Set());
+  // 已断开的标签 tabId 集合
+  const disconnectedTabsRef = useRef<Set<string>>(new Set());
+
+  const [activeDisconnected, setActiveDisconnected] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
   const selectedHostId = useHostStore((s) => s.selectedHostId);
@@ -99,35 +150,53 @@ export function TerminalPanel() {
   const terminalHeight = useUIStore((s) => s.terminalHeight);
   const terminalVisibleMap = useUIStore((s) => s.terminalVisible);
   const setTerminalVisible = useUIStore((s) => s.setTerminalVisible);
-  const terminalVisible = !!selectedHostId && !!terminalVisibleMap[selectedHostId];
+  const terminalFullscreen = useUIStore((s) => s.terminalFullscreen);
+  const setTerminalFullscreen = useUIStore((s) => s.setTerminalFullscreen);
+  const terminalTabsMap = useUIStore((s) => s.terminalTabs);
+  const activeTerminalTabMap = useUIStore((s) => s.activeTerminalTab);
+  const addTerminalTab = useUIStore((s) => s.addTerminalTab);
+  const removeTerminalTab = useUIStore((s) => s.removeTerminalTab);
+  const setActiveTerminalTab = useUIStore((s) => s.setActiveTerminalTab);
 
+  const terminalVisible = !!selectedHostId && !!terminalVisibleMap[selectedHostId];
   const isConnected =
     !!selectedHostId && connectionStates[selectedHostId] === 'connected';
   const hostName =
     hosts.find((h) => h.id === selectedHostId)?.name ?? '终端';
+  const tabs = selectedHostId
+    ? terminalTabsMap[selectedHostId] ?? EMPTY_TABS
+    : EMPTY_TABS;
+  const activeTab = selectedHostId
+    ? activeTerminalTabMap[selectedHostId] ?? null
+    : null;
 
   /* ---------- 触发一次自适应（防抖到 rAF） ---------- */
-  const requestFit = () => {
-    const term = termRef.current;
-    const fit = fitRef.current;
-    const hostId = openedHostRef.current;
-    if (!term || !fit) return;
+  const requestFit = (tabId?: string) => {
+    const id =
+      tabId ??
+      (selectedHostId
+        ? useUIStore.getState().activeTerminalTab[selectedHostId] ?? undefined
+        : undefined);
+    if (!id) return;
+    const inst = tabsRef.current.get(id);
+    if (!inst) return;
     if (fitRafRef.current !== null) {
       cancelAnimationFrame(fitRafRef.current);
     }
     fitRafRef.current = requestAnimationFrame(() => {
       fitRafRef.current = null;
       try {
-        fit.fit();
+        inst.fitAddon.fit();
       } catch {
-        /* 容器尚未布局好时忽略 */
         return;
       }
+      const hostId = currentHostRef.current;
       if (hostId) {
         void invoke('pty_resize', {
           hostId,
-          cols: term.cols,
-          rows: term.rows,
+          tabId: id,
+          cols: inst.term.cols,
+          rows: inst.term.rows,
         }).catch(() => {
           /* PTY 可能尚未打开 */
         });
@@ -135,12 +204,15 @@ export function TerminalPanel() {
     });
   };
 
-  /* ---------- Effect 1：终端实例生命周期（仅 mount 一次） ---------- */
-  useEffect(() => {
-    if (!containerRef.current) return;
+  /* ---------- 创建单个标签的 xterm 实例（同步）并打开 PTY ---------- */
+  const createTabInstance = (hostId: string, tabId: string) => {
+    if (!bodyRef.current) return;
+    if (tabsRef.current.has(tabId)) return;
+
     const term = new Terminal({
       fontSize: 14,
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, "Courier New", monospace',
+      fontFamily:
+        '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, "Courier New", monospace',
       fontWeight: '400',
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -148,66 +220,53 @@ export function TerminalPanel() {
       allowProposedApi: true,
       lineHeight: 1.2,
       letterSpacing: 0.3,
-      theme: {
-        background: '#1a1b26',
-        foreground: '#a9b1d6',
-        cursor: '#c0caf5',
-        cursorAccent: '#1a1b26',
-        selectionBackground: 'rgba(122, 162, 247, 0.3)',
-        black: '#32344a',
-        red: '#f7768e',
-        green: '#9ece6a',
-        yellow: '#e0af68',
-        blue: '#7aa2f7',
-        magenta: '#bb9af7',
-        cyan: '#7dcfff',
-        white: '#c0caf5',
-        brightBlack: '#565f89',
-        brightRed: '#f7768e',
-        brightGreen: '#9ece6a',
-        brightYellow: '#e0af68',
-        brightBlue: '#7aa2f7',
-        brightMagenta: '#bb9af7',
-        brightCyan: '#7dcfff',
-        brightWhite: '#acb0d0',
-      },
+      theme: TERMINAL_THEME,
     });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(containerRef.current);
-    termRef.current = term;
-    fitRef.current = fit;
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
 
-    // xterm 会吞掉 contextmenu 事件，需要在 xterm 的内部 DOM 上直接监听
-    const xtermEl = containerRef.current.querySelector('.xterm') as HTMLElement | null;
+    const container = document.createElement('div');
+    container.className = 'terminal-tab-container';
+    container.dataset.tabId = tabId;
+    // 活动标签可见，其余隐藏
+    const activeNow = useUIStore.getState().activeTerminalTab[hostId];
+    container.style.display = tabId === activeNow ? 'block' : 'none';
+    bodyRef.current.appendChild(container);
+    term.open(container);
+
+    tabsRef.current.set(tabId, { term, fitAddon, container });
+
+    // xterm → PTY：用户输入
+    term.onData((data) => {
+      const bytes = Array.from(new TextEncoder().encode(data));
+      void invoke('pty_write', { hostId, tabId, data: bytes }).catch(() => {
+        /* PTY 可能已关闭 */
+      });
+    });
+
+    // 右键复制 / 粘贴
+    const xtermEl = container.querySelector('.xterm') as HTMLElement | null;
     if (xtermEl) {
       xtermEl.addEventListener('contextmenu', async (e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        const term = termRef.current;
-        if (!term || !openedHostRef.current) return;
-        const hostId = openedHostRef.current;
-        const hasSelection = term.hasSelection();
-        if (hasSelection) {
-          // 有选中则复制
+        if (term.hasSelection()) {
           const selection = term.getSelection();
           if (selection) {
             try {
               await writeText(selection);
               useToastStore.getState().push('success', '已复制');
             } catch {
-              /* 忽略错误 */
+              /* ignore */
             }
             term.clearSelection();
           }
         } else {
-          // 无选中则粘贴
           try {
             let text: string | null = null;
             try {
               text = await readText();
             } catch {
-              /* Tauri 插件失败时回退到 navigator.clipboard */
               try {
                 text = await navigator.clipboard.readText();
               } catch {
@@ -216,7 +275,7 @@ export function TerminalPanel() {
             }
             if (text) {
               const bytes = Array.from(new TextEncoder().encode(text));
-              await invoke('pty_write', { hostId, data: bytes });
+              await invoke('pty_write', { hostId, tabId, data: bytes });
             }
           } catch (err) {
             useToastStore
@@ -227,77 +286,84 @@ export function TerminalPanel() {
       });
     }
 
-    // 初次布局；容器可能刚渲染，下一帧再 fit 一次以拿到准确尺寸
-    try {
-      fit.fit();
-    } catch {
-      /* ignore */
-    }
-    requestAnimationFrame(() => requestFit());
+    // 恢复该标签的快照
+    const key = makeTabKey(hostId, tabId);
+    const snapshot = snapshotsRef.current.get(key);
+    restoreTerminalSnapshot(term, snapshot);
 
-    // ResizeObserver：容器尺寸变化 → fit + pty_resize
-    const ro = new ResizeObserver(() => {
-      requestFit();
-    });
-    ro.observe(containerRef.current);
-    roRef.current = ro;
-
-    return () => {
-      if (fitRafRef.current !== null) {
-        cancelAnimationFrame(fitRafRef.current);
-        fitRafRef.current = null;
-      }
-      ro.disconnect();
-      roRef.current = null;
-      term.dispose();
-      termRef.current = null;
-      fitRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ---------- Effect 2：PTY 会话生命周期 ---------- */
-  useEffect(() => {
-    if (!isConnected || !selectedHostId) return;
-    const hostId = selectedHostId;
-    let disposed = false;
-    const unlistens: UnlistenFn[] = [];
-    const term = termRef.current;
-    const fit = fitRef.current;
-    if (!term || !fit) return;
-
-    setDisconnected(false);
-    openedHostRef.current = hostId;
-
-    // xterm → PTY：用户输入 / 粘贴
-    const onDataDisp = term.onData((data) => {
-      const bytes = Array.from(new TextEncoder().encode(data));
-      void invoke('pty_write', { hostId, data: bytes }).catch(() => {
-        /* PTY 可能已关闭 */
+    // 打开 PTY（幂等），返回是否新建了会话
+    justOpenedRef.current.add(key);
+    void invoke<boolean>('pty_open', { hostId, tabId })
+      .then((isNew) => {
+        justOpenedRef.current.delete(key);
+        // 实例可能已被销毁（切换主机）
+        if (!tabsRef.current.has(tabId)) return;
+        requestFit(tabId);
+        ignoreFirstCwdRef.current.add(key);
+        if (isNew) {
+          // 新建 PTY 会话：重置该主机的 pty_cd 路径记录
+          lastPtyCdPath.delete(hostId);
+          initCwdSyncedRef.current.set(key, false);
+          setTimeout(() => {
+            if (!tabsRef.current.has(tabId)) return;
+            const fState = useFileStore.getState();
+            const targetPath = fState.currentPath;
+            if (targetPath && lastPtyCdPath.get(hostId) !== targetPath) {
+              lastPtyCdPath.set(hostId, targetPath);
+              void invoke('pty_cd', { hostId, tabId, path: targetPath }).catch(
+                () => {},
+              );
+            }
+            initCwdSyncedRef.current.set(key, true);
+          }, 500);
+        } else {
+          initCwdSyncedRef.current.set(key, true);
+        }
+      })
+      .catch((err) => {
+        justOpenedRef.current.delete(key);
+        if (!tabsRef.current.has(tabId)) return;
+        disconnectedTabsRef.current.add(tabId);
+        const active = useUIStore.getState().activeTerminalTab[hostId];
+        if (active === tabId) setActiveDisconnected(true);
+        useToastStore
+          .getState()
+          .push('error', `终端打开失败：${formatErr(err)}`);
       });
-    });
+  };
 
-    // PTY → xterm：输出数据
+  /* ---------- Effect 1：全局事件监听 + ResizeObserver（仅 mount 一次） ---------- */
+  useEffect(() => {
+    if (!bodyRef.current) return;
+
+    const unlistens: UnlistenFn[] = [];
+    let disposed = false;
+
+    // PTY → xterm：输出数据（按 host_id + tab_id 分发）
     const dataListenerPromise = listen<PtyDataPayload>('pty://data', (event) => {
-      if (event.payload.host_id !== hostId) return;
-      const arr = event.payload.data;
-      if (!arr || arr.length === 0) return;
-      term.write(new Uint8Array(arr));
+      const { host_id, tab_id, data } = event.payload;
+      if (currentHostRef.current !== host_id) return;
+      const inst = tabsRef.current.get(tab_id);
+      if (!inst) return;
+      if (!data || data.length === 0) return;
+      inst.term.write(new Uint8Array(data));
     });
 
-    // 工作目录变更 → 同步到文件浏览器
+    // 工作目录变更 → 同步到文件浏览器（仅活动标签）
     const cwdListenerPromise = listen<PtyCwdPayload>(
       'pty://cwd-changed',
       (event) => {
-        if (event.payload.host_id !== hostId) return;
-        // PTY 新建会话时，在初始 pty_cd 完成前忽略所有 cwd 事件
-        // （避免 shell 的 home 路径覆盖 ContentArea 的缓存路径）
-        if (!initCwdSyncedRef.current.get(hostId)) return;
-        if (ignoreFirstCwdRef.current) {
-          ignoreFirstCwdRef.current = false;
+        const { host_id, tab_id, path } = event.payload;
+        if (currentHostRef.current !== host_id) return;
+        const activeTab = useUIStore.getState().activeTerminalTab[host_id];
+        if (tab_id !== activeTab) return;
+        const key = makeTabKey(host_id, tab_id);
+        if (!initCwdSyncedRef.current.get(key)) return;
+        if (ignoreFirstCwdRef.current.has(key)) {
+          ignoreFirstCwdRef.current.delete(key);
           return;
         }
-        void useFileStore.getState().syncFromTerminalCwd(hostId, event.payload.path);
+        void useFileStore.getState().syncFromTerminalCwd(host_id, path);
       },
     );
 
@@ -305,24 +371,27 @@ export function TerminalPanel() {
     const closedListenerPromise = listen<PtyClosedPayload>(
       'pty://closed',
       (event) => {
-        if (event.payload.host_id !== hostId) return;
-        if (justOpenedRef.current) {
-          justOpenedRef.current = false;
+        const { host_id, tab_id } = event.payload;
+        if (currentHostRef.current !== host_id) return;
+        const key = makeTabKey(host_id, tab_id);
+        const markDisconnected = () => {
+          disconnectedTabsRef.current.add(tab_id);
+          const active = useUIStore.getState().activeTerminalTab[host_id];
+          if (active === tab_id) setActiveDisconnected(true);
+        };
+        if (justOpenedRef.current.has(key)) {
+          justOpenedRef.current.delete(key);
           setTimeout(() => {
             if (disposed) return;
-            void invoke('pty_is_open', { hostId })
+            void invoke<boolean>('pty_is_open', { hostId: host_id, tabId: tab_id })
               .then((isOpen) => {
-                if (!isOpen && !disposed) {
-                  setDisconnected(true);
-                }
+                if (!isOpen) markDisconnected();
               })
-              .catch(() => {
-                if (!disposed) setDisconnected(true);
-              });
+              .catch(() => markDisconnected());
           }, 200);
           return;
         }
-        setDisconnected(true);
+        markDisconnected();
       },
     );
 
@@ -338,86 +407,148 @@ export function TerminalPanel() {
       }
     });
 
-    // 打开 PTY（幂等），返回是否新建了会话
-    justOpenedRef.current = true;
-    void invoke<boolean>('pty_open', { hostId })
-      .then((isNew) => {
-        if (disposed) return;
-        justOpenedRef.current = false;
-        requestAnimationFrame(() => requestFit());
-        // 恢复该主机的终端快照。cleanup 时已清空终端并保存了快照，
-        // 这里无论 isNew 都恢复，让切回的主机能看到之前的输出。
-        const snapshot = termSnapshotsRef.current.get(hostId);
-        restoreTerminalSnapshot(term, snapshot);
-        ignoreFirstCwdRef.current = true;
-        if (isNew) {
-          // 新建 PTY 会话：重置该主机的 pty_cd 路径记录，
-          // 让后续 ContentArea init 时能正确发送 pty_cd（新 shell 在 home 目录）
-          lastPtyCdPath.delete(hostId);
-          // 初始同步前忽略 cwd 事件，防止 shell 的 home 路径覆盖缓存路径
-          initCwdSyncedRef.current.set(hostId, false);
-          // 延迟读取 currentPath：ContentArea 的 init() 是 fire-and-forget，
-          // pty_open 回调执行时 navigate 可能还没完成，currentPath 仍是 null。
-          // 在 setTimeout 里读取，确保 ContentArea init 已设置好路径。
-          setTimeout(() => {
-            if (disposed) return;
-            const fState = useFileStore.getState();
-            const targetPath = fState.currentPath;
-            if (targetPath && lastPtyCdPath.get(hostId) !== targetPath) {
-              lastPtyCdPath.set(hostId, targetPath);
-              void invoke('pty_cd', { hostId, path: targetPath }).catch(() => {});
-            }
-            // 初始 pty_cd 完成后，放行后续 cwd 事件
-            initCwdSyncedRef.current.set(hostId, true);
-          }, 500);
-        }
-      })
-      .catch((err) => {
-        if (disposed) return;
-        justOpenedRef.current = false;
-        setDisconnected(true);
-        useToastStore
-          .getState()
-          .push('error', `终端打开失败：${formatErr(err)}`);
-      });
+    // ResizeObserver：容器尺寸变化 → fit + pty_resize（活动标签）
+    const ro = new ResizeObserver(() => {
+      requestFit();
+    });
+    ro.observe(bodyRef.current);
+    roRef.current = ro;
 
     return () => {
       disposed = true;
-      // 切换离开前保存当前终端内容，切回时可恢复
-      if (termRef.current) {
-        termSnapshotsRef.current.set(hostId, saveTerminalSnapshot(termRef.current));
-        // 清空终端显示，避免下一个主机的 PTY 输出混入旧主机内容
-        termRef.current.reset();
+      if (fitRafRef.current !== null) {
+        cancelAnimationFrame(fitRafRef.current);
+        fitRafRef.current = null;
       }
-      onDataDisp.dispose();
+      ro.disconnect();
+      roRef.current = null;
       unlistens.forEach((fn) => fn());
       unlistens.length = 0;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ---------- Effect 2：主机切换 —— 创建/销毁所有标签实例 ---------- */
+  useEffect(() => {
+    if (!isConnected || !selectedHostId) {
+      // 未连接：清理所有实例（PTY 由断开逻辑关闭）
+      for (const [, inst] of tabsRef.current) {
+        inst.term.dispose();
+        inst.container.remove();
+      }
+      tabsRef.current.clear();
+      currentHostRef.current = null;
+      return;
+    }
+    const hostId = selectedHostId;
+    currentHostRef.current = hostId;
+    setActiveDisconnected(false);
+
+    // 确保主机至少有一个标签（首次自动创建 "default"）
+    let currentTabs = useUIStore.getState().terminalTabs[hostId] ?? [];
+    if (currentTabs.length === 0) {
+      addTerminalTab(hostId);
+      currentTabs = useUIStore.getState().terminalTabs[hostId] ?? [];
+    }
+
+    // 为每个标签创建 xterm 实例 + 打开 PTY
+    for (const tabId of currentTabs) {
+      createTabInstance(hostId, tabId);
+    }
+
+    // 初次布局
+    requestAnimationFrame(() => requestFit());
+
+    return () => {
+      // 切换离开前保存每个标签的终端内容
+      for (const [tabId, inst] of tabsRef.current) {
+        snapshotsRef.current.set(
+          makeTabKey(hostId, tabId),
+          saveTerminalSnapshot(inst.term),
+        );
+        inst.term.dispose();
+        inst.container.remove();
+      }
+      tabsRef.current.clear();
+
       // 仅在主机断开连接时关闭 PTY；面板隐藏时保留会话
       const currentConnState =
         useHostStore.getState().connectionStates[hostId];
       if (currentConnState !== 'connected') {
-        // 主机已断开：清空快照和初始同步状态（重连后是全新会话，旧输出无意义）
-        termSnapshotsRef.current.delete(hostId);
-        initCwdSyncedRef.current.delete(hostId);
-        const opened = openedHostRef.current;
-        if (opened) {
-          void invoke('pty_close', { hostId: opened }).catch(() => {});
-          openedHostRef.current = null;
+        // 主机已断开：清空快照和初始同步状态（重连后是全新会话）
+        for (const tabId of currentTabs) {
+          const key = makeTabKey(hostId, tabId);
+          snapshotsRef.current.delete(key);
+          initCwdSyncedRef.current.delete(key);
+          ignoreFirstCwdRef.current.delete(key);
+          justOpenedRef.current.delete(key);
+          disconnectedTabsRef.current.delete(tabId);
+          void invoke('pty_close', { hostId, tabId }).catch(() => {});
         }
       }
+      currentHostRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedHostId, isConnected]);
 
-  /* ---------- Effect 3：terminalHeight / 可见性变化时重新 fit ---------- */
+  /* ---------- Effect 3：活动标签变化 —— 显示/隐藏 + fit ---------- */
   useEffect(() => {
-    // 等待浏览器应用内联高度后再 fit
+    if (!activeTab) {
+      setActiveDisconnected(false);
+      return;
+    }
+    // 显示活动标签，隐藏其余
+    tabsRef.current.forEach((inst, id) => {
+      inst.container.style.display = id === activeTab ? 'block' : 'none';
+    });
+    requestAnimationFrame(() => requestFit(activeTab));
+    // 更新断开状态
+    setActiveDisconnected(disconnectedTabsRef.current.has(activeTab));
+  }, [activeTab]);
+
+  /* ---------- Effect 4：terminalHeight / 可见性变化时重新 fit ---------- */
+  useEffect(() => {
     requestAnimationFrame(() => requestFit());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalHeight, terminalVisible]);
 
-  /* ---------- 清屏 ---------- */
+  /* ---------- 新增标签 ---------- */
+  const handleAddTab = () => {
+    if (!selectedHostId || !isConnected) return;
+    const hostId = selectedHostId;
+    const tabId = addTerminalTab(hostId);
+    createTabInstance(hostId, tabId);
+    // addTerminalTab 已将新标签设为活动，Effect 3 会切换显示
+  };
+
+  /* ---------- 关闭标签 ---------- */
+  const handleCloseTab = async (tabId: string) => {
+    if (!selectedHostId) return;
+    const hostId = selectedHostId;
+    // 关闭 PTY 会话
+    await invoke('pty_close', { hostId, tabId }).catch(() => {});
+    // 销毁 xterm 实例
+    const inst = tabsRef.current.get(tabId);
+    if (inst) {
+      inst.term.dispose();
+      inst.container.remove();
+      tabsRef.current.delete(tabId);
+    }
+    // 清理每标签状态
+    const key = makeTabKey(hostId, tabId);
+    snapshotsRef.current.delete(key);
+    initCwdSyncedRef.current.delete(key);
+    ignoreFirstCwdRef.current.delete(key);
+    justOpenedRef.current.delete(key);
+    disconnectedTabsRef.current.delete(tabId);
+    // 从 store 移除（会切换活动标签到相邻标签）
+    removeTerminalTab(hostId, tabId);
+  };
+
+  /* ---------- 清屏（活动标签） ---------- */
   const handleClear = () => {
-    termRef.current?.clear();
+    if (!activeTab) return;
+    tabsRef.current.get(activeTab)?.term.clear();
   };
 
   /* ---------- 关闭终端面板 ---------- */
@@ -425,27 +556,37 @@ export function TerminalPanel() {
     if (selectedHostId) setTerminalVisible(selectedHostId, false);
   };
 
-  /* ---------- 断开后重试 ---------- */
+  /* ---------- 全屏切换 ---------- */
+  const handleToggleFullscreen = () => {
+    setTerminalFullscreen(!terminalFullscreen);
+  };
+
+  /* ---------- 断开后重试（活动标签） ---------- */
   const handleRetry = async () => {
-    if (!selectedHostId || retrying) return;
+    if (!selectedHostId || !activeTab || retrying) return;
+    const hostId = selectedHostId;
+    const tabId = activeTab;
+    const key = makeTabKey(hostId, tabId);
     setRetrying(true);
     try {
-      // 先关闭可能残留的旧会话
-      await invoke('pty_close', { hostId: selectedHostId }).catch(() => {});
+      await invoke('pty_close', { hostId, tabId }).catch(() => {});
       await new Promise((resolve) => setTimeout(resolve, 300));
-      justOpenedRef.current = true;
-      const isNew = await invoke<boolean>('pty_open', { hostId: selectedHostId });
-      justOpenedRef.current = false;
-      setDisconnected(false);
-      requestAnimationFrame(() => requestFit());
-      // 重连后清空旧快照并重置终端
-      if (isNew) {
-        termSnapshotsRef.current.delete(selectedHostId);
-        termRef.current?.reset();
-        ignoreFirstCwdRef.current = true;
+      justOpenedRef.current.add(key);
+      const isNew = await invoke<boolean>('pty_open', { hostId, tabId });
+      justOpenedRef.current.delete(key);
+      disconnectedTabsRef.current.delete(tabId);
+      setActiveDisconnected(false);
+      const inst = tabsRef.current.get(tabId);
+      if (inst) {
+        requestAnimationFrame(() => requestFit(tabId));
+        if (isNew) {
+          snapshotsRef.current.delete(key);
+          inst.term.reset();
+          ignoreFirstCwdRef.current.add(key);
+        }
       }
     } catch (err) {
-      justOpenedRef.current = false;
+      justOpenedRef.current.delete(key);
       useToastStore
         .getState()
         .push('error', `重连失败：${formatErr(err)}`);
@@ -455,28 +596,75 @@ export function TerminalPanel() {
   };
 
   const showConnectPrompt = !isConnected;
+  const showEmptyState = isConnected && tabs.length === 0;
 
   return (
-    <div className="terminal-panel-root">
-      {/* 标题栏 */}
-      <div className="terminal-titlebar" role="toolbar" aria-label="终端工具栏">
-        <span className="terminal-titlebar-icon" aria-hidden="true">
-          <SquareTerminal size={13} />
-        </span>
-        <span className="terminal-titlebar-title" title={hostName}>
-          {hostName}
-        </span>
-        {isConnected && (
-          <span className="terminal-titlebar-state">已连接</span>
-        )}
-        <div className="terminal-titlebar-actions">
+    <div
+      className={`terminal-panel-root${terminalFullscreen ? ' terminal-fullscreen' : ''}`}
+    >
+      {/* 标签栏 + 操作按钮 */}
+      <div className="terminal-header" role="toolbar" aria-label="终端工具栏">
+        <div className="terminal-tabs">
+          <span className="terminal-header-icon" aria-hidden="true">
+            <SquareTerminal size={13} />
+          </span>
+          {tabs.map((tabId, idx) => (
+            <div
+              key={tabId}
+              className={`terminal-tab${tabId === activeTab ? ' active' : ''}`}
+              onClick={() =>
+                selectedHostId && setActiveTerminalTab(selectedHostId, tabId)
+              }
+              title={`${hostName} — 终端 ${idx + 1}`}
+            >
+              <span className="terminal-tab-label">终端 {idx + 1}</span>
+              {tabs.length > 1 && (
+                <button
+                  className="terminal-tab-close"
+                  type="button"
+                  aria-label="关闭标签"
+                  title="关闭标签"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleCloseTab(tabId);
+                  }}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            className="terminal-tab-add"
+            type="button"
+            aria-label="新建终端标签"
+            title="新建终端标签"
+            onClick={handleAddTab}
+            disabled={!isConnected}
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+        <div className="terminal-header-actions">
+          {isConnected && (
+            <span className="terminal-header-state">已连接</span>
+          )}
+          <button
+            className="terminal-titlebar-btn"
+            type="button"
+            aria-label={terminalFullscreen ? '退出全屏' : '全屏'}
+            title={terminalFullscreen ? '退出全屏' : '全屏'}
+            onClick={handleToggleFullscreen}
+          >
+            {terminalFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
           <button
             className="terminal-titlebar-btn"
             type="button"
             aria-label="清屏"
             title="清屏"
             onClick={handleClear}
-            disabled={!isConnected || disconnected}
+            disabled={!isConnected || activeDisconnected}
           >
             <Eraser size={13} />
           </button>
@@ -493,8 +681,8 @@ export function TerminalPanel() {
       </div>
 
       {/* 终端主体 */}
-      <div className="terminal-body" ref={containerRef}>
-        {/* Xterm 渲染节点由 term.open 注入 */}
+      <div className="terminal-body" ref={bodyRef}>
+        {/* Xterm 渲染节点由 createTabInstance 动态注入 */}
 
         {/* 未连接提示 */}
         {showConnectPrompt && (
@@ -509,8 +697,26 @@ export function TerminalPanel() {
           </div>
         )}
 
-        {/* PTY 断开重试 */}
-        {disconnected && isConnected && (
+        {/* 标签全部关闭时的空状态 */}
+        {showEmptyState && (
+          <div className="terminal-overlay">
+            <span className="terminal-overlay-icon" aria-hidden="true">
+              <SquareTerminal size={26} />
+            </span>
+            <p className="terminal-overlay-title">没有打开的终端</p>
+            <button
+              className="terminal-retry-btn"
+              type="button"
+              onClick={handleAddTab}
+            >
+              <Plus size={13} />
+              新建终端
+            </button>
+          </div>
+        )}
+
+        {/* 活动 PTY 标签断开重试 */}
+        {activeDisconnected && isConnected && !showEmptyState && (
           <div className="terminal-overlay">
             <span className="terminal-overlay-icon" aria-hidden="true">
               <RefreshCw size={26} />

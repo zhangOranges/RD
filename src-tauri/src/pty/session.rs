@@ -49,6 +49,7 @@ impl PtySession {
     /// read loop.
     pub async fn create(
         host_id: String,
+        tab_id: String,
         shared_handle: crate::ssh::SharedHandle,
         app: AppHandle,
     ) -> Result<Self, String> {
@@ -105,6 +106,7 @@ impl PtySession {
 
         let task_handle = tokio::spawn(read_loop(
             host_id.clone(),
+            tab_id.clone(),
             channel,
             cmd_rx,
             app,
@@ -166,6 +168,7 @@ impl PtySession {
 /// sets the shared `closed` flag and emits `pty://closed`.
 async fn read_loop(
     host_id: String,
+    tab_id: String,
     mut channel: Channel<Msg>,
     mut cmd_rx: UnboundedReceiver<PtyCommand>,
     app: AppHandle,
@@ -178,10 +181,10 @@ async fn read_loop(
             msg = channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
-                        handle_output(&host_id, &app, &mut parser, data);
+                        handle_output(&host_id, &tab_id, &app, &mut parser, data);
                     }
                     Some(ChannelMsg::ExtendedData { ref data, .. }) => {
-                        handle_output(&host_id, &app, &mut parser, data);
+                        handle_output(&host_id, &tab_id, &app, &mut parser, data);
                     }
                     Some(ChannelMsg::Eof) => {
                         eprintln!("[PTY] channel EOF received for host: {}", host_id);
@@ -222,10 +225,11 @@ async fn read_loop(
         }
     }
 
-    eprintln!("[PTY] read_loop exited for host: {}", host_id);
+    eprintln!("[PTY] read_loop exited for host: {} tab: {}", host_id, tab_id);
     closed.store(true, Ordering::Release);
     let _ = app.emit(CLOSED_EVENT, &PtyClosedPayload {
         host_id: host_id.clone(),
+        tab_id: tab_id.clone(),
     });
 }
 
@@ -234,6 +238,7 @@ async fn read_loop(
 #[inline]
 fn handle_output(
     host_id: &str,
+    tab_id: &str,
     app: &AppHandle,
     parser: &mut OscParser,
     data: &[u8],
@@ -245,12 +250,14 @@ fn handle_output(
     if !clean.is_empty() {
         let _ = app.emit(DATA_EVENT, &PtyDataPayload {
             host_id: host_id.to_string(),
+            tab_id: tab_id.to_string(),
             data: clean,
         });
     }
     for path in paths {
         let _ = app.emit(CWD_CHANGED_EVENT, &PtyCwdPayload {
             host_id: host_id.to_string(),
+            tab_id: tab_id.to_string(),
             path,
         });
     }

@@ -17,12 +17,14 @@
 
 pub mod connection;
 pub mod error;
+pub mod exec;
 pub mod handler;
 
 use std::collections::HashMap;
 
 pub use connection::{ConnectParams, ConnectResult, ConnectionHandle, SharedHandle};
 pub use error::SshError;
+pub use exec::{get_server_stats, ServerStats};
 pub use handler::{ClientHandler, HandlerSharedState, DISCONNECTED_EVENT};
 
 /// Global SSH connection state, registered with Tauri via `.manage(new_state())`.

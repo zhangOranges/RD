@@ -23,6 +23,8 @@ interface FileState {
   history: string[];
   historyIndex: number;
   selectedEntry: FileEntry | null;
+  /** 多选：选中的文件名集合 */
+  selectedNames: Set<string>;
 
   navigate: (hostId: string, path: string, opts?: { skipHistory?: boolean }) => Promise<boolean>;
   refresh: (hostId: string) => Promise<void>;
@@ -36,6 +38,10 @@ interface FileState {
   remove: (hostId: string, name: string, isDir: boolean) => Promise<void>;
   resolvePath: (hostId: string, input: string) => Promise<string | null>;
   selectEntry: (entry: FileEntry | null) => void;
+  /** 多选：切换/范围/替换选中 */
+  selectOne: (name: string, mode: 'toggle' | 'replace' | 'range') => void;
+  /** 多选：清空选中 */
+  clearSelection: () => void;
   // 切换主机时重置全部文件浏览器状态，防止旧主机的路径/历史/列表残留
   resetState: () => void;
   // 远程文件读写：返回/写入 UTF-8 文本
@@ -134,12 +140,21 @@ export const useFileStore = create<FileState>((set, get) => ({
   history: [],
   historyIndex: -1,
   selectedEntry: null,
+  selectedNames: new Set<string>(),
 
   navigate: async (hostId, path, opts) => {
     const skipHistory = opts?.skipHistory ?? false;
     // 捕获并立即重置标志：即便后续 sftp_list_dir 抛错，标志也不会残留影响下一次导航
     const fromTerminal = syncFromTerminal;
     syncFromTerminal = false;
+    // 路径合法性前置校验：远程路径必须以「/」开头（绝对路径），
+    // 否则直接失败，避免脏数据（如 hostId UUID）误入 currentPath 进而显示在面包屑中
+    if (typeof path !== 'string' || !path.startsWith('/')) {
+      const msg = `无效的远程路径：${JSON.stringify(path)}`;
+      set({ loading: false, error: msg });
+      useToastStore.getState().push('error', msg);
+      return false;
+    }
     set({ loading: true, error: null });
     try {
       const entries = await invoke<FileEntry[]>('sftp_list_dir', { hostId, path });
@@ -161,6 +176,7 @@ export const useFileStore = create<FileState>((set, get) => ({
         loading: false,
         error: null,
         selectedEntry: null,
+        selectedNames: new Set<string>(),
         history,
         historyIndex,
       });
@@ -175,12 +191,13 @@ export const useFileStore = create<FileState>((set, get) => ({
       // 才回推 pty_cd。否则会形成回环（终端 cd → 文件浏览器刷新 → pty_cd → 终端 cd…）。
       if (!fromTerminal) {
         try {
-          const isOpen = await invoke<boolean>('pty_is_open', { hostId });
+          const activeTab = useUIStore.getState().getActiveTerminalTab(hostId);
+          const isOpen = await invoke<boolean>('pty_is_open', { hostId, tabId: activeTab });
           if (isOpen) {
             // 同一主机重复导航到相同路径时跳过 pty_cd，避免终端出现重复 cd 回显
             if (lastPtyCdPath.get(hostId) !== path) {
               lastPtyCdPath.set(hostId, path);
-              await invoke('pty_cd', { hostId, path });
+              await invoke('pty_cd', { hostId, tabId: activeTab, path });
             }
           }
         } catch {
@@ -335,7 +352,45 @@ export const useFileStore = create<FileState>((set, get) => ({
     }
   },
 
-  selectEntry: (entry) => set({ selectedEntry: entry }),
+  selectEntry: (entry) => set({
+    selectedEntry: entry,
+    selectedNames: entry ? new Set([entry.name]) : new Set<string>(),
+  }),
+
+  selectOne: (name, mode) => {
+    const { selectedNames, entries } = get();
+    if (mode === 'replace') {
+      set({ selectedNames: new Set([name]), selectedEntry: entries.find(e => e.name === name) ?? null });
+      return;
+    }
+    if (mode === 'toggle') {
+      const next = new Set(selectedNames);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      set({ selectedNames: next });
+      return;
+    }
+    if (mode === 'range') {
+      const orderedNames = entries.map((e) => e.name);
+      let anchorIdx = -1;
+      for (const n of selectedNames) {
+        const idx = orderedNames.indexOf(n);
+        if (idx >= 0 && (anchorIdx < 0 || idx < anchorIdx)) anchorIdx = idx;
+      }
+      if (anchorIdx < 0) anchorIdx = 0;
+      const targetIdx = orderedNames.indexOf(name);
+      if (targetIdx < 0) return;
+      const [lo, hi] = anchorIdx < targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
+      const next = new Set<string>();
+      for (let i = lo; i <= hi; i++) {
+        const n = orderedNames[i];
+        if (n !== undefined) next.add(n);
+      }
+      set({ selectedNames: next });
+    }
+  },
+
+  clearSelection: () => set({ selectedNames: new Set<string>(), selectedEntry: null }),
 
   resetState: () =>
     set({
@@ -346,6 +401,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       history: [],
       historyIndex: -1,
       selectedEntry: null,
+      selectedNames: new Set<string>(),
     }),
 }));
 

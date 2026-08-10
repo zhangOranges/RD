@@ -1,22 +1,27 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { Toolbar } from './components/Toolbar';
+import { TabBar } from './components/TabBar';
 import { StatusBar } from './components/StatusBar';
 import { ContentArea } from './components/ContentArea';
 import { TerminalPanel } from './components/TerminalPanel';
 import { SettingsDialog } from './components/SettingsDialog';
 import { ToastContainer } from './components/Toast';
+import { RightPanel } from './components/RightPanel';
 import { useHostStore } from './store/hostStore';
 import { useUIStore } from './store/uiStore';
 import { useFileStore } from './store/fileStore';
 import { bindTransferProgressListener } from './store/transferStore';
 import './styles/finder.css';
+import './styles/tabbar.css';
+import './styles/rightpanel.css';
 
 function App() {
   const loadHosts = useHostStore((s) => s.loadHosts);
   const loadCategories = useHostStore((s) => s.loadCategories);
   const initEventListeners = useHostStore((s) => s.initEventListeners);
   const teardownEventListeners = useHostStore((s) => s.teardownEventListeners);
+  const [appReady, setAppReady] = useState(false);
+  const [fadeOut, setFadeOut] = useState(false);
 
   const sidebarWidth = useUIStore((s) => s.sidebarWidth);
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth);
@@ -31,16 +36,42 @@ function App() {
   const setTerminalResizing = useUIStore((s) => s.setTerminalResizing);
   const terminalResizing = useUIStore((s) => s.terminalResizing);
 
+  const rightPanelWidth = useUIStore((s) => s.rightPanelWidth);
+  const setRightPanelWidth = useUIStore((s) => s.setRightPanelWidth);
+  const rightPanelResizing = useUIStore((s) => s.rightPanelResizing);
+  const setRightPanelResizing = useUIStore((s) => s.setRightPanelResizing);
+  const rightPanelVisible = useUIStore((s) => s.rightPanelVisible);
+
   useEffect(() => {
-    void loadHosts();
-    void loadCategories();
-    void initEventListeners();
-    // 注册全局传输进度事件（上传/下载进度由 Rust 端 emit）
-    void bindTransferProgressListener();
+    let done = false;
+    Promise.all([
+      loadHosts(),
+      loadCategories(),
+      initEventListeners(),
+      bindTransferProgressListener(),
+    ])
+      .then(() => {
+        done = true;
+        setFadeOut(true);
+        setTimeout(() => setAppReady(true), 350);
+      })
+      .catch(() => {
+        done = true;
+        setFadeOut(true);
+        setTimeout(() => setAppReady(true), 350);
+      });
     return () => {
+      if (!done) setAppReady(true);
       void teardownEventListeners();
     };
   }, [loadHosts, loadCategories, initEventListeners, teardownEventListeners]);
+
+  // 全局禁用浏览器原生右键菜单（自定义菜单已在各组件内 preventDefault，此处兜底拦截漏网区域）
+  useEffect(() => {
+    const handler = (e: MouseEvent) => e.preventDefault();
+    document.addEventListener('contextmenu', handler);
+    return () => document.removeEventListener('contextmenu', handler);
+  }, []);
 
   // 全局快捷键：
   // - Ctrl+,（Windows/Linux）/ Cmd+,（macOS）→ 打开设置
@@ -122,15 +153,36 @@ function App() {
     [terminalHeight, setTerminalHeight, setTerminalResizing],
   );
 
+  // 右侧面板拖拽（向左拖增大宽度）
+  const onRightPanelMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setRightPanelResizing(true);
+      const startX = e.clientX;
+      const startWidth = rightPanelWidth;
+      const onMove = (ev: MouseEvent) => {
+        setRightPanelWidth(startWidth - (ev.clientX - startX));
+      };
+      const onUp = () => {
+        setRightPanelResizing(false);
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [rightPanelWidth, setRightPanelWidth, setRightPanelResizing],
+  );
+
   const terminalRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <div
       className={`app-root ${sidebarResizing ? 'is-resizing-sidebar' : ''} ${
         terminalResizing ? 'is-resizing-terminal' : ''
-      }`}
+      } ${rightPanelResizing ? 'is-resizing-rightpanel' : ''}`}
     >
-      <Toolbar />
+      <TabBar />
 
       <div className="app-body">
         <div className="sidebar-wrap" style={{ width: sidebarWidth }}>
@@ -168,12 +220,37 @@ function App() {
             <TerminalPanel />
           </div>
         </div>
+        {/* 右侧面板分隔条 */}
+        <div
+          className={`rightpanel-resizer ${rightPanelResizing ? 'is-active' : ''}`}
+          onMouseDown={onRightPanelMouseDown}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="调整右侧面板宽度"
+          style={{ display: rightPanelVisible ? '' : 'none' }}
+        />
+        {/* 右侧面板区 */}
+        <div
+          className="rightpanel-wrap"
+          style={{ width: rightPanelWidth, display: rightPanelVisible ? '' : 'none' }}
+        >
+          <RightPanel />
+        </div>
       </div>
 
       <StatusBar />
 
       <ToastContainer />
       <SettingsDialog />
+
+      {/* 启动加载遮罩 */}
+      {!appReady && (
+        <div className={`app-splash ${fadeOut ? 'app-splash-fadeout' : ''}`}>
+          <div className="app-splash-logo">RD</div>
+          <div className="app-slash-spinner" />
+          <div className="app-splash-text">正在加载…</div>
+        </div>
+      )}
     </div>
   );
 }

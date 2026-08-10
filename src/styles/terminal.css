@@ -275,3 +275,218 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* ============================================================
+ * Task 8：终端多标签栏 + 全屏样式
+ * ============================================================ */
+
+/* 终端头部：标签栏（左）+ 操作按钮（右） */
+.terminal-header {
+  flex: 0 0 36px;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 8px 0 4px;
+  background: linear-gradient(180deg,
+    rgba(34, 36, 52, 0.92) 0%,
+    rgba(26, 27, 38, 0.92) 100%);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  border-bottom: 0.5px solid rgba(122, 162, 247, 0.18);
+  color: #7aa2f7;
+  font-size: 12px;
+  user-select: none;
+  position: relative;
+  z-index: 4;
+  box-shadow: 0 1px 0 0 rgba(255,255,255,0.03) inset;
+}
+
+/* 头部图标 */
+.terminal-header-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: #7aa2f7;
+  filter: drop-shadow(0 0 4px rgba(122, 162, 247, 0.35));
+  padding: 0 2px 0 6px;
+}
+
+/* 标签栏容器：横向滚动 */
+.terminal-tabs {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* 单个标签 */
+.terminal-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  max-width: 160px;
+  padding: 0 6px 0 12px;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  color: #565f89;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s cubic-bezier(.2,.7,.3,1),
+              color 0.15s;
+  position: relative;
+  border: 0.5px solid transparent;
+  white-space: nowrap;
+}
+
+.terminal-tab:hover {
+  background: rgba(122, 162, 247, 0.08);
+  color: #a9b1d6;
+}
+
+.terminal-tab.active {
+  background: rgba(122, 162, 247, 0.14);
+  color: #c0caf5;
+  border-color: rgba(122, 162, 247, 0.28);
+  box-shadow: 0 -1px 0 0 rgba(122, 162, 247, 0.4) inset;
+}
+
+.terminal-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--finder-font-mono);
+  letter-spacing: 0.01em;
+}
+
+/* 标签关闭按钮 */
+.terminal-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  color: #ff5f57;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.terminal-tab-close:hover {
+  background: rgba(255, 95, 87, 0.2);
+  color: #ff5f57;
+  opacity: 1;
+}
+
+/* 「+」新建标签按钮 */
+.terminal-tab-add {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: #565f89;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s cubic-bezier(.2,.7,.3,1),
+              color 0.15s;
+}
+
+.terminal-tab-add:hover {
+  background: rgba(158, 206, 106, 0.16);
+  color: #9ece6a;
+}
+
+.terminal-tab-add:active {
+  transform: scale(0.92);
+}
+
+.terminal-tab-add:disabled {
+  color: #3b3f54;
+  cursor: default;
+}
+
+.terminal-tab-add:disabled:hover {
+  background: transparent;
+  color: #3b3f54;
+}
+
+/* 头部右侧操作按钮组 */
+.terminal-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.terminal-header-state {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #9ece6a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(158, 206, 106, 0.12);
+  border: 0.5px solid rgba(158, 206, 106, 0.25);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  box-shadow: 0 0 10px rgba(158, 206, 106, 0.15);
+  margin-right: 4px;
+}
+
+/* 每个标签的 xterm 容器：撑满 body */
+.terminal-tab-container {
+  position: absolute;
+  inset: 0;
+}
+.terminal-tab-container .xterm {
+  height: 100%;
+  padding: 8px 10px;
+}
+.terminal-tab-container .xterm-viewport {
+  background-color: transparent !important;
+}
+.terminal-tab-container .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.terminal-tab-container .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-tab-container .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(122, 162, 247, 0.22);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.terminal-tab-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(122, 162, 247, 0.38);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  box-shadow: 0 0 8px rgba(122, 162, 247, 0.3);
+}
+
+/* 终端全屏：fixed 覆盖整个视口，无需修改 App.tsx 布局 */
+.terminal-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  height: 100vh !important;
+  border-radius: 0;
+}
+

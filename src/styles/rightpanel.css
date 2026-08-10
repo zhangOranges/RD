@@ -1,0 +1,356 @@
+/* ============================================================
+   右侧功能面板（服务器信息 / 快捷操作 / 传输队列）
+   ============================================================ */
+
+.rightpanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.rp-section {
+  border-bottom: 0.5px solid var(--divider);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto; /* 默认不收缩，仅最后一个传输队列区有自己的 flex 规则 */
+}
+.rp-section:last-child {
+  border-bottom: none;
+  flex: 1 1 auto; /* 传输队列：占据剩余空间，不足时可收缩，内部通过 .rp-task-list 滚动 */
+  min-height: 0; /* 允许 flex 项收缩到内容之下，使 overflow-y 生效 */
+}
+
+.rp-section-title {
+  flex: 0 0 auto;
+  padding: 10px 14px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+}
+
+/* 服务器信息 */
+.rp-info-grid {
+  padding: 0 14px 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  font-size: 11px;
+}
+.rp-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.rp-info-label {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+.rp-info-value {
+  color: var(--text-primary);
+  font-family: var(--finder-font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-conn-status {
+  padding: 4px 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.rp-conn-status.connected { color: var(--state-connected); }
+.rp-conn-status.disconnected { color: var(--text-tertiary); }
+.rp-conn-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+}
+.rp-disconnect-btn {
+  margin: 6px 14px 10px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: linear-gradient(135deg, #FF3B30 0%, #FF6B5B 100%);
+  color: white;
+  font-size: 11px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.rp-disconnect-btn:hover { filter: brightness(0.9); }
+.rp-disconnect-btn:disabled {
+  background: var(--text-quaternary);
+  cursor: default;
+  opacity: 0.5;
+}
+.rp-empty-section {
+  padding: 16px 14px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* 服务器硬件信息（CPU / 内存 / 磁盘） */
+.rp-hw {
+  padding: 4px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rp-hw-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.rp-hw-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.rp-hw-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.rp-hw-sub {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--finder-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-hw-detail {
+  font-size: 10px;
+  color: var(--text-primary);
+  font-family: var(--finder-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-hw-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--divider);
+  overflow: hidden;
+}
+.rp-hw-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* 快捷操作 */
+.rp-quick-grid {
+  padding: 0 10px 10px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.rp-quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 4px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-control);
+  background: var(--bg-content);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.rp-quick-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.rp-quick-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 传输队列 */
+.rp-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 0 10px;
+}
+.rp-tab {
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+.rp-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.rp-tab-badge {
+  margin-left: 3px;
+  font-size: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0 4px;
+  border-radius: 8px;
+}
+
+.rp-task-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 10px;
+}
+.rp-task-item {
+  padding: 6px 8px;
+  border-radius: var(--radius-control);
+  background: var(--hover);
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+.rp-task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.rp-task-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.rp-task-cancel {
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  border: none; background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+}
+.rp-task-cancel:hover { background: var(--danger); color: white; }
+/* 下载完成后的「打开文件夹」按钮 */
+.rp-task-reveal {
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  border: none; background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+.rp-task-reveal:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+}
+.rp-task-progress {
+  height: 3px;
+  background: var(--divider);
+  border-radius: 2px;
+  margin: 4px 0;
+  overflow: hidden;
+}
+.rp-task-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  border-radius: 2px;
+  transition: width 0.2s;
+}
+.rp-task-info {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+.rp-task-info-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.rp-task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.rp-task-status.completed { color: var(--state-connected); }
+.rp-task-status.error { color: var(--danger); }
+.rp-task-status.canceled { color: var(--text-tertiary); }
+.rp-task-status.running { color: var(--accent); }
+.rp-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.rp-clear-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 8px;
+}
+.rp-clear-btn {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 22px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+}
+.rp-clear-btn:hover { background: var(--hover); }
+.rp-clear-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.rp-clear-all-btn:hover {
+  border-color: var(--danger, #ff5f57);
+  color: var(--danger, #ff5f57);
+}
+
+/* ---------- 传输队列垂直滚动条：与远程目录列表的自定义风格一致 ---------- */
+.rp-task-list::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.rp-task-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rp-task-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-tertiary, #888) 28%, transparent);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.15s;
+}
+.rp-task-list::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent, #0a84ff) 45%, transparent);
+}
+/* Firefox：细滚动条 + 主题色 */
+.rp-task-list {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-tertiary, #888) 28%, transparent) transparent;
+}

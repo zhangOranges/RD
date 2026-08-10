@@ -1,0 +1,382 @@
+/* ============================================================
+ * LocalFilePane — 本地文件栏（双栏文件管理器左栏）
+ * 独立 class 前缀 `local-pane-`，复用 finder.css 中的 CSS 变量。
+ * 风格参考 filebrowser.css（Finder 风 + 科技感），但保持独立。
+ * ============================================================ */
+
+/* ---------- 容器 ---------- */
+.local-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  background: var(--bg-content);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---------- 工具栏 ---------- */
+.local-pane-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 0.5px solid var(--divider-soft);
+  background: linear-gradient(180deg, var(--bg-toolbar, transparent), transparent);
+  min-height: 38px;
+}
+
+.pane-label {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* ---------- 面包屑 ---------- */
+.local-breadcrumb {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  height: 26px;
+  scrollbar-width: none; /* Firefox 隐藏滚动条 */
+}
+
+.local-breadcrumb::-webkit-scrollbar {
+  display: none; /* Chrome/Edge 隐藏滚动条 */
+}
+
+.local-breadcrumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;       /* 不参与 flex 压缩：避免长目录名时 wrap 互相重叠 */
+  min-width: 0;
+}
+
+.local-breadcrumb-sep {
+  color: var(--text-tertiary);
+  margin: 0 2px;
+  opacity: 0.7;
+  user-select: none;
+  flex: 0 0 auto;
+}
+
+.local-breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  height: 22px;
+  cursor: pointer;
+  white-space: nowrap;
+  /* 不限制宽度：面包屑容器自身带 overflow-x: auto 可水平滚动查看 */
+  transition: background 0.14s, color 0.14s;
+  font-family: var(--finder-font);
+}
+
+.local-breadcrumb-item:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.local-breadcrumb-item.is-current {
+  background: var(--selected-gradient, rgba(10, 132, 255, 0.12));
+  color: var(--text-on-accent, var(--accent));
+  font-weight: 600;
+}
+
+.local-breadcrumb-item.is-current:hover {
+  color: var(--text-on-accent, var(--accent));
+}
+
+.local-breadcrumb-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 0 6px;
+}
+
+/* 面包屑：双击区域可进入编辑模式 */
+.local-breadcrumb {
+  cursor: text;
+}
+
+/* ---------- 面包屑路径编辑输入框 ---------- */
+.local-breadcrumb-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  font-size: 12px;
+  font-family: var(--finder-font-mono);
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-content);
+  color: var(--text-primary);
+  outline: none;
+  box-shadow: var(--shadow-glow);
+}
+
+.local-breadcrumb-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* ---------- 操作按钮组 ---------- */
+.local-pane-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.local-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+}
+
+.local-action-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.local-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.local-spin {
+  animation: local-spin 0.7s linear infinite;
+}
+
+@keyframes local-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 列表区 ---------- */
+.local-pane-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+
+.local-pane-list-inner {
+  position: relative;
+  width: 100%;
+}
+
+/* ---------- 表头（sticky） ---------- */
+.local-pane-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--text-tertiary);
+  background: var(--bg-content);
+  border-bottom: 0.5px solid var(--divider-soft);
+  user-select: none;
+}
+
+/* ---------- 列宽定义（表头与行共用） ---------- */
+.local-pane-col-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.local-pane-col-type {
+  flex: 0 0 60px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.local-pane-col-time {
+  flex: 0 0 138px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--finder-font-mono);
+}
+
+/* ---------- 行 ---------- */
+.local-pane-row {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  cursor: default;
+  user-select: none;
+  white-space: nowrap;
+  border-radius: var(--radius-xs);
+  transition: background 0.12s;
+}
+
+.local-pane-row:hover {
+  background: var(--hover);
+}
+
+.local-pane-row.selected {
+  background: color-mix(in srgb, var(--accent, #7aa2f7) 20%, transparent);
+  color: var(--accent, #7aa2f7);
+}
+
+.local-pane-row.selected:hover {
+  background: color-mix(in srgb, var(--accent, #7aa2f7) 28%, transparent);
+}
+
+.local-pane-row-icon {
+  flex: 0 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.local-icon-dir {
+  color: #5ba8ff;
+  filter: drop-shadow(0 0 3px rgba(91, 168, 255, 0.25));
+}
+
+.local-icon-file {
+  color: var(--text-secondary);
+}
+
+.local-pane-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-pane-row .local-pane-col-type,
+.local-pane-row .local-pane-col-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ---------- 空状态 ---------- */
+.local-pane-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 120px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ---------- 加载层 ---------- */
+.local-pane-loading {
+  position: absolute;
+  inset: 26px 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.local-loading-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--divider-soft);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: local-spin 0.7s linear infinite;
+  box-shadow: 0 0 10px rgba(10, 132, 255, 0.3);
+}
+
+/* ---------- 底部统计 ---------- */
+.local-pane-stats {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 0.5px solid var(--divider-soft);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-content);
+  user-select: none;
+  min-height: 28px;
+}
+
+.local-stats-sep {
+  color: var(--text-tertiary);
+  opacity: 0.7;
+}
+
+/* ---------- 滚动条（Finder 风） ---------- */
+.local-pane-list::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.local-pane-list::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 128, 0.32);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.15s;
+}
+
+.local-pane-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 128, 0.48);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.local-pane-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  .local-pane-list::-webkit-scrollbar-thumb {
+    background: rgba(142, 142, 147, 0.30);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .local-pane-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(142, 142, 147, 0.48);
+  }
+}

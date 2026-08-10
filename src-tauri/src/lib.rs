@@ -2,6 +2,7 @@
 pub mod ssh;
 pub mod sftp;
 pub mod pty;
+pub mod local_fs;
 mod storage;
 
 #[tauri::command]
@@ -22,9 +23,14 @@ pub fn run() {
         .manage(storage::new_state())
         .invoke_handler(tauri::generate_handler![
             greet,
+            local_fs::list_local_dir,
+            local_fs::local_home_dir,
+            local_fs::read_local_file_bytes,
+            local_fs::read_local_file_chunk,
             ssh::connect_host,
             ssh::disconnect_host,
             ssh::connection_state,
+            ssh::exec::get_server_stats,
             sftp::sftp_list_dir,
             sftp::sftp_mkdir,
             sftp::sftp_rename,

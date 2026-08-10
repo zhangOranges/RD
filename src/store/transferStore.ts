@@ -58,6 +58,8 @@ interface TransferState {
   setPanelVisible: (v: boolean) => void;
   /** 清除已完成 / 错误 / 取消 的历史任务。 */
   clearFinished: () => void;
+  /** 清空全部任务（含进行中的，进行中的先标记取消）。 */
+  clearAll: () => void;
   /** 根据 id 手动更新任务状态（用于前端侧状态迁移，如 cancel）。 */
   setTaskStatus: (id: string, status: TransferStatus, extra?: Partial<TransferTask>) => void;
   /**
@@ -243,6 +245,22 @@ export const useTransferStore = create<TransferState>((set, get) => ({
       const tasks = s.tasks.filter((t) => t.status === 'running' || t.status === 'queued');
       persistTasks(tasks);
       return { tasks, hasUnread: false };
+    }),
+
+  clearAll: () =>
+    set((s) => {
+      // 对进行中的任务通知 Rust 端取消
+      s.tasks.forEach((t) => {
+        if (t.status === 'running' || t.status === 'queued') {
+          if (typeof window !== 'undefined') {
+            import('@tauri-apps/api/core')
+              .then(({ invoke }) => invoke('sftp_cancel_transfer', { taskId: t.id }))
+              .catch(() => {});
+          }
+        }
+      });
+      persistTasks([]);
+      return { tasks: [], hasUnread: false };
     }),
 
   setTaskStatus: (id, status, extra) => {

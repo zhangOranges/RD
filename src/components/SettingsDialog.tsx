@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X } from 'lucide-react';
+import { X, Check } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
+import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
 
 /**
  * 设置弹窗（Finder 风格模态）。
@@ -20,6 +21,8 @@ export function SettingsDialog() {
   const settingsVisible = useUIStore((s) => s.settingsVisible);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
   const pushToast = useToastStore((s) => s.push);
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
 
   const [rememberDirGlobal, setRememberDirGlobal] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -108,6 +111,28 @@ export function SettingsDialog() {
         </div>
 
         <div className="dialog-body">
+          <div className="settings-section-title">主题</div>
+
+          <div className="settings-theme-grid">
+            {THEME_OPTIONS.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`theme-card ${theme === opt.id ? 'is-selected' : ''}`}
+                onClick={() => {
+                  setTheme(opt.id);
+                  pushToast('success', `已切换主题：${opt.name}`);
+                }}
+                aria-pressed={theme === opt.id}
+              >
+                <span className="theme-card-swatch" style={{ background: opt.swatch }} />
+                <span className="theme-card-name">{opt.name}</span>
+                <span className="theme-card-desc">{opt.desc}</span>
+                {theme === opt.id && <Check size={14} className="theme-card-check" />}
+              </button>
+            ))}
+          </div>
+
           <div className="settings-section-title">通用</div>
 
           <div className="settings-row">
