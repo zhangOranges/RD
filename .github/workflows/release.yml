@@ -27,18 +27,21 @@ jobs:
             updater-key: windows-x86_64
             updater-format: nsis
             artifact-dir: artifacts-windows
+            bundles: nsis,msi
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             label: linux-x64
             updater-key: linux-x86_64
             updater-format: appimage
             artifact-dir: artifacts-linux
+            bundles: deb,appimage
           - platform: macos-latest
             target: aarch64-apple-darwin
             label: macos-arm64
             updater-key: darwin-aarch64
             updater-format: app
             artifact-dir: artifacts-macos
+            bundles: dmg,app
 
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
@@ -95,21 +98,42 @@ jobs:
           echo "Key prefix (first 40 chars): ${KEY:0:40}..."
 
       - name: Tauri build
-        run: npm run tauri -- build --verbose
+        run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Verify bundle output (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Diagnose bundle output (all platforms)
+        shell: bash
         run: |
-          echo "=== Checking both possible bundle paths ==="
-          echo "--- target/${{ matrix.target }}/release/bundle ---"
-          find "src-tauri/target/${{ matrix.target }}/release/bundle" -type f 2>/dev/null || echo "(not found)"
-          echo "--- target/release/bundle ---"
-          find "src-tauri/target/release/bundle" -type f 2>/dev/null || echo "(not found)"
-          echo "=== All bundle dirs under target/ ==="
+          echo "=== Environment ==="
+          echo "matrix.target=${{ matrix.target }}"
+          echo "matrix.bundles=${{ matrix.bundles }}"
+          echo "matrix.platform=${{ matrix.platform }}"
+          echo ""
+          echo "=== All directories under src-tauri/target (depth <= 4) ==="
+          find src-tauri/target -maxdepth 4 -type d 2>/dev/null | head -80 || echo "(no target dir)"
+          echo ""
+          echo "=== All bundle dirs anywhere ==="
           find src-tauri/target -name "bundle" -type d 2>/dev/null || echo "(no bundle dirs)"
+          echo ""
+          echo "--- target/release contents ---"
+          ls -la src-tauri/target/release/ 2>/dev/null | head -30 || echo "(not found)"
+          echo ""
+          TRIPLE_DIR="src-tauri/target/${{ matrix.target }}/release"
+          echo "--- $TRIPLE_DIR contents ---"
+          ls -la "$TRIPLE_DIR" 2>/dev/null | head -30 || echo "(not found)"
+          echo ""
+          for bundle in "src-tauri/target/release/bundle" "src-tauri/target/${{ matrix.target }}/release/bundle"; do
+            if [ -d "$bundle" ]; then
+              echo "=== BUNDLE DIR FOUND: $bundle ==="
+              find "$bundle" -type f 2>/dev/null | head -80
+              echo "--- END: $bundle ---"
+            fi
+          done
+          echo ""
+          echo "=== Any installer-like files anywhere under target? ==="
+          find src-tauri/target -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) 2>/dev/null | head -50 || echo "(none)"
 
       # ------------------------------------------------------------
       # 收集产物（各平台分别处理）
@@ -190,7 +214,7 @@ jobs:
             echo "=== Bundle dir (full tree) ==="
             find "$bundle" -type f 2>/dev/null || echo "Bundle dir empty"
             # 收集所有包 + 对应 .sig
-            find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
+            find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" \;
           fi
 
           # 选定 updater 主包（优先 AppImage）
@@ -216,7 +240,7 @@ jobs:
             if [ -d "$bundle" ]; then
               echo "=== Found bundle dir: $bundle ==="
               find "$bundle" -type f 2>/dev/null
-              find "$bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" 2>/dev/null || true
+              find "$bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" \;
             fi
           done
           # updater 主包用 dmg（用户点击安装的就是 dmg）
