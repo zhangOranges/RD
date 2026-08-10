@@ -29,7 +29,12 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis"
+      "nsis",
+      "msi",
+      "deb",
+      "appimage",
+      "dmg",
+      "app"
     ],
     "icon": [
       "icons/32x32.png",
