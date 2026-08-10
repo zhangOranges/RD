@@ -47,15 +47,19 @@ const DEFAULT_STATE: AppUpdaterState = {
 };
 
 /**
- * 判断当前是否为开发/调试模式：
- * 1. import.meta.env.DEV 由 Vite 注入（前端 dev server 一定是 true）
- * 2. location.protocol !== 'tauri:' 也是 dev（t dev 时 Vite 用 http://localhost:1420 提供页面）
+ * 判断当前是否为开发/调试模式。
+ * 仅用 Vite 编译时注入的 DEV 标志：
+ * - `npm run dev`（tauri dev）时为 true → 跳过自动更新检查
+ * - `npm run build`（生产打包）时为 false → 允许自动更新检查
+ *
+ * 注意：Tauri v2 生产打包使用 https: 协议，不能用 location.protocol 来区分 dev/prod。
  */
 function isDevProfile(): boolean {
   if (typeof window === 'undefined') return false;
+  // Tauri v2 生产打包用 https: 协议（非 tauri:），因此不能用 protocol 区分 dev/prod。
+  // 改用 Vite 编译时注入的 DEV 标志：dev build 为 true，生产 build (npm run build) 为 false。
   const viteDev = !!(import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV;
-  const httpHosted = typeof location !== 'undefined' && location.protocol !== 'tauri:';
-  return viteDev || httpHosted;
+  return viteDev;
 }
 
 /**
