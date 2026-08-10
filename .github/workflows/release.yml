@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   # ------------------------------------------------------------
-  # 三平台矩阵构建：Windows / Linux / macOS (Universal Binary: Intel + Apple Silicon)
+  # 三平台构建：Windows / Linux / macOS (Universal Binary via lipo)
   # 每个 job 只上传 artifact，不直接操作 GitHub Release
   # ------------------------------------------------------------
   build:
@@ -45,21 +45,21 @@ jobs:
       - name: Install npm deps
         run: npm ci --prefer-offline --no-audit --no-fund
 
+      # ---------- Windows / Linux：直接按 target 构建 ----------
       - name: Setup Rust toolchain (Windows/Linux)
         if: matrix.platform != 'macos-latest'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Setup Rust toolchain (macOS - no custom target)
+      # ---------- macOS：先装基础工具链，再手动装两个架构 target ----------
+      - name: Setup Rust toolchain (macOS - base)
         if: matrix.platform == 'macos-latest'
         uses: dtolnay/rust-toolchain@stable
-        # 不传 targets，默认安装 aarch64-apple-darwin（runner 原生架构）
 
       - name: Install Rust targets for macOS Universal Binary
         if: matrix.platform == 'macos-latest'
         run: |
-          # universal-apple-darwin 不是 rustup 原生 target，需要同时安装 aarch64 + x86_64
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
           rustup target list --installed | grep apple
 
@@ -82,7 +82,66 @@ jobs:
         with:
           workspaces: 'src-tauri -> target'
 
-      - name: Tauri build
+      # ---------- macOS：分两步构建 + lipo 合并 ----------
+      - name: Tauri build (macOS - aarch64)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          npm run tauri -- build --target aarch64-apple-darwin --verbose
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Save aarch64 build artifacts
+        if: matrix.platform == 'macos-latest'
+        run: |
+          mkdir -p build-aarch64
+          cp -R src-tauri/target/aarch64-apple-darwin/release/bundle build-aarch64/bundle
+          # 复制主二进制（按文件名查找，兼容 rd_app / RD 等命名）
+          BIN=$(ls src-tauri/target/aarch64-apple-darwin/release/ | grep -v '\.dSYM$' | head -1)
+          echo "Detected binary: $BIN"
+          cp "src-tauri/target/aarch64-apple-darwin/release/$BIN" build-aarch64/rd_app
+          file build-aarch64/rd_app
+
+      - name: Tauri build (macOS - x86_64)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          npm run tauri -- build --target x86_64-apple-darwin --verbose
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: lipo merge and produce Universal Binary
+        if: matrix.platform == 'macos-latest'
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+
+          # 找到 x86_64 二进制
+          X64_BIN=$(ls src-tauri/target/x86_64-apple-darwin/release/ | grep -v '\.dSYM$' | head -1)
+          echo "x86_64 binary: $X64_BIN"
+
+          # 合并主二进制为 Universal Binary
+          lipo -create \
+            build-aarch64/rd_app \
+            "src-tauri/target/x86_64-apple-darwin/release/$X64_BIN" \
+            -output target/universal-apple-darwin/release/rd_app
+          echo "=== Universal binary ==="
+          file target/universal-apple-darwin/release/rd_app
+
+          # 用 aarch64 的 bundle 作为基础，替换其中的二进制为 Universal
+          cp -R build-aarch64/bundle target/universal-bundle
+          # 查找 .app 内部的可执行文件路径
+          APP_BIN=$(find target/universal-bundle -path '*/Contents/MacOS/*' -type f | head -1)
+          echo "App bundle binary: $APP_BIN"
+          if [ -n "$APP_BIN" ]; then
+            cp target/universal-apple-darwin/release/rd_app "$APP_BIN"
+            chmod +x "$APP_BIN"
+          fi
+          echo "=== Bundled app ==="
+          find target/universal-bundle -name '*.app' -maxdepth 3
+
+      # ---------- Windows / Linux：直接构建 ----------
+      - name: Tauri build (Windows/Linux)
+        if: matrix.platform != 'macos-latest'
         run: npm run tauri -- build --target ${{ matrix.target }} --verbose
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -122,18 +181,20 @@ jobs:
           echo "=== Artifacts ==="
           ls -lh "$out"
 
-      - name: Collect artifacts (macOS)
+      - name: Collect artifacts (macOS - Universal)
         if: matrix.platform == 'macos-latest'
         run: |
-          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
-          # dmg
-          find "$bundle/dmg" -name '*.dmg' -exec cp {} "$out/" 2>/dev/null || true
-          # app (tar.gz for upload)
-          if [ -d "$bundle/macos" ]; then
-            tar -czf "$out/RD.app.tar.gz" -C "$bundle/macos" .
+          # 把合并后的 Universal .app 打包成 tar.gz
+          APP_PATH=$(find target/universal-bundle -name '*.app' -maxdepth 3 | head -1)
+          echo "App path: $APP_PATH"
+          if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
+            APP_NAME=$(basename "$APP_PATH")
+            tar -czf "$out/RD-macos-universal.tar.gz" -C "$(dirname "$APP_PATH")" "$APP_NAME"
           fi
+          # 放一份 aarch64 的 dmg 作备用
+          find build-aarch64/bundle/dmg -name '*.dmg' -exec cp {} "$out/" 2>/dev/null || true
           echo "=== Artifacts ==="
           ls -lh "$out"
 
