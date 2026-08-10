@@ -334,6 +334,20 @@ jobs:
           echo "=== manifests dir ==="
           ls -lh all-artifacts/manifests/ 2>/dev/null || echo "(no manifests)"
           cat all-artifacts/manifests/*.json 2>/dev/null || true
+          echo "=== Full tree ==="
+          find all-artifacts -type f 2>/dev/null | head -50
+
+      - name: Flatten all artifacts to root
+        run: |
+          cd all-artifacts
+          echo "=== Before flatten ==="
+          find . -type f -not -name 'latest.json' | head -30
+          # 将所有子目录中的文件复制到根目录
+          find . -mindepth 2 -type f -exec cp {} . \; 2>/dev/null || true
+          # 清理子目录（保留 manifests/）
+          find . -mindepth 1 -maxdepth 1 -type d -not -name 'manifests' -exec rm -rf {} + 2>/dev/null || true
+          echo "=== After flatten ==="
+          ls -lh . | grep -v '^d'
 
       - name: Generate latest.json updater manifest
         run: |
