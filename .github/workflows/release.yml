@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   # ------------------------------------------------------------
-  # 四平台矩阵构建：Windows / Linux / macOS (Apple Silicon + Intel)
+  # 三平台矩阵构建：Windows / Linux / macOS (Universal Binary: Intel + Apple Silicon)
   # 每个 job 只上传 artifact，不直接操作 GitHub Release
   # ------------------------------------------------------------
   build:
@@ -27,13 +27,9 @@ jobs:
             label: linux-x64
             artifact-dir: artifacts-linux
           - platform: macos-latest
-            target: aarch64-apple-darwin
-            label: macos-arm64
+            target: universal-apple-darwin
+            label: macos-universal
             artifact-dir: artifacts-macos
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            label: macos-x64
-            artifact-dir: artifacts-macos-x64
 
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
@@ -114,7 +110,7 @@ jobs:
           ls -lh "$out"
 
       - name: Collect artifacts (macOS)
-        if: matrix.platform == 'macos-latest' || matrix.platform == 'macos-13'
+        if: matrix.platform == 'macos-latest'
         run: |
           bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
           out="${{ matrix.artifact-dir }}"

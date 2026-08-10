@@ -154,4 +154,4 @@ jobs:
           echo "| 递增类型 | ${{ inputs.bump }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tag | \`v${{ steps.ver.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "tag 推送后将自动触发 **Release** 工作流构建三平台产物。" >> "$GITHUB_STEP_SUMMARY"
+          echo "tag 推送后将自动触发 **Release** 工作流构建三平台产物（Windows / Linux / macOS Universal）。" >> "$GITHUB_STEP_SUMMARY"
