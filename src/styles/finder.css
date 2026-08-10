@@ -2296,3 +2296,12 @@ html[data-theme="dark"] body {
   border-radius: 2px;
   transition: width 0.25s ease;
 }
+.update-badge.is-dev {
+  color: color-mix(in srgb, var(--text-tertiary) 80%, var(--text-secondary));
+  background: color-mix(in srgb, var(--text-tertiary) 6%, transparent);
+  cursor: help;
+}
+.update-badge.is-dev:hover {
+  background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
+  color: var(--text-secondary);
+}

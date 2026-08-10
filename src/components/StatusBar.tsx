@@ -19,6 +19,19 @@ import { useAppUpdater } from '../hooks/useAppUpdater';
 function UpdateBadge() {
   const updater = useAppUpdater();
 
+  // dev 模式下 latest.json (GitHub releases/latest) 通常不存在，给一个静态提示不主动触发检查
+  if (updater.isDev) {
+    return (
+      <span
+        className="statusbar-item update-badge is-dev"
+        title="开发模式下自动检查会被跳过。需先打 tag + Release 发布后，用打包好的安装包测试更新。"
+      >
+        <Sparkles size={11} />
+        <span>更新：仅打包版可用</span>
+      </span>
+    );
+  }
+
   if (updater.status === 'idle' || updater.status === 'checking') {
     return (
       <button
@@ -27,7 +40,7 @@ function UpdateBadge() {
           updater.status === 'checking' ? 'is-checking' : ''
         }`}
         onClick={() => updater.check()}
-        title="检查更新"
+        title="检查更新（最多等待 8 秒）"
       >
         <RefreshCw size={11} className={updater.status === 'checking' ? 'spin' : ''} />
         <span>检查更新</span>
@@ -75,7 +88,7 @@ function UpdateBadge() {
   if (updater.status === 'downloading' || updater.status === 'installing') {
     const label =
       updater.status === 'downloading'
-        ? `下载中 ${updater.progressPct || 0}%`
+        ? `下载中 ${updater.progressPct || 0}% · ${updater.downloadedMB || 0}MB`
         : '安装中…';
     return (
       <span className="statusbar-item update-badge is-downloading" title={label}>
