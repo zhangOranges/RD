@@ -106,37 +106,36 @@ jobs:
       - name: Diagnose bundle output (all platforms)
         shell: bash
         run: |
+          set +o pipefail
           echo "=== Environment ==="
           echo "matrix.target=${{ matrix.target }}"
           echo "matrix.bundles=${{ matrix.bundles }}"
           echo "matrix.platform=${{ matrix.platform }}"
           echo ""
-          echo "=== All directories under src-tauri/target (depth <= 4) ==="
-          find src-tauri/target -maxdepth 4 -type d 2>/dev/null | head -80 || echo "(no target dir)"
-          echo ""
-          echo "=== All bundle dirs anywhere ==="
-          find src-tauri/target -name "bundle" -type d 2>/dev/null || echo "(no bundle dirs)"
+          echo "=== All bundle dirs ==="
+          find src-tauri/target -name "bundle" -type d 2>/dev/null | head -20 || echo "(none)"
           echo ""
           echo "--- target/release contents ---"
-          ls -la src-tauri/target/release/ 2>/dev/null | head -30 || echo "(not found)"
+          ls src-tauri/target/release/ 2>/dev/null | head -20 || echo "(not found)"
           echo ""
           TRIPLE_DIR="src-tauri/target/${{ matrix.target }}/release"
           echo "--- $TRIPLE_DIR contents ---"
-          ls -la "$TRIPLE_DIR" 2>/dev/null | head -30 || echo "(not found)"
+          ls "$TRIPLE_DIR" 2>/dev/null | head -20 || echo "(not found)"
           echo ""
           for bundle in "src-tauri/target/release/bundle" "src-tauri/target/${{ matrix.target }}/release/bundle"; do
             if [ -d "$bundle" ]; then
-              echo "=== BUNDLE DIR FOUND: $bundle ==="
-              find "$bundle" -type f 2>/dev/null | head -80
-              echo "--- END: $bundle ---"
+              echo "=== BUNDLE DIR: $bundle ==="
+              ls "$bundle" 2>/dev/null
+              find "$bundle" -maxdepth 2 -type f 2>/dev/null | grep -E '\.(deb|AppImage|dmg|tar\.gz|sig|exe|msi)$' || echo "  (no installer files at depth<=2)"
+              echo "--- END ---"
             fi
           done
           echo ""
-          echo "=== Any installer-like files anywhere under target? ==="
-          find src-tauri/target -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) 2>/dev/null | head -50 || echo "(none)"
+          echo "=== Installer files anywhere ==="
+          find src-tauri/target -maxdepth 5 -type f 2>/dev/null | grep -E '\.(deb|AppImage|dmg|tar\.gz|sig|exe|msi)$' | head -30 || echo "(none found)"
           echo ""
           echo "=== Diagnostic complete ==="
-          exit 0
+          true
 
       # ------------------------------------------------------------
       # 收集产物（各平台分别处理）
