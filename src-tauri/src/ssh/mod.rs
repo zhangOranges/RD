@@ -182,3 +182,26 @@ pub async fn connection_state(
         None => Ok("disconnected".to_string()),
     }
 }
+
+/// Test an SSH connection without registering it in state.
+///
+/// Connects, authenticates, resolves the home dir, then immediately
+/// disconnects. Used by the "Test Connection" button in the host dialog.
+#[tauri::command]
+pub async fn test_connection(
+    params: ConnectParams,
+) -> Result<ConnectResult, String> {
+    let result = ConnectionHandle::connect(&params, None).await;
+    match result {
+        Ok(conn) => {
+            let connect_result = ConnectResult {
+                home_dir: conn.home_dir.clone().unwrap_or_else(|| "~".to_string()),
+                fingerprint: conn.fingerprint.clone().unwrap_or_default(),
+            };
+            // Immediately disconnect — we only wanted to verify connectivity.
+            conn.disconnect().await.ok();
+            Ok(connect_result)
+        }
+        Err(e) => Err(e.into()),
+    }
+}

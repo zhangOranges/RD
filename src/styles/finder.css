@@ -1562,9 +1562,19 @@ html[data-theme="dark"] body {
 
 .dialog-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding-top: 4px;
+}
+
+.dialog-footer-right {
+  display: flex;
+  gap: 8px;
+}
+
+.is-spin {
+  animation: spin 1s linear infinite;
 }
 
 /* ---------- 按钮体系：多态 + 科技感 ---------- */

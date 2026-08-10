@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { X, PlugZap, Loader2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { useHostStore } from '../store/hostStore';
 import { useToastStore } from './Toast';
 import type {
@@ -74,6 +75,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
     return { ...emptyForm(), category_id: presetCategoryId };
   });
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -142,6 +144,66 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
       pushToast('error', `保存失败：${formatErr(err)}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTestConnection() {
+    if (!form.host.trim() || !form.username.trim()) {
+      pushToast('warning', '请先填写主机地址和用户名');
+      return;
+    }
+    // 编辑模式下凭据可能留空（表示不修改），此时尝试用已保存的凭据测试
+    let password: string | null = form.password || null;
+    let privateKey: string | null = form.private_key || null;
+    if (isEdit && !password && !privateKey) {
+      try {
+        if (form.auth_type === 'password') {
+          password = await invoke<string | null>('get_credential', {
+            hostId: host!.id,
+            credType: 'password',
+          });
+        } else {
+          privateKey = await invoke<string | null>('get_credential', {
+            hostId: host!.id,
+            credType: 'private_key',
+          });
+        }
+      } catch {
+        // ignore
+      }
+      if (!password && !privateKey) {
+        pushToast('warning', '请填写密码或私钥后再测试');
+        return;
+      }
+    } else if (!isEdit) {
+      if (form.auth_type === 'password' && !password) {
+        pushToast('warning', '请填写密码后再测试');
+        return;
+      }
+      if (form.auth_type === 'key' && !privateKey?.trim()) {
+        pushToast('warning', '请粘贴私钥后再测试');
+        return;
+      }
+    }
+
+    setTesting(true);
+    try {
+      const result = await invoke<{ home_dir: string; fingerprint: string }>('test_connection', {
+        params: {
+          host_id: host?.id ?? 'test',
+          host: form.host.trim(),
+          port: Number(form.port),
+          username: form.username.trim(),
+          auth_type: form.auth_type,
+          password,
+          private_key: privateKey,
+        },
+      });
+      pushToast('success', `连接成功，主目录：${result.home_dir}`);
+    } catch (err) {
+      pushToast('error', `连接失败：${formatErr(err)}`);
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -336,12 +398,24 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
           </div>
 
           <div className="dialog-footer">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              取消
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleTestConnection}
+              disabled={testing || saving}
+              title="测试是否能连接到该主机"
+            >
+              {testing ? <Loader2 size={14} className="is-spin" /> : <PlugZap size={14} />}
+              {testing ? '测试中…' : '测试连接'}
             </button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? '保存中…' : '保存'}
-            </button>
+            <div className="dialog-footer-right">
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                取消
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={saving || testing}>
+                {saving ? '保存中…' : '保存'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

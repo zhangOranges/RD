@@ -31,6 +31,7 @@ pub fn run() {
             ssh::connect_host,
             ssh::disconnect_host,
             ssh::connection_state,
+            ssh::test_connection,
             ssh::exec::get_server_stats,
             sftp::sftp_list_dir,
             sftp::sftp_mkdir,

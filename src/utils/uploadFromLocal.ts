@@ -169,6 +169,24 @@ export async function uploadLocalItemsToRemote(
   }
   flat.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.relPath.localeCompare(b.relPath));
 
+  // 预创建所有文件任务为 queued 状态，让用户立刻在传输队列中看到全部待上传文件
+  const taskIdMap = new Map<string, string>();
+  for (const item of flat) {
+    if (item.isDir) continue;
+    const tid = genTaskId();
+    taskIdMap.set(item.relPath, tid);
+    createTransferTask({
+      id: tid,
+      kind: 'upload',
+      hostId,
+      name: item.name,
+      remotePath: joinRemotePath(remoteCurrentPath, item.relPath),
+      localPath: localBaseDir,
+      totalBytes: item.size || 0,
+      status: 'queued',
+    });
+  }
+
   for (const item of flat) {
     const remotePath = joinRemotePath(remoteCurrentPath, item.relPath);
 
@@ -209,7 +227,13 @@ export async function uploadLocalItemsToRemote(
         }
       }
     }
-    if (!needWrite) continue;
+
+    const uploadTaskId = taskIdMap.get(item.relPath)!;
+    if (!needWrite) {
+      // 被跳过的文件：标记为已取消
+      cancelTransferTask(uploadTaskId);
+      continue;
+    }
 
     // 确保父目录存在（嵌套）
     if (item.relPath.includes('/')) {
@@ -221,19 +245,10 @@ export async function uploadLocalItemsToRemote(
       } catch { /* ignore */ }
     }
 
-    const uploadTaskId = genTaskId();
     const displayName = item.name;
     let fileCanceled = false;
-    createTransferTask({
-      id: uploadTaskId,
-      kind: 'upload',
-      hostId,
-      name: displayName,
-      remotePath,
-      localPath: localBaseDir,
-      totalBytes: item.size || 0,
-      status: 'running',
-    });
+    // 从 queued 切换到 running
+    useTransferStore.getState().setTaskStatus(uploadTaskId, 'running');
 
     try {
       await readLocalFileChunked(hostId, item.fullPath, async (chunk, offset, total, isFirst) => {
