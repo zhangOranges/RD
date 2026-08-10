@@ -337,13 +337,16 @@ jobs:
         run: |
           cd all-artifacts
           echo "=== Before flatten ==="
-          find . -type f -not -name 'latest.json' | head -30
+          find . -type f | head -30
           # 将所有子目录中的文件复制到根目录
-          find . -mindepth 2 -type f -exec cp {} . \; 2>/dev/null || true
+          while IFS= read -r -d '' file; do
+            fname=$(basename "$file")
+            cp "$file" "./$fname"
+          done < <(find . -mindepth 2 -type f -not -path './manifests/*' -print0)
           # 清理子目录（保留 manifests/）
           find . -mindepth 1 -maxdepth 1 -type d -not -name 'manifests' -exec rm -rf {} + 2>/dev/null || true
           echo "=== After flatten ==="
-          ls -lh . | grep -v '^d'
+          ls -lh .
 
       - name: Generate latest.json updater manifest
         run: |
@@ -405,6 +408,14 @@ jobs:
             all-artifacts/*.tar.gz
             all-artifacts/*.sig
             all-artifacts/latest.json
+            all-artifacts/*/*.exe
+            all-artifacts/*/*.msi
+            all-artifacts/*/*.deb
+            all-artifacts/*/*.AppImage
+            all-artifacts/*/*.dmg
+            all-artifacts/*/*.tar.gz
+            all-artifacts/*/*.sig
+            all-artifacts/*/latest.json
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
