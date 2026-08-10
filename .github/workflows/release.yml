@@ -83,10 +83,20 @@ jobs:
         with:
           workspaces: 'src-tauri -> target'
 
+      - name: Write signing key file
+        shell: bash
+        run: |
+          echo "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" > /tmp/tauri-signing.key
+          echo "Key file written:"
+          head -c 100 /tmp/tauri-signing.key
+          echo "..."
+          wc -c /tmp/tauri-signing.key
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} --verbose
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PATH: /tmp/tauri-signing.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Verify bundle output (Linux)
