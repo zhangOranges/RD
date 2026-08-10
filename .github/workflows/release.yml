@@ -203,6 +203,11 @@ jobs:
             echo "=== Copying installers and sig files ==="
             while IFS= read -r -d '' file; do
               fname=$(basename "$file")
+              # 排除 deb 包内部的 control.tar.gz / data.tar.gz
+              if [ "$fname" = "control.tar.gz" ] || [ "$fname" = "data.tar.gz" ]; then
+                echo "  Skipping (internal deb file): $fname"
+                continue
+              fi
               echo "  Copying $fname"
               cp "$file" "$out/"
             done < <(find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) -print0)
