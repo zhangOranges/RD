@@ -182,13 +182,6 @@ export function TabBar() {
     }
   }
 
-  function newSameHostTab(hostId: string) {
-    setCtxMenu(null);
-    // 当前应用每个主机只支持一个连接，因此切换到该主机的标签
-    selectHost(hostId);
-    pushToast('info', '该主机已存在标签，已切换至此标签');
-  }
-
   const ctxHost = ctxMenu ? hosts.find((h) => h.id === ctxMenu.hostId) : undefined;
   const terminalVisible = !!selectedHostId && !!terminalVisibleMap[selectedHostId];
 
@@ -354,14 +347,6 @@ export function TabBar() {
             onClick={() => void copyConnectionInfo(ctxHost.id)}
           >
             <Copy size={11} /> 复制连接信息
-          </button>
-          <button
-            className="host-menu-item"
-            type="button"
-            role="menuitem"
-            onClick={() => newSameHostTab(ctxHost.id)}
-          >
-            <Plus size={11} /> 新建同主机标签
           </button>
         </div>,
         document.body,

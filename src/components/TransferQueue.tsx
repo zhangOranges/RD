@@ -28,6 +28,30 @@ export function TransferQueue() {
   return (
     <section className="rp-section" onContextMenu={(e) => e.preventDefault()}>
       <div className="rp-section-title">传输队列</div>
+      <div className="rp-clear-actions">
+        <button
+          type="button"
+          className="rp-clear-btn"
+          disabled={!hasFinished}
+          onClick={() => clearFinished()}
+        >
+          清除已完成
+        </button>
+        <button
+          type="button"
+          className="rp-clear-btn rp-clear-all-btn"
+          disabled={tasks.length === 0}
+          onClick={() => {
+            if (tasks.some((t) => t.status === 'running' || t.status === 'queued')) {
+              if (!window.confirm('有正在进行的传输任务，确定要清空全部吗？')) return;
+            }
+            clearAll();
+          }}
+        >
+          <Trash2 size={11} />
+          清空全部
+        </button>
+      </div>
       <div className="rp-tabs">
         <button
           type="button"
@@ -55,31 +79,6 @@ export function TransferQueue() {
             <TaskItem key={t.id} task={t} onCancel={() => cancelTask(t.id)} />
           ))
         )}
-      </div>
-
-      <div className="rp-clear-actions">
-        <button
-          type="button"
-          className="rp-clear-btn"
-          disabled={!hasFinished}
-          onClick={() => clearFinished()}
-        >
-          清除已完成
-        </button>
-        <button
-          type="button"
-          className="rp-clear-btn rp-clear-all-btn"
-          disabled={tasks.length === 0}
-          onClick={() => {
-            if (tasks.some((t) => t.status === 'running' || t.status === 'queued')) {
-              if (!window.confirm('有正在进行的传输任务，确定要清空全部吗？')) return;
-            }
-            clearAll();
-          }}
-        >
-          <Trash2 size={11} />
-          清空全部
-        </button>
       </div>
     </section>
   );
@@ -129,9 +128,12 @@ function TaskItem({ task, onCancel }: { task: TransferTask; onCancel: () => void
       : 0;
 
   const isRunning = task.status === 'running';
+  const isQueued = task.status === 'queued';
 
   let statusNode: React.ReactNode;
-  if (task.status === 'running' || task.status === 'queued') {
+  if (isQueued) {
+    statusNode = <span className="rp-task-status queued">等待中</span>;
+  } else if (isRunning) {
     statusNode = <span className="rp-task-status running">{pct}%</span>;
   } else if (task.status === 'completed') {
     statusNode = (
@@ -169,7 +171,7 @@ function TaskItem({ task, onCancel }: { task: TransferTask; onCancel: () => void
             <FolderOpen size={12} />
           </button>
         )}
-        {isRunning && (
+        {(isRunning || isQueued) && (
           <button
             type="button"
             className="rp-task-cancel"
@@ -180,7 +182,7 @@ function TaskItem({ task, onCancel }: { task: TransferTask; onCancel: () => void
           </button>
         )}
       </div>
-      <div className="rp-task-progress">
+      <div className={`rp-task-progress${isQueued ? ' is-queued' : ''}`}>
         <div className="rp-task-progress-fill" style={{ width: `${pct}%` }} />
       </div>
       <div className="rp-task-info">

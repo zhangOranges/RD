@@ -61,6 +61,45 @@ export function setUpdateMirror(mirror: UpdateMirror) {
   }
 }
 
+/**
+ * 并行测试所有镜像源对 latest.json 的访问延迟，返回延迟最低的镜像。
+ * 每个镜像只发一个 HEAD 请求（不下载 body），带 6 秒超时。
+ * 所有镜像都失败时回退到用户当前设定的源。
+ */
+async function pickFastestMirror(
+  endpoints: readonly string[],
+  userMirror: UpdateMirror,
+): Promise<UpdateMirror> {
+  const allMirrors = UPDATE_MIRROR_OPTIONS.map((o) => o.id);
+  const results = await Promise.all(
+    allMirrors.map(async (m) => {
+      const url = m === 'github' ? endpoints[0] : applyMirror(endpoints[0], m);
+      const start = performance.now();
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 6000);
+        const resp = await fetch(url, {
+          method: 'HEAD',
+          cache: 'no-store',
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        const elapsed = performance.now() - start;
+        // HEAD 可能返回 405（部分镜像不支持 HEAD），但只要能连上就算可用
+        return { mirror: m, elapsed, ok: resp.ok || resp.status === 405 };
+      } catch {
+        return { mirror: m, elapsed: Infinity, ok: false };
+      }
+    }),
+  );
+
+  // 过滤出能连通的，按延迟升序取最快
+  const reachable = results.filter((r) => r.ok && r.elapsed < Infinity);
+  if (reachable.length === 0) return userMirror;
+  reachable.sort((a, b) => a.elapsed - b.elapsed);
+  return reachable[0].mirror;
+}
+
 /** 将 GitHub 下载 URL 根据选择的镜像源进行转换 */
 function applyMirror(url: string, mirror: UpdateMirror): string {
   if (mirror === 'github') return url;
@@ -246,10 +285,15 @@ export function useAppUpdater() {
         const endpoints =
           tauriEndpoints && tauriEndpoints.length > 0 ? tauriEndpoints : defaultEndpoints;
 
-        const mirrorNow = getUpdateMirror();
+        // 自动检查更新时测速选最优镜像（手动点击检查也走此逻辑）
+        const userMirror = getUpdateMirror();
+        const fastestMirror = await pickFastestMirror(endpoints, userMirror);
+        // 更新 state 中的 mirror 为测速结果，用户可在对话框/设置中手动覆盖
+        setState((s) => ({ ...s, mirror: fastestMirror }));
+
         const { sizes, notes, version: metaVersion } = await fetchLatestMeta(
           endpoints,
-          mirrorNow,
+          fastestMirror,
         );
         platformSizesRef.current = sizes;
 

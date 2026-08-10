@@ -246,6 +246,14 @@
 .rp-task-status.error { color: var(--danger); }
 .rp-task-status.canceled { color: var(--text-tertiary); }
 .rp-task-status.running { color: var(--accent); }
+.rp-task-status.queued { color: var(--warning); }
+.rp-task-progress.is-queued {
+  background: color-mix(in srgb, var(--warning, #FF9F0A) 20%, var(--divider));
+}
+.rp-task-progress.is-queued .rp-task-progress-fill {
+  background: var(--warning, #FF9F0A);
+  opacity: 0.3;
+}
 .rp-empty {
   padding: 20px;
   text-align: center;
