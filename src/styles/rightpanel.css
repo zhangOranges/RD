@@ -70,23 +70,6 @@
   width: 6px; height: 6px; border-radius: 50%;
   background: currentColor;
 }
-.rp-disconnect-btn {
-  margin: 6px 14px 10px;
-  height: 26px;
-  border: none;
-  border-radius: var(--radius-control);
-  background: linear-gradient(135deg, #FF3B30 0%, #FF6B5B 100%);
-  color: white;
-  font-size: 11px;
-  cursor: pointer;
-  transition: filter 0.15s;
-}
-.rp-disconnect-btn:hover { filter: brightness(0.9); }
-.rp-disconnect-btn:disabled {
-  background: var(--text-quaternary);
-  cursor: default;
-  opacity: 0.5;
-}
 .rp-empty-section {
   padding: 16px 14px;
   color: var(--text-tertiary);
@@ -146,38 +129,6 @@
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
   border-radius: 2px;
   transition: width 0.3s ease;
-}
-
-/* 快捷操作 */
-.rp-quick-grid {
-  padding: 0 10px 10px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-.rp-quick-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 10px 4px;
-  border: 1px solid var(--divider);
-  border-radius: var(--radius-control);
-  background: var(--bg-content);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 10px;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-.rp-quick-btn:hover:not(:disabled) {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.rp-quick-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 /* 传输队列 */

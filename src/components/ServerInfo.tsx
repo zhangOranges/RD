@@ -44,14 +44,12 @@ function formatPercent(used: number, total: number): string {
 
 /**
  * 右侧面板 - 服务器信息区
- * 展示当前选中主机的连接参数、连接状态、在线时长、服务器硬件信息，
- * 以及断开连接按钮。
+ * 展示当前选中主机的连接参数、连接状态、在线时长、服务器硬件信息。
  */
 export function ServerInfo() {
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const hosts = useHostStore((s) => s.hosts);
   const connectionStates = useHostStore((s) => s.connectionStates);
-  const disconnectHost = useHostStore((s) => s.disconnectHost);
 
   const host = selectedHostId ? hosts.find((h) => h.id === selectedHostId) : undefined;
   const connState = selectedHostId ? connectionStates[selectedHostId] : undefined;
@@ -235,14 +233,6 @@ export function ServerInfo() {
         <span className="rp-conn-dot" />
         <span>{isConnected ? '已连接' : '未连接'}</span>
       </div>
-      <button
-        type="button"
-        className="rp-disconnect-btn"
-        disabled={!isConnected}
-        onClick={() => void disconnectHost(selectedHostId)}
-      >
-        断开连接
-      </button>
     </section>
   );
 }

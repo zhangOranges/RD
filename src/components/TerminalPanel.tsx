@@ -134,6 +134,8 @@ export function TerminalPanel() {
   const snapshotsRef = useRef<Map<string, string[]>>(new Map());
   // 每个标签是否已完成初始路径同步
   const initCwdSyncedRef = useRef<Map<string, boolean>>(new Map());
+  // 每个标签的最新 cwd 快照（用于切换标签时同步文件浏览器）
+  const tabCwdRef = useRef<Map<string, string>>(new Map());
   // 标记忽略下一个 cwd-changed 事件（终端刚打开时的初始 cwd 不应覆盖文件浏览器）
   const ignoreFirstCwdRef = useRef<Set<string>>(new Set());
   // 标记 PTY 是否刚打开，用于过滤旧会话的 pty://closed 事件
@@ -301,20 +303,35 @@ export function TerminalPanel() {
         requestFit(tabId);
         ignoreFirstCwdRef.current.add(key);
         if (isNew) {
-          // 新建 PTY 会话：重置该主机的 pty_cd 路径记录
-          lastPtyCdPath.delete(hostId);
+          // 新建 PTY 会话：重置该标签的 pty_cd 路径记录
+          lastPtyCdPath.delete(key);
           initCwdSyncedRef.current.set(key, false);
           setTimeout(() => {
             if (!tabsRef.current.has(tabId)) return;
-            const fState = useFileStore.getState();
-            const targetPath = fState.currentPath;
-            if (targetPath && lastPtyCdPath.get(hostId) !== targetPath) {
-              lastPtyCdPath.set(hostId, targetPath);
-              void invoke('pty_cd', { hostId, tabId, path: targetPath }).catch(
-                () => {},
-              );
-            }
-            initCwdSyncedRef.current.set(key, true);
+            // 优先从路径缓存恢复该标签上次目录（跨会话持久化）；
+            // 缓存不存在时回退到文件浏览器当前路径
+            void (async () => {
+              let targetPath: string | null = null;
+              try {
+                const cached = await invoke<string | null>('get_path_cache', {
+                  hostId,
+                  tabId,
+                });
+                if (cached && cached.startsWith('/')) targetPath = cached;
+              } catch {
+                /* ignore */
+              }
+              if (!targetPath) {
+                targetPath = useFileStore.getState().currentPath;
+              }
+              if (targetPath && lastPtyCdPath.get(key) !== targetPath) {
+                lastPtyCdPath.set(key, targetPath);
+                void invoke('pty_cd', { hostId, tabId, path: targetPath }).catch(
+                  () => {},
+                );
+              }
+              initCwdSyncedRef.current.set(key, true);
+            })();
           }, 500);
         } else {
           initCwdSyncedRef.current.set(key, true);
@@ -349,15 +366,17 @@ export function TerminalPanel() {
       inst.term.write(new Uint8Array(data));
     });
 
-    // 工作目录变更 → 同步到文件浏览器（仅活动标签）
+    // 工作目录变更 → 记录该标签 cwd 快照；若是活动标签则同步到文件浏览器
     const cwdListenerPromise = listen<PtyCwdPayload>(
       'pty://cwd-changed',
       (event) => {
         const { host_id, tab_id, path } = event.payload;
         if (currentHostRef.current !== host_id) return;
+        const key = makeTabKey(host_id, tab_id);
+        // 无论是否活动标签，都更新该标签的 cwd 快照（切换标签时需要用到）
+        tabCwdRef.current.set(key, path);
         const activeTab = useUIStore.getState().activeTerminalTab[host_id];
         if (tab_id !== activeTab) return;
-        const key = makeTabKey(host_id, tab_id);
         if (!initCwdSyncedRef.current.get(key)) return;
         if (ignoreFirstCwdRef.current.has(key)) {
           ignoreFirstCwdRef.current.delete(key);
@@ -491,7 +510,7 @@ export function TerminalPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedHostId, isConnected]);
 
-  /* ---------- Effect 3：活动标签变化 —— 显示/隐藏 + fit ---------- */
+  /* ---------- Effect 3：活动标签变化 —— 显示/隐藏 + fit + cwd 同步 ---------- */
   useEffect(() => {
     if (!activeTab) {
       setActiveDisconnected(false);
@@ -504,6 +523,18 @@ export function TerminalPanel() {
     requestAnimationFrame(() => requestFit(activeTab));
     // 更新断开状态
     setActiveDisconnected(disconnectedTabsRef.current.has(activeTab));
+    // 切换标签时同步文件浏览器到新活动标签的 cwd
+    // syncFromTerminalCwd 内部会设置 syncFromTerminal 标志，避免 navigate 又回推 pty_cd 形成回环
+    if (selectedHostId) {
+      const key = makeTabKey(selectedHostId, activeTab);
+      if (initCwdSyncedRef.current.get(key)) {
+        const cwd = tabCwdRef.current.get(key);
+        if (cwd) {
+          void useFileStore.getState().syncFromTerminalCwd(selectedHostId, cwd);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   /* ---------- Effect 4：terminalHeight / 可见性变化时重新 fit ---------- */
@@ -538,8 +569,10 @@ export function TerminalPanel() {
     const key = makeTabKey(hostId, tabId);
     snapshotsRef.current.delete(key);
     initCwdSyncedRef.current.delete(key);
+    tabCwdRef.current.delete(key);
     ignoreFirstCwdRef.current.delete(key);
     justOpenedRef.current.delete(key);
+    lastPtyCdPath.delete(key);
     disconnectedTabsRef.current.delete(tabId);
     // 从 store 移除（会切换活动标签到相邻标签）
     removeTerminalTab(hostId, tabId);

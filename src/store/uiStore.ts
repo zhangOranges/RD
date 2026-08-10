@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ToolType = 'sftp' | 'terminal' | 'port-forward' | 'remote-cmd' | 'keys' | 'plugins';
+export type ToolType = 'sftp' | 'port-forward' | 'keys' | 'plugins';
 
 // ---- 持久化：终端显示/隐藏状态按主机隔离 ----
 const TERMINAL_VISIBLE_KEY = 'terminal_visible_map';
@@ -20,6 +20,40 @@ function loadTerminalVisible(): Record<string, boolean> {
 function saveTerminalVisible(map: Record<string, boolean>) {
   try {
     localStorage.setItem(TERMINAL_VISIBLE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+// ---- 持久化：终端标签列表 + 活动标签（按主机隔离）----
+// 让 tab ID 跨会话稳定，从而 path_cache 能按 tabId 恢复各自目录
+const TERMINAL_TABS_KEY = 'terminal_tabs_map';
+
+interface PersistedTabs {
+  tabs: Record<string, string[]>;
+  active: Record<string, string>;
+}
+
+function loadTerminalTabs(): PersistedTabs {
+  try {
+    const raw = localStorage.getItem(TERMINAL_TABS_KEY);
+    if (!raw) return { tabs: {}, active: {} };
+    const obj = JSON.parse(raw);
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+      return { tabs: {}, active: {} };
+    }
+    return {
+      tabs: obj.tabs ?? {},
+      active: obj.active ?? {},
+    };
+  } catch {
+    return { tabs: {}, active: {} };
+  }
+}
+
+function saveTerminalTabs(tabs: Record<string, string[]>, active: Record<string, string>) {
+  try {
+    localStorage.setItem(TERMINAL_TABS_KEY, JSON.stringify({ tabs, active }));
   } catch {
     /* ignore */
   }
@@ -82,6 +116,8 @@ interface UIState {
   getActiveTerminalTab: (hostId: string) => string | null;
   // 设置主机当前活动标签
   setActiveTerminalTab: (hostId: string, tabId: string) => void;
+  // 清除某主机的终端标签持久化数据（删除主机时调用）
+  clearTerminalTabsForHost: (hostId: string) => void;
 }
 
 const MIN_SIDEBAR = 160;
@@ -90,6 +126,8 @@ const MIN_TERMINAL = 80;
 const MAX_TERMINAL = 600;
 const MIN_RIGHT_PANEL = 220;
 const MAX_RIGHT_PANEL = 420;
+
+const _persistedTabs = loadTerminalTabs();
 
 export const useUIStore = create<UIState>((set, get) => ({
   sidebarWidth: 220,
@@ -105,8 +143,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   rightPanelVisible: true,
   terminalFullscreen: false,
   sidebarSearch: '',
-  terminalTabs: {},
-  activeTerminalTab: {},
+  terminalTabs: _persistedTabs.tabs,
+  activeTerminalTab: _persistedTabs.active,
 
   setSidebarWidth: (w) =>
     set({
@@ -150,20 +188,20 @@ export const useUIStore = create<UIState>((set, get) => ({
   addTerminalTab: (hostId) => {
     const tabId = 't_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const existing = get().terminalTabs[hostId];
+    let nextTabs: Record<string, string[]>;
+    let nextActive: Record<string, string>;
     if (!existing || existing.length === 0) {
       // 第一个标签固定为 "default"，保持与旧单标签会话兼容
-      const tabs = ['default'];
-      set((s) => ({
-        terminalTabs: { ...s.terminalTabs, [hostId]: tabs },
-        activeTerminalTab: { ...s.activeTerminalTab, [hostId]: 'default' },
-      }));
+      nextTabs = { ...get().terminalTabs, [hostId]: ['default'] };
+      nextActive = { ...get().activeTerminalTab, [hostId]: 'default' };
+      set({ terminalTabs: nextTabs, activeTerminalTab: nextActive });
+      saveTerminalTabs(nextTabs, nextActive);
       return 'default';
     }
-    const tabs = [...existing, tabId];
-    set((s) => ({
-      terminalTabs: { ...s.terminalTabs, [hostId]: tabs },
-      activeTerminalTab: { ...s.activeTerminalTab, [hostId]: tabId },
-    }));
+    nextTabs = { ...get().terminalTabs, [hostId]: [...existing, tabId] };
+    nextActive = { ...get().activeTerminalTab, [hostId]: tabId };
+    set({ terminalTabs: nextTabs, activeTerminalTab: nextActive });
+    saveTerminalTabs(nextTabs, nextActive);
     return tabId;
   },
   removeTerminalTab: (hostId, tabId) => {
@@ -185,12 +223,27 @@ export const useUIStore = create<UIState>((set, get) => ({
           nextActive[hostId] = fallback;
         }
       }
+      saveTerminalTabs(nextTabs, nextActive);
       return { terminalTabs: nextTabs, activeTerminalTab: nextActive };
     });
   },
   getActiveTerminalTab: (hostId) => get().activeTerminalTab[hostId] ?? null,
   setActiveTerminalTab: (hostId, tabId) =>
-    set((s) => ({ activeTerminalTab: { ...s.activeTerminalTab, [hostId]: tabId } })),
+    set((s) => {
+      const nextActive = { ...s.activeTerminalTab, [hostId]: tabId };
+      saveTerminalTabs(s.terminalTabs, nextActive);
+      return { activeTerminalTab: nextActive };
+    }),
+  clearTerminalTabsForHost: (hostId) => {
+    set((s) => {
+      const nextTabs = { ...s.terminalTabs };
+      const nextActive = { ...s.activeTerminalTab };
+      delete nextTabs[hostId];
+      delete nextActive[hostId];
+      saveTerminalTabs(nextTabs, nextActive);
+      return { terminalTabs: nextTabs, activeTerminalTab: nextActive };
+    });
+  },
 }));
 
 export const SIDEBAR_LIMITS = { min: MIN_SIDEBAR, max: MAX_SIDEBAR };

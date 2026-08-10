@@ -3,9 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   ServerCog,
   FolderTree,
-  Terminal,
   Network,
-  SquareTerminal,
   KeyRound,
   Puzzle,
 } from 'lucide-react';
@@ -85,12 +83,14 @@ export function ContentArea() {
         typeof p === 'string' && p.length > 0 && p.startsWith('/');
 
       // 2) 读取路径缓存（仅当主机级开启目录记忆时）
+      // 读活动 tab 的缓存路径，使文件浏览器跟随活动 tab 恢复目录
       let cachedPath: string | null = null;
       if (rememberDir) {
         try {
+          const activeTabId = useUIStore.getState().getActiveTerminalTab(hostId) ?? 'default';
           cachedPath = await invoke<string | null>('get_path_cache', {
             hostId,
-            tabId: 'default',
+            tabId: activeTabId,
           });
         } catch {
           cachedPath = null;
@@ -293,17 +293,9 @@ export function ContentArea() {
   let placeholderIcon: React.ReactNode = <FolderTree size={48} className="content-placeholder-icon" />;
   let placeholderTitle = '未知工具';
   switch (activeTool) {
-    case 'terminal':
-      placeholderIcon = <Terminal size={48} className="content-placeholder-icon" />;
-      placeholderTitle = 'SSH 终端全屏模式（开发中）';
-      break;
     case 'port-forward':
       placeholderIcon = <Network size={48} className="content-placeholder-icon" />;
       placeholderTitle = '端口转发（开发中）';
-      break;
-    case 'remote-cmd':
-      placeholderIcon = <SquareTerminal size={48} className="content-placeholder-icon" />;
-      placeholderTitle = '远程命令（开发中）';
       break;
     case 'keys':
       placeholderIcon = <KeyRound size={48} className="content-placeholder-icon" />;

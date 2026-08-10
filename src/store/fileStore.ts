@@ -96,9 +96,16 @@ export function isTextFile(entry: FileEntry): boolean {
 // 用户主动导航（文件浏览器/地址栏）→ navigate → pty_cd → 终端 cwd 同步
 let syncFromTerminal = false;
 
-// 记录每个主机最后一次通过 pty_cd 设置的路径，避免切换主机时重复发送相同的 cd 命令
+// 记录每个标签最后一次通过 pty_cd 设置的路径，避免重复发送相同的 cd 命令
 // （PTY 会回显 cd 命令，多次切换会导致终端里出现大量重复 cd 行）
+// key 为 `${hostId}__${tabId}`，按标签维度独立记录，避免多 tab 之间相互干扰
+// （若按 host 维度共用一条记录，新建 tab 时会误判"已发过该路径"而跳过 cd，
+//  导致新 tab 与文件浏览器目录不一致）
 const lastPtyCdPath = new Map<string, string>();
+
+function ptyCdKey(hostId: string, tabId: string | null): string {
+  return `${hostId}__${tabId ?? 'default'}`;
+}
 
 function parentPath(path: string): string {
   if (!path || path === '/') return '/';
@@ -182,8 +189,10 @@ export const useFileStore = create<FileState>((set, get) => ({
       });
       useUIStore.getState().setCurrentPath(path);
       // 写入路径缓存（失败不阻断流程）
+      // 按活动 tab ID 存储，使每个标签独立记忆各自目录
       try {
-        await invoke('set_path_cache', { hostId, tabId: 'default', path });
+        const activeTabId = useUIStore.getState().getActiveTerminalTab(hostId) ?? 'default';
+        await invoke('set_path_cache', { hostId, tabId: activeTabId, path });
       } catch {
         // 路径缓存写入失败视为非致命
       }
@@ -194,9 +203,10 @@ export const useFileStore = create<FileState>((set, get) => ({
           const activeTab = useUIStore.getState().getActiveTerminalTab(hostId);
           const isOpen = await invoke<boolean>('pty_is_open', { hostId, tabId: activeTab });
           if (isOpen) {
-            // 同一主机重复导航到相同路径时跳过 pty_cd，避免终端出现重复 cd 回显
-            if (lastPtyCdPath.get(hostId) !== path) {
-              lastPtyCdPath.set(hostId, path);
+            // 同一标签重复导航到相同路径时跳过 pty_cd，避免终端出现重复 cd 回显
+            const cdKey = ptyCdKey(hostId, activeTab);
+            if (lastPtyCdPath.get(cdKey) !== path) {
+              lastPtyCdPath.set(cdKey, path);
               await invoke('pty_cd', { hostId, tabId: activeTab, path });
             }
           }

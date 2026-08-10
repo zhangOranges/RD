@@ -16,9 +16,7 @@ import {
   PowerOff,
   Copy,
   FolderTree,
-  SquareTerminal,
   Network,
-  Terminal,
   KeyRound,
   Puzzle,
   Search,
@@ -98,9 +96,7 @@ export function Sidebar() {
   // ========== 工具菜单配置 ==========
   const tools: { id: ToolType; label: string; icon: typeof FolderTree }[] = [
     { id: 'sftp', label: 'SFTP', icon: FolderTree },
-    { id: 'terminal', label: 'SSH 终端', icon: SquareTerminal },
     { id: 'port-forward', label: '端口转发', icon: Network },
-    { id: 'remote-cmd', label: '远程命令', icon: Terminal },
     { id: 'keys', label: '密钥管理', icon: KeyRound },
     { id: 'plugins', label: '插件中心', icon: Puzzle },
   ];
@@ -232,6 +228,8 @@ export function Sidebar() {
     if (!ok) return;
     try {
       await removeHost(host.id);
+      // 清理该主机的终端标签持久化数据
+      useUIStore.getState().clearTerminalTabsForHost(host.id);
       pushToast('success', '已删除主机');
     } catch (err) {
       pushToast('error', `删除失败：${formatErr(err)}`);
