@@ -1,5 +1,14 @@
 import { createPortal } from 'react-dom';
-import { X, Sparkles, Download, ChevronRight, Check } from 'lucide-react';
+import {
+  X,
+  Sparkles,
+  Download,
+  ChevronRight,
+  Check,
+  PackageCheck,
+  DownloadCloud,
+  RefreshCw,
+} from 'lucide-react';
 import {
   useAppUpdater,
   UPDATE_MIRROR_OPTIONS,
@@ -99,11 +108,35 @@ export function UpdateDialog() {
   const notesHTML = renderNotes(updater.releaseNotes);
   const hasRealTotal = updater.totalMB && updater.totalMB > 0;
 
+  const status = updater.status;
+  const isAvailable = status === 'available';
+  const isDownloading = status === 'downloading';
+  const isDownloaded = status === 'downloaded'; // 下载完成，待确认安装
+  const isInstalling = status === 'installing';
+
+  // 标题
+  let title = '发现新版本';
+  if (isDownloading) title = '正在下载更新';
+  else if (isDownloaded) title = '更新包已下载完成';
+  else if (isInstalling) title = '正在安装更新';
+
+  // 安装中禁用关闭按钮（安装过程不可打断）；下载中允许关闭，继续后台下载
+  const closeDisabled = isInstalling;
+
+  const handleDownload = () => {
+    void updater.download();
+  };
+
   const handleInstall = () => {
     void updater.install();
   };
 
+  const handleInstallLater = () => {
+    updater.installLater();
+  };
+
   const handleClose = () => {
+    if (closeDisabled) return;
     updater.hideDialog();
   };
 
@@ -118,9 +151,17 @@ export function UpdateDialog() {
       <div className="dialog dialog-update" onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <div className="update-dialog-title-wrap">
-            <Sparkles size={18} className="update-dialog-spark" />
+            {isDownloaded ? (
+              <PackageCheck size={18} className="update-dialog-spark update-dialog-icon-ready" />
+            ) : isDownloading ? (
+              <RefreshCw size={18} className="update-dialog-spark spin" />
+            ) : isInstalling ? (
+              <DownloadCloud size={18} className="update-dialog-spark" />
+            ) : (
+              <Sparkles size={18} className="update-dialog-spark" />
+            )}
             <h2 id="update-dialog-title" className="dialog-title">
-              发现新版本
+              {title}
             </h2>
           </div>
           <button
@@ -128,12 +169,50 @@ export function UpdateDialog() {
             className="dialog-close"
             aria-label="关闭"
             onClick={handleClose}
+            disabled={closeDisabled}
+            style={closeDisabled ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
           >
             <X size={16} />
           </button>
         </div>
 
         <div className="dialog-body update-dialog-body">
+          {/* 下载中提示条：提示用户进度在状态栏 */}
+          {isDownloading && (
+            <div className="update-banner update-banner-downloading">
+              <RefreshCw size={14} className="spin" />
+              <span>
+                正在后台下载更新，可关闭此对话框继续使用。下载进度可在右下角状态栏查看，下载完成后将自动弹出确认。
+              </span>
+            </div>
+          )}
+
+          {/* 下载完成提示条 */}
+          {isDownloaded && !isInstalling && (
+            <div
+              className={`update-banner ${
+                updater.pendingFromLocal
+                  ? 'update-banner-pending'
+                  : 'update-banner-ready'
+              }`}
+            >
+              <PackageCheck size={14} />
+              <span>
+                {updater.pendingFromLocal
+                  ? '检测到上次已下载的更新包，版本匹配，可直接安装。'
+                  : '更新包已下载完成，安装后程序将自动重启。请选择安装时机。'}
+              </span>
+            </div>
+          )}
+
+          {/* 安装中提示条 */}
+          {isInstalling && (
+            <div className="update-banner update-banner-installing">
+              <DownloadCloud size={14} />
+              <span>正在安装新版本，请不要关闭程序，完成后将自动重启。</span>
+            </div>
+          )}
+
           <div className="update-version-row">
             <div className="update-version-block">
               <div className="update-version-label">当前版本</div>
@@ -173,43 +252,98 @@ export function UpdateDialog() {
             )}
           </div>
 
-          <div className="update-mirror-section">
-            <div className="update-mirror-title">下载源（国内网络建议选择镜像加速）</div>
-            <div className="update-mirror-grid">
-              {UPDATE_MIRROR_OPTIONS.map((opt) => {
-                const selected = updater.mirror === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    className={`mirror-card ${selected ? 'is-selected' : ''}`}
-                    onClick={() => updater.changeMirror(opt.id as UpdateMirror)}
-                    aria-pressed={selected}
-                  >
-                    <div className="mirror-card-header">
-                      <span className="mirror-card-name">{opt.name}</span>
-                      {selected && <Check size={14} className="mirror-card-check" />}
-                    </div>
-                    <div className="mirror-card-desc">{opt.desc}</div>
-                  </button>
-                );
-              })}
+          {/* 仅"有新版本可用"且尚未开始下载时显示镜像选择 */}
+          {isAvailable && (
+            <div className="update-mirror-section">
+              <div className="update-mirror-title">下载源（国内网络建议选择镜像加速）</div>
+              <div className="update-mirror-grid">
+                {UPDATE_MIRROR_OPTIONS.map((opt) => {
+                  const selected = updater.mirror === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`mirror-card ${selected ? 'is-selected' : ''}`}
+                      onClick={() => updater.changeMirror(opt.id as UpdateMirror)}
+                      aria-pressed={selected}
+                    >
+                      <div className="mirror-card-header">
+                        <span className="mirror-card-name">{opt.name}</span>
+                        {selected && <Check size={14} className="mirror-card-check" />}
+                      </div>
+                      <div className="mirror-card-desc">{opt.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
+        {/* 底部按钮区域：根据状态渲染不同内容 */}
         <div className="dialog-footer update-dialog-footer">
-          <button type="button" className="btn btn-ghost" onClick={handleClose}>
-            稍后更新
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary update-dialog-install-btn"
-            onClick={handleInstall}
-          >
-            <Download size={14} />
-            <span>立即下载并安装</span>
-          </button>
+          {/* 有新版本可用 → 开始后台下载 */}
+          {isAvailable && (
+            <>
+              <button type="button" className="btn btn-ghost" onClick={handleClose}>
+                稍后再说
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary update-dialog-install-btn"
+                onClick={handleDownload}
+              >
+                <Download size={14} />
+                <span>后台下载更新</span>
+              </button>
+            </>
+          )}
+
+          {/* 下载中 → 显示状态 + 允许关闭 */}
+          {isDownloading && (
+            <div className="update-footer-busy update-footer-downloading">
+              <RefreshCw size={12} className="spin" />
+              <span>
+                下载中 {updater.progressPct || 0}%
+                {hasRealTotal
+                  ? ` · ${updater.downloadedMB || 0}/${updater.totalMB} MB`
+                  : ` · ${updater.downloadedMB || 0} MB`}
+              </span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={handleClose}>
+                后台下载
+              </button>
+            </div>
+          )}
+
+          {/* 下载完成 → 立即安装 / 下次启动 */}
+          {isDownloaded && !isInstalling && (
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleInstallLater}
+                title="保留已下载的更新包，下次启动时再次提示安装"
+              >
+                下次启动时安装
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary update-dialog-install-btn"
+                onClick={handleInstall}
+              >
+                <PackageCheck size={14} />
+                <span>立即安装并重启</span>
+              </button>
+            </>
+          )}
+
+          {/* 安装中 → 仅状态展示 */}
+          {isInstalling && (
+            <div className="update-footer-busy update-footer-installing">
+              <DownloadCloud size={12} />
+              <span>安装中，完成后程序将自动重启…</span>
+            </div>
+          )}
         </div>
       </div>
     </div>,

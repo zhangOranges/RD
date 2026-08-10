@@ -23,6 +23,7 @@ export type UpdateStatus =
   | 'checking'
   | 'available'
   | 'downloading'
+  | 'downloaded' // 下载完成，等待用户确认安装
   | 'installing'
   | 'done'
   | 'error';
@@ -42,6 +43,12 @@ export const UPDATE_MIRROR_OPTIONS: {
 ];
 
 const UPDATE_MIRROR_KEY = 'app_updater_mirror';
+const UPDATE_PENDING_KEY = 'app_updater_pending';
+
+interface PendingUpdate {
+  version: string;
+  downloadedAt: number;
+}
 
 export function getUpdateMirror(): UpdateMirror {
   try {
@@ -57,6 +64,27 @@ export function getUpdateMirror(): UpdateMirror {
 export function setUpdateMirror(mirror: UpdateMirror) {
   try {
     localStorage.setItem(UPDATE_MIRROR_KEY, mirror);
+  } catch {
+    /* ignore */
+  }
+}
+
+function getPendingUpdate(): PendingUpdate | null {
+  try {
+    const raw = localStorage.getItem(UPDATE_PENDING_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingUpdate;
+    if (!parsed || typeof parsed.version !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function setPendingUpdate(p: PendingUpdate | null) {
+  try {
+    if (p) localStorage.setItem(UPDATE_PENDING_KEY, JSON.stringify(p));
+    else localStorage.removeItem(UPDATE_PENDING_KEY);
   } catch {
     /* ignore */
   }
@@ -137,6 +165,8 @@ export interface AppUpdaterState {
   /** 是否显示更新对话框 */
   dialogVisible: boolean;
   mirror: UpdateMirror;
+  /** 是否检测到本地有待安装的已下载包（跨 session 恢复） */
+  pendingFromLocal: boolean;
 }
 
 const DEFAULT_STATE: AppUpdaterState = {
@@ -150,6 +180,7 @@ const DEFAULT_STATE: AppUpdaterState = {
   releaseNotes: null,
   dialogVisible: false,
   mirror: 'github',
+  pendingFromLocal: false,
 };
 
 function isDevProfile(): boolean {
@@ -233,6 +264,7 @@ function detectPlatformKey(): string | null {
 
 // ---- 模块级变量（不触发 re-render，全组件共享）----
 let updateRef: Update | null = null;
+let downloadingRef = false;
 let installingRef = false;
 let platformSizesRef: Record<string, number> = {};
 let autoCheckDone = false;
@@ -243,7 +275,12 @@ interface AppUpdaterStore extends AppUpdaterState {
   hideDialog: () => void;
   showDialog: () => void;
   check: () => void;
+  /** 仅开始后台下载，下载中用户可关闭对话框；下载完成后自动进入 downloaded 状态并弹出确认 */
+  download: () => void;
+  /** 立即执行安装（调用前需已完成 download），并自动重启 */
   install: () => void;
+  /** 稍后安装（本次关闭对话框，下次启动时再次检查本地待安装包） */
+  installLater: () => void;
   dismissError: () => void;
   isDev: boolean;
 }
@@ -261,7 +298,10 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
   hideDialog: () => set({ dialogVisible: false }),
 
   showDialog: () => {
-    if (get().status === 'available') set({ dialogVisible: true });
+    const s = get().status;
+    if (s === 'available' || s === 'downloaded' || s === 'downloading' || s === 'error') {
+      set({ dialogVisible: true });
+    }
   },
 
   dismissError: () =>
@@ -271,7 +311,7 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
     })),
 
   check: async () => {
-    if (installingRef) return;
+    if (downloadingRef || installingRef) return;
 
     let cur = get().currentVersion;
     if (!cur && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
@@ -283,7 +323,8 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
     }
 
     set((s) => {
-      if (s.status === 'checking' || s.status === 'downloading') return s;
+      if (s.status === 'checking' || s.status === 'downloading' || s.status === 'installing')
+        return s;
       return {
         ...DEFAULT_STATE,
         mirror: s.mirror,
@@ -298,7 +339,8 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
       ];
       const tauriEndpoints: readonly string[] =
         (window as unknown as { __TAURI_UPDATER_ENDPOINTS__?: readonly string[] })
-          .__TAURI_UPDATER_ENDPOINTS__ ?? defaultEndpoints;
+          .__TAURI_UPDATER_ENDPOINTS__ ??
+        defaultEndpoints;
       const endpoints =
         tauriEndpoints && tauriEndpoints.length > 0 ? tauriEndpoints : defaultEndpoints;
 
@@ -316,6 +358,8 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
 
       const update = await checkUpdater({ timeout: 8000 });
       if (!update) {
+        // 没有可用更新 → 清除本地 pending 记录（旧版遗留的）
+        setPendingUpdate(null);
         set((s) => ({
           ...DEFAULT_STATE,
           mirror: s.mirror,
@@ -327,16 +371,41 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
       }
       updateRef = update;
 
+      // 有可用更新 → 检查本地是否有已下载待安装的同版本包
+      const pending = getPendingUpdate();
+      const latestV = update.version || metaVersion || null;
+      const pendingMatches = pending && latestV && pending.version === latestV;
+
+      if (pendingMatches) {
+        // 标记本地有待安装包，用户确认时再执行"安装"步骤（download 会从缓存秒下）
+        set((s) => ({
+          ...s,
+          status: 'downloaded',
+          currentVersion: s.currentVersion || cur || update.currentVersion || null,
+          availableVersion: latestV,
+          releaseNotes: notes,
+          dialogVisible: true,
+          errorMsg: null,
+          downloadedMB: 0,
+          progressPct: 100,
+          pendingFromLocal: true,
+        }));
+        return;
+      }
+      // 版本变化了，清理旧 pending
+      if (pending && pending.version !== latestV) setPendingUpdate(null);
+
       set((s) => ({
         ...s,
         status: 'available',
         currentVersion: s.currentVersion || cur || update.currentVersion || null,
-        availableVersion: update.version || metaVersion || null,
+        availableVersion: latestV,
         releaseNotes: notes,
         dialogVisible: true,
         errorMsg: null,
         downloadedMB: 0,
         progressPct: 0,
+        pendingFromLocal: false,
       }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -350,13 +419,12 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
     }
   },
 
-  install: async () => {
+  download: async () => {
     const update = updateRef;
-    if (!update || installingRef) return;
-    installingRef = true;
+    if (!update || downloadingRef || installingRef) return;
+    downloadingRef = true;
 
     set({
-      dialogVisible: false,
       status: 'downloading',
       errorMsg: null,
       downloadedMB: 0,
@@ -385,75 +453,122 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
       });
 
       let downloaded = 0;
-      // clProvided 放在回调外层，Started 回调中更新，Progress 中读取
       let clProvided = false;
 
-      await update.downloadAndInstall(
-        (event: DownloadEvent) => {
-          switch (event.event) {
-            case 'Started': {
-              // 尝试从事件中读取 contentLength（部分版本的 updater 事件会提供）
-              const data = event.data as unknown as { contentLength?: unknown } | undefined;
-              let cl: number | null = null;
-              if (data && typeof data === 'object' && 'contentLength' in data) {
-                const v = data.contentLength;
-                if (typeof v === 'number' && v > 0) {
-                  cl = v;
-                  clProvided = true;
-                }
+      // 2. 仅下载（不安装）
+      await update.download((event: DownloadEvent) => {
+        switch (event.event) {
+          case 'Started': {
+            const data = event.data as unknown as { contentLength?: unknown } | undefined;
+            let cl: number | null = null;
+            if (data && typeof data === 'object' && 'contentLength' in data) {
+              const v = data.contentLength;
+              if (typeof v === 'number' && v > 0) {
+                cl = v;
+                clProvided = true;
               }
-              downloaded = 0;
-              const finalTotal =
-                cl && cl > 0 ? cl : currentTotalRef.v;
-              currentTotalRef.v = finalTotal;
-              const finalMB = finalTotal / (1024 * 1024);
-              set({
-                downloadedMB: 0,
-                progressPct: 0,
-                totalMB: Math.round(finalMB * 10) / 10,
-              });
-              break;
             }
-            case 'Progress': {
-              downloaded += event.data.chunkLength;
-              const total = currentTotalRef.v;
-              const mb = downloaded / (1024 * 1024);
-              // 有真实/准确大小时：最多 99%，Finished 置 100%
-              // 估算大小时：最多 95%，避免"超过 100%" 的不自然
-              const ceiling = hasRealSize || clProvided ? 99 : 95;
-              const pct = Math.min(
-                ceiling,
-                Math.max(1, Math.round((downloaded / total) * 100)),
-              );
-              set((s) => ({
-                downloadedMB: Math.round(mb * 10) / 10,
-                progressPct: Math.max(s.progressPct, pct),
-              }));
-              break;
-            }
-            case 'Finished':
-              set({
-                status: 'installing',
-                progressPct: 100,
-              });
-              break;
+            downloaded = 0;
+            const finalTotal = cl && cl > 0 ? cl : currentTotalRef.v;
+            currentTotalRef.v = finalTotal;
+            const finalMB = finalTotal / (1024 * 1024);
+            set({
+              downloadedMB: 0,
+              progressPct: 0,
+              totalMB: Math.round(finalMB * 10) / 10,
+            });
+            break;
           }
-        },
-        { timeout: 5 * 60 * 1000 },
-      );
+          case 'Progress': {
+            downloaded += event.data.chunkLength;
+            const total = currentTotalRef.v;
+            const mb = downloaded / (1024 * 1024);
+            const ceiling = hasRealSize || clProvided ? 99 : 95;
+            const pct = Math.min(
+              ceiling,
+              Math.max(1, Math.round((downloaded / total) * 100)),
+            );
+            set((s) => ({
+              downloadedMB: Math.round(mb * 10) / 10,
+              progressPct: Math.max(s.progressPct, pct),
+            }));
+            break;
+          }
+          case 'Finished':
+            set({
+              progressPct: 100,
+            });
+            break;
+        }
+      }, { timeout: 5 * 60 * 1000 });
 
+      // 3. 下载完成 → 进入"待安装"状态，并自动弹出确认对话框
+      const version = get().availableVersion;
+      if (version) {
+        setPendingUpdate({ version, downloadedAt: Date.now() });
+      }
+      downloadingRef = false;
+      set({
+        status: 'downloaded',
+        pendingFromLocal: false,
+        dialogVisible: true,
+        progressPct: 100,
+      });
+      showToast({
+        type: 'success',
+        message: '更新包已下载完成',
+        duration: 3000,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      downloadingRef = false;
+      set({ status: 'error', errorMsg: msg });
+      showToast({ type: 'error', message: `下载更新失败：${msg}`, duration: 5000 });
+    }
+  },
+
+  install: async () => {
+    const update = updateRef;
+    if (!update || installingRef) return;
+    // 如果 pendingFromLocal（本地有待安装包），先重新 download 一次（Tauri 缓存命中会秒下）
+    // 这样确保 Rust 侧的 Resource 状态与 install 对齐
+    if (get().pendingFromLocal || get().status === 'downloaded') {
+      try {
+        // 重新执行下载（走本地缓存，Finished 会立即触发）
+        await update.download(() => {}, { timeout: 2 * 60 * 1000 });
+      } catch {
+        // 缓存命中失败不致命，继续尝试安装
+      }
+    }
+    installingRef = true;
+    set({ status: 'installing' });
+    try {
+      await update.install();
       set({ status: 'done', progressPct: 100 });
       showToast({
         type: 'success',
         message: '更新完成，程序即将自动重启',
         duration: 4000,
       });
+      // 安装成功 → 清理 pending
+      setPendingUpdate(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      set({ status: 'error', errorMsg: msg });
-      showToast({ type: 'error', message: `更新失败：${msg}`, duration: 5000 });
       installingRef = false;
+      set({ status: 'error', errorMsg: msg });
+      showToast({ type: 'error', message: `安装更新失败：${msg}`, duration: 5000 });
     }
+  },
+
+  installLater: () => {
+    // 用户选择稍后安装 → 保留 pending 记录（下次启动自动识别）
+    // 仅关闭对话框即可
+    set({ dialogVisible: false });
+    showToast({
+      type: 'info',
+      message: '已保留更新包，下次启动时将再次提示安装',
+      duration: 3000,
+    });
   },
 }));
 

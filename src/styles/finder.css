@@ -2256,17 +2256,26 @@ html[data-theme="dark"] body {
   font-size: 10px;
   transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
 }
 .update-badge:hover {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: var(--accent);
 }
-.update-badge.is-checking svg {
+.update-badge svg.spin,
+.spin {
   animation: spin 1s linear infinite;
+  transform-origin: center;
 }
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+.update-badge.is-checking svg {
+  animation: spin 1s linear infinite;
 }
 .update-badge.is-available {
   color: var(--accent);
@@ -2277,11 +2286,48 @@ html[data-theme="dark"] body {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .update-badge.is-downloading {
-  color: var(--text-primary);
-  cursor: default;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-weight: 600;
+  cursor: pointer;
 }
 .update-badge.is-downloading:hover {
-  background: transparent;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.update-badge.is-installing {
+  color: var(--state-connected);
+  background: color-mix(in srgb, var(--state-connected) 10%, transparent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.update-badge.is-installing:hover {
+  background: color-mix(in srgb, var(--state-connected) 18%, transparent);
+}
+/* 下载完成待安装：绿色（或 pending 状态橙色） */
+.update-badge.is-downloaded {
+  color: var(--state-connected);
+  background: color-mix(in srgb, var(--state-connected) 12%, transparent);
+  font-weight: 700;
+  animation: update-downloaded-pulse 2.4s ease-in-out infinite;
+}
+.update-badge.is-downloaded:hover {
+  background: color-mix(in srgb, var(--state-connected) 22%, transparent);
+}
+.update-badge.is-downloaded.is-pending {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  animation: update-pending-pulse 2.4s ease-in-out infinite;
+}
+.update-badge.is-downloaded.is-pending:hover {
+  background: color-mix(in srgb, var(--warning) 24%, transparent);
+}
+@keyframes update-downloaded-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-connected) 30%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--state-connected) 0%, transparent); }
+}
+@keyframes update-pending-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 32%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 0%, transparent); }
 }
 .update-badge.is-error {
   color: var(--danger);
@@ -2291,20 +2337,26 @@ html[data-theme="dark"] body {
   color: var(--state-connected);
 }
 .update-progress {
-  width: 48px;
+  width: 64px;
   height: 4px;
   border-radius: 2px;
   background: color-mix(in srgb, var(--text-tertiary) 20%, transparent);
   overflow: hidden;
   display: inline-block;
-  margin-left: 4px;
+  margin-left: 2px;
+  position: relative;
 }
 .update-progress-fill {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
   border-radius: 2px;
   transition: width 0.25s ease;
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.update-badge.is-installing .update-progress-fill {
+  background: linear-gradient(90deg, var(--state-connected), #34d399);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--state-connected) 55%, transparent);
 }
 .update-badge.is-dev {
   color: color-mix(in srgb, var(--text-tertiary) 80%, var(--text-secondary));
@@ -2563,6 +2615,82 @@ html[data-theme="dark"] body {
   padding: 2px 0 8px;
 }
 
+/* ---------- 更新对话框：状态 banner ---------- */
+.update-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-large);
+  font-size: 12px;
+  line-height: 1.55;
+  border: 1px solid transparent;
+}
+.update-banner svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.update-banner-downloading {
+  background: linear-gradient(135deg, var(--accent-soft), var(--accent-soft-2));
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text-primary);
+}
+.update-banner-downloading svg { color: var(--accent); }
+
+.update-banner-ready {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--state-connected) 14%, transparent),
+    color-mix(in srgb, var(--state-connected) 6%, transparent)
+  );
+  border-color: color-mix(in srgb, var(--state-connected) 35%, transparent);
+  color: var(--text-primary);
+}
+.update-banner-ready svg { color: var(--state-connected); }
+
+.update-banner-pending {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--warning) 16%, transparent),
+    color-mix(in srgb, var(--warning) 8%, transparent)
+  );
+  border-color: color-mix(in srgb, var(--warning) 38%, transparent);
+  color: var(--text-primary);
+}
+.update-banner-pending svg { color: var(--warning); }
+
+.update-banner-installing {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent-3) 18%, transparent),
+    color-mix(in srgb, var(--accent) 10%, transparent)
+  );
+  border-color: color-mix(in srgb, var(--accent-3) 35%, transparent);
+  color: var(--text-primary);
+  animation: update-installing-banner-pulse 1.8s ease-in-out infinite;
+}
+.update-banner-installing svg { color: var(--accent-3); }
+
+@keyframes update-installing-banner-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-3) 28%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-3) 0%, transparent); }
+}
+
+/* 对话框标题图标：待安装高亮为绿色 */
+.update-dialog-icon-ready {
+  color: var(--state-connected);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--state-connected) 45%, transparent));
+}
+
+/* 小按钮（用于"后台下载"） */
+.btn-sm {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  border-radius: 6px;
+  line-height: 1;
+}
+
 .update-dialog-footer {
   justify-content: space-between;
   padding-top: 12px;
@@ -2575,4 +2703,26 @@ html[data-theme="dark"] body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.update-footer-busy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+  gap: 12px;
+}
+.update-footer-downloading {
+  color: var(--accent);
+}
+.update-footer-downloading > span {
+  flex: 1 1 auto;
+}
+.update-footer-installing {
+  color: var(--accent-3);
+  justify-content: center;
 }

@@ -400,55 +400,49 @@ jobs:
 
           /**
            * 解析 CHANGELOG.md，提取指定版本的更新说明。
-           * 支持两种常见格式：
+           * 支持格式：
            *   ## [x.y.z] - 2024-01-01
+           *   ## [x.y.z]
            *   ## x.y.z
            *   ## vx.y.z
-           *   - 或 tag == v1.2.3 时，搜索 [1.2.3] / 1.2.3 / v1.2.3 三种
            * 返回字符串（纯 markdown，未转义）
            */
           function extractChangelog(filePath, targetVersion) {
-            if (!filePath || !fs.existsSync(filePath)) return null;
+            if (!filePath || !fs.existsSync(filePath)) {
+              console.error('CHANGELOG.md not found at:', filePath);
+              return null;
+            }
             try {
               const content = fs.readFileSync(filePath, 'utf8');
               const lines = content.replace(/\r\n/g, '\n').split('\n');
 
-              // 构造候选的标题匹配文本
-              const candidates = new Set([
-                `[${targetVersion}]`,
-                `${targetVersion}`,
-                `v${targetVersion}`,
-                `[v${targetVersion}]`,
-              ]);
+              // 从标题中提取版本号：匹配 [x.y.z] 或 x.y.z 或 vx.y.z
+              const versionRe = /\[?v?(\d+\.\d+\.\d+)\]?/;
 
-              // 找到起始行：形如 "## xxx" 的 markdown H2
+              // 找到起始行：形如 "## [x.y.z]" 或 "## x.y.z" 的 markdown H2
               let startIdx = -1;
               for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
                 const m = line.match(/^##\s+(.+?)\s*$/);
                 if (!m) continue;
                 const heading = m[1].trim();
-                // heading 可能形如 "[1.2.3] - 2025-01-01"，先去掉前缀的 [] 或 纯版本
-                // 取空白/连字符前的第一个 token 比较
-                const firstToken = heading.split(/\s|-|—/)[0].trim()
-                  .replace(/^\[/, '').replace(/\].*$/, '');
-                if (candidates.has(firstToken) || candidates.has(heading) || candidates.has(heading.replace(/^\[(.*)\].*$/, '$1'))) {
+                const vm = heading.match(versionRe);
+                if (vm && vm[1] === targetVersion) {
                   startIdx = i + 1;
+                  console.error(`[CHANGELOG] Matched heading: "${heading}" at line ${i + 1}`);
                   break;
                 }
-                // 兜底：整段 heading 包含版本号字符串也匹配
-                for (const c of candidates) {
-                  if (c.length >= 3 && heading.includes(c.replace(/[\[\]]/g, ''))) {
-                    startIdx = i + 1;
-                    break;
-                  }
-                }
-                if (startIdx >= 0) break;
               }
 
-              if (startIdx < 0) return null;
+              if (startIdx < 0) {
+                console.error(`Version ${targetVersion} not found in CHANGELOG.md`);
+                // 打印所有 H2 标题帮助调试
+                const h2s = lines.filter(l => /^##\s+/.test(l.trim()));
+                console.error('Available H2 headings:', JSON.stringify(h2s));
+                return null;
+              }
 
-              // 找到结束行：下一个 ## H2 或文件尾
+              // 找到结束行：下一个 ## H2 或文件尾（跳过 --- 分隔线）
               let endIdx = lines.length;
               for (let i = startIdx; i < lines.length; i++) {
                 const line = lines[i].trim();

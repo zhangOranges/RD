@@ -189,7 +189,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
     setTesting(true);
     const t0 = performance.now();
     try {
-      const result = await invoke<{ home_dir: string; fingerprint: string }>('test_connection', {
+      await invoke<{ home_dir: string; fingerprint: string }>('test_connection', {
         params: {
           host_id: host?.id ?? 'test',
           host: form.host.trim(),

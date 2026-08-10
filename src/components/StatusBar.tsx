@@ -5,6 +5,7 @@ import {
   ArrowDown,
   Activity,
   Download,
+  DownloadCloud,
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
@@ -53,8 +54,8 @@ function UpdateBadge() {
       <button
         type="button"
         className="statusbar-item update-badge is-error"
-        onClick={() => updater.check()}
-        title={`更新失败：${updater.errorMsg ?? ''}（点击重试）`}
+        onClick={() => updater.showDialog()}
+        title={`更新失败：${updater.errorMsg ?? ''}（点击查看详情）`}
       >
         <AlertTriangle size={11} />
         <span>更新错误</span>
@@ -85,6 +86,30 @@ function UpdateBadge() {
     );
   }
 
+  // 下载完成待安装
+  if (updater.status === 'downloaded') {
+    const title = updater.pendingFromLocal
+      ? `检测到本地已下载 v${updater.availableVersion ?? ''} 更新包，点击立即安装或稍后安装`
+      : `v${updater.availableVersion ?? ''} 已下载完成，点击立即安装或稍后安装`;
+    return (
+      <button
+        type="button"
+        className={`statusbar-item update-badge is-downloaded ${
+          updater.pendingFromLocal ? 'is-pending' : ''
+        }`}
+        onClick={() => updater.showDialog()}
+        title={title}
+      >
+        <CheckCircle2 size={11} />
+        <span>
+          {updater.pendingFromLocal
+            ? `更新包已就绪 · v${updater.availableVersion ?? ''}`
+            : `已下载 · 点击安装 v${updater.availableVersion ?? ''}`}
+        </span>
+      </button>
+    );
+  }
+
   if (updater.status === 'downloading' || updater.status === 'installing') {
     const hasTotal = updater.totalMB && updater.totalMB > 0;
     const sizeText = hasTotal
@@ -95,8 +120,19 @@ function UpdateBadge() {
         ? `下载中 ${updater.progressPct || 0}% · ${sizeText}`
         : '安装中…';
     return (
-      <span className="statusbar-item update-badge is-downloading" title={label}>
-        <Download size={11} />
+      <button
+        type="button"
+        className={`statusbar-item update-badge ${
+          updater.status === 'installing' ? 'is-installing' : 'is-downloading'
+        }`}
+        title={`${label} · 点击查看详情`}
+        onClick={() => updater.showDialog()}
+      >
+        {updater.status === 'installing' ? (
+          <DownloadCloud size={11} />
+        ) : (
+          <Download size={11} />
+        )}
         <span>{label}</span>
         <span className="update-progress">
           <span
@@ -104,7 +140,7 @@ function UpdateBadge() {
             style={{ width: `${updater.progressPct || 0}%` }}
           />
         </span>
-      </span>
+      </button>
     );
   }
 
