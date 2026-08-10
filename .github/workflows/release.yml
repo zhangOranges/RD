@@ -186,37 +186,31 @@ jobs:
         id: collect-linux
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          # Linux 原生构建时，Cargo 可能输出到 target/release/bundle 而非 target/<triple>/release/bundle
-          # 两个路径都检查，哪个有就用哪个
-          BUNDLE1="src-tauri/target/${{ matrix.target }}/release/bundle"
-          BUNDLE2="src-tauri/target/release/bundle"
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
+          BUNDLE1="src-tauri/target/${{ matrix.target }}/release/bundle"
+          BUNDLE2="src-tauri/target/release/bundle"
 
           bundle=""
-          if [ -d "$BUNDLE1" ]; then
-            bundle="$BUNDLE1"
-            echo "Found bundle at: $BUNDLE1"
-          elif [ -d "$BUNDLE2" ]; then
-            bundle="$BUNDLE2"
-            echo "Found bundle at: $BUNDLE2"
-          else
-            echo "ERROR: No bundle directory found!"
-            echo "=== Checking target dirs ==="
-            find src-tauri/target -maxdepth 4 -name "bundle" -type d 2>/dev/null || echo "No bundle dir anywhere"
-            echo "=== target/release contents ==="
-            ls -la src-tauri/target/release/ 2>/dev/null | head -30
-            echo "=== target/x86_64-unknown-linux-gnu/release contents ==="
-            ls -la src-tauri/target/x86_64-unknown-linux-gnu/release/ 2>/dev/null | head -30
-          fi
+          if [ -d "$BUNDLE1" ]; then bundle="$BUNDLE1"; elif [ -d "$BUNDLE2" ]; then bundle="$BUNDLE2"; fi
 
           if [ -n "$bundle" ]; then
-            echo "=== Bundle dir (full tree) ==="
-            find "$bundle" -type f 2>/dev/null || echo "Bundle dir empty"
-            # 收集所有包 + 对应 .sig
-            find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" \;
+            echo "=== Bundle dir: $bundle ==="
+            find "$bundle" -type f
+            echo ""
+            echo "=== Copying installers and sig files ==="
+            while IFS= read -r -d '' file; do
+              fname=$(basename "$file")
+              echo "  Copying $fname"
+              cp "$file" "$out/"
+            done < <(find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) -print0)
+          else
+            echo "ERROR: No bundle directory found!"
+            find src-tauri/target -maxdepth 4 -name "bundle" -type d 2>/dev/null
           fi
 
+          echo "=== Artifacts ==="
+          ls -lh "$out"
           # 选定 updater 主包（优先 AppImage）
           UPDATER_FILE=$(ls "$out"/*.AppImage 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
           UPDATER_FORMAT="appimage"
@@ -226,8 +220,6 @@ jobs:
           fi
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
-          echo "=== Artifacts ==="
-          ls -lh "$out" 2>/dev/null || echo "(empty)"
 
       - name: Collect artifacts (macOS)
         id: collect-macos
@@ -235,26 +227,30 @@ jobs:
         run: |
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
-          # 两个路径都检查（原生构建 vs --target 指定构建）
           for bundle in "src-tauri/target/release/bundle" "src-tauri/target/${{ matrix.target }}/release/bundle"; do
             if [ -d "$bundle" ]; then
               echo "=== Found bundle dir: $bundle ==="
-              find "$bundle" -type f 2>/dev/null
-              find "$bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp {} "$out/" \;
+              find "$bundle" -type f
+              echo ""
+              echo "=== Copying dmg / tar.gz / sig files ==="
+              while IFS= read -r -d '' file; do
+                fname=$(basename "$file")
+                echo "  Copying $fname"
+                cp "$file" "$out/"
+              done < <(find "$bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -print0)
             fi
           done
-          # updater 主包用 dmg（用户点击安装的就是 dmg）
+          echo "=== Artifacts ==="
+          ls -lh "$out"
+          # updater 主包用 dmg
           UPDATER_FILE=$(ls "$out"/*.dmg 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
           UPDATER_FORMAT="dmg"
           if [ -z "$UPDATER_FILE" ]; then
-            # fallback: 如果 dmg 没生成，用 .app.tar.gz 作为 updater 包
             UPDATER_FILE=$(ls "$out"/*.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
             UPDATER_FORMAT="app"
           fi
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
-          echo "=== Artifacts ==="
-          ls -lh "$out"
 
       # ------------------------------------------------------------
       # 写入本平台 manifest（给发布 job 汇总成 latest.json）
