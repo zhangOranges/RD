@@ -45,10 +45,16 @@ jobs:
       - name: Install npm deps
         run: npm ci --prefer-offline --no-audit --no-fund
 
-      - name: Setup Rust toolchain
+      - name: Setup Rust toolchain (Windows/Linux)
+        if: matrix.platform != 'macos-latest'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Setup Rust toolchain (macOS - no custom target)
+        if: matrix.platform == 'macos-latest'
+        uses: dtolnay/rust-toolchain@stable
+        # 不传 targets，默认安装 aarch64-apple-darwin（runner 原生架构）
 
       - name: Install Rust targets for macOS Universal Binary
         if: matrix.platform == 'macos-latest'
