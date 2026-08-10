@@ -3,7 +3,7 @@
 use russh::ChannelMsg;
 use serde::Serialize;
 
-use super::{SshState, SshError};
+use super::{SshError, SshState};
 
 /// Execute a command on the remote server and return its stdout.
 /// Intended for short-lived commands (server stats, etc.).
@@ -109,44 +109,81 @@ pub async fn get_server_stats(
     state: tauri::State<'_, SshState>,
 ) -> Result<ServerStats, String> {
     // CPU model + cores
-    let cpu_out = ssh_exec_raw(&state, &host_id, "cat /proc/cpuinfo | grep 'model name' | head -1; echo '---'; nproc").await
-        .unwrap_or_default();
+    let cpu_out = ssh_exec_raw(
+        &state,
+        &host_id,
+        "cat /proc/cpuinfo | grep 'model name' | head -1; echo '---'; nproc",
+    )
+    .await
+    .unwrap_or_default();
     let mut cpu_parts = cpu_out.split("---");
-    let cpu_model = cpu_parts.next().unwrap_or("").trim().replace("model name\t: ", "").to_string();
+    let cpu_model = cpu_parts
+        .next()
+        .unwrap_or("")
+        .trim()
+        .replace("model name\t: ", "")
+        .to_string();
     let cpu_cores: u32 = cpu_parts.next().unwrap_or("1").trim().parse().unwrap_or(1);
 
     // CPU 占用率：采样两次 /proc/stat，间隔 500ms，按 (total-idle)/total 差值计算
     let cpu_usage: f64 = {
-        let s1 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat").await.unwrap_or_default();
+        let s1 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat")
+            .await
+            .unwrap_or_default();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let s2 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat").await.unwrap_or_default();
-        match (parse_proc_stat_first_line(&s1), parse_proc_stat_first_line(&s2)) {
+        let s2 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat")
+            .await
+            .unwrap_or_default();
+        match (
+            parse_proc_stat_first_line(&s1),
+            parse_proc_stat_first_line(&s2),
+        ) {
             (Some((t1, i1)), Some((t2, i2))) => {
                 let dt = t2.saturating_sub(t1) as f64;
                 let di = i2.saturating_sub(i1) as f64;
-                if dt > 0.0 { ((dt - di) / dt * 100.0).max(0.0).min(100.0) } else { 0.0 }
+                if dt > 0.0 {
+                    ((dt - di) / dt * 100.0).max(0.0).min(100.0)
+                } else {
+                    0.0
+                }
             }
             _ => 0.0,
         }
     };
 
     // Memory: parse /proc/meminfo
-    let mem_out = ssh_exec_raw(&state, &host_id, "cat /proc/meminfo").await.unwrap_or_default();
+    let mem_out = ssh_exec_raw(&state, &host_id, "cat /proc/meminfo")
+        .await
+        .unwrap_or_default();
     let mut mem_total_kb: u64 = 0;
     let mut mem_available_kb: u64 = 0;
     for line in mem_out.lines() {
         if line.starts_with("MemTotal:") {
-            mem_total_kb = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+            mem_total_kb = line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
         }
         if line.starts_with("MemAvailable:") {
-            mem_available_kb = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+            mem_available_kb = line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
         }
     }
     let mem_total_mb = mem_total_kb / 1024;
-    let mem_used_mb = if mem_total_mb > 0 { mem_total_mb - mem_available_kb / 1024 } else { 0 };
+    let mem_used_mb = if mem_total_mb > 0 {
+        mem_total_mb - mem_available_kb / 1024
+    } else {
+        0
+    };
 
     // Disk: df -B1 /
-    let disk_out = ssh_exec_raw(&state, &host_id, "df -B1 / | tail -1").await.unwrap_or_default();
+    let disk_out = ssh_exec_raw(&state, &host_id, "df -B1 / | tail -1")
+        .await
+        .unwrap_or_default();
     let disk_parts: Vec<&str> = disk_out.split_whitespace().collect();
     let disk_total_bytes: u64 = disk_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
     let disk_used_bytes: u64 = disk_parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -154,7 +191,9 @@ pub async fn get_server_stats(
     let disk_used_gb = disk_used_bytes as f64 / 1_073_741_824.0;
 
     // Load average
-    let load_out = ssh_exec_raw(&state, &host_id, "cat /proc/loadavg | awk '{print $1}'").await.unwrap_or_default();
+    let load_out = ssh_exec_raw(&state, &host_id, "cat /proc/loadavg | awk '{print $1}'")
+        .await
+        .unwrap_or_default();
     let load_avg: f64 = load_out.trim().parse().unwrap_or(0.0);
 
     // OS info
@@ -162,11 +201,22 @@ pub async fn get_server_stats(
     let os_info = os_out.trim().to_string();
 
     // Uptime
-    let up_out = ssh_exec_raw(&state, &host_id, "cat /proc/uptime | awk '{print $1}'").await.unwrap_or_default();
-    let uptime_secs: u64 = up_out.trim().split('.').next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let up_out = ssh_exec_raw(&state, &host_id, "cat /proc/uptime | awk '{print $1}'")
+        .await
+        .unwrap_or_default();
+    let uptime_secs: u64 = up_out
+        .trim()
+        .split('.')
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
     Ok(ServerStats {
-        cpu_model: if cpu_model.is_empty() { "Unknown".to_string() } else { cpu_model },
+        cpu_model: if cpu_model.is_empty() {
+            "Unknown".to_string()
+        } else {
+            cpu_model
+        },
         cpu_cores,
         cpu_usage,
         mem_total_mb,
@@ -174,7 +224,11 @@ pub async fn get_server_stats(
         disk_total_gb,
         disk_used_gb,
         load_avg,
-        os_info: if os_info.is_empty() { "Linux".to_string() } else { os_info },
+        os_info: if os_info.is_empty() {
+            "Linux".to_string()
+        } else {
+            os_info
+        },
         uptime_secs,
     })
 }

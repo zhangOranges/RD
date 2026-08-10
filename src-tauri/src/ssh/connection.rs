@@ -92,11 +92,7 @@ impl ConnectionHandle {
         config.keepalive_interval = Some(std::time::Duration::from_secs(15));
         config.keepalive_max = 3;
 
-        let handler = ClientHandler::new(
-            params.host_id.clone(),
-            host_port.clone(),
-            app_handle,
-        );
+        let handler = ClientHandler::new(params.host_id.clone(), host_port.clone(), app_handle);
         let shared = handler.shared_state();
 
         // --- TCP + SSH handshake -------------------------------------------------
@@ -128,38 +124,44 @@ impl ConnectionHandle {
             .and_then(|mut guard| guard.take())
         {
             // Best-effort cleanup of the half-open session.
-            let _ = handle.disconnect(Disconnect::ByApplication, "auth abort", "en").await;
+            let _ = handle
+                .disconnect(Disconnect::ByApplication, "auth abort", "en")
+                .await;
             return Err(specific);
         }
 
         // --- Authenticate --------------------------------------------------------
         let auth_ok = match params.auth_type.as_str() {
             "password" => {
-                let password = params
-                    .password
-                    .clone()
-                    .ok_or_else(|| SshError::Internal("password auth requires a password".into()))?;
+                let password = params.password.clone().ok_or_else(|| {
+                    SshError::Internal("password auth requires a password".into())
+                })?;
                 handle
                     .authenticate_password(&params.username, &password)
                     .await
                     .map_err(|e| SshError::Ssh(e))?
             }
             "key" => {
-                let key_str = params.private_key.clone().ok_or_else(|| {
-                    SshError::Internal("key auth requires a private_key".into())
-                })?;
+                let key_str = params
+                    .private_key
+                    .clone()
+                    .ok_or_else(|| SshError::Internal("key auth requires a private_key".into()))?;
                 // Passphrase (if the key is encrypted) comes from the password
                 // field; otherwise None.
                 let passphrase = params.password.as_deref();
-                let key_pair = russh::keys::decode_secret_key(&key_str, passphrase)
-                    .map_err(|e| SshError::Internal(format!("failed to decode private key: {e}")))?;
+                let key_pair =
+                    russh::keys::decode_secret_key(&key_str, passphrase).map_err(|e| {
+                        SshError::Internal(format!("failed to decode private key: {e}"))
+                    })?;
                 handle
                     .authenticate_publickey(&params.username, Arc::new(key_pair))
                     .await
                     .map_err(|e| SshError::Ssh(e))?
             }
             other => {
-                let _ = handle.disconnect(Disconnect::ByApplication, "bad auth_type", "en").await;
+                let _ = handle
+                    .disconnect(Disconnect::ByApplication, "bad auth_type", "en")
+                    .await;
                 return Err(SshError::Internal(format!("unknown auth_type: {other}")));
             }
         };

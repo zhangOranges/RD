@@ -125,8 +125,7 @@ impl Handler for ClientHandler {
                 *self
                     .connect_error
                     .lock()
-                    .expect("connect_error mutex poisoned") =
-                    Some(SshError::Internal(msg.clone()));
+                    .expect("connect_error mutex poisoned") = Some(SshError::Internal(msg.clone()));
                 return Err(SshError::Internal(msg));
             }
         };
@@ -171,7 +170,10 @@ impl Handler for ClientHandler {
     /// Only emits the disconnect event if the connection had been fully
     /// established (i.e. `emit_disconnect` was armed by the caller). This
     /// avoids spurious events during a failed initial connect.
-    async fn disconnected(&mut self, reason: DisconnectReason<Self::Error>) -> Result<(), Self::Error> {
+    async fn disconnected(
+        &mut self,
+        reason: DisconnectReason<Self::Error>,
+    ) -> Result<(), Self::Error> {
         if self.emit_disconnect.load(Ordering::Acquire) {
             if let Some(app) = &self.app_handle {
                 // Best-effort emit; ignore failures (e.g. shutting down).

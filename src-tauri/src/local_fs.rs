@@ -16,7 +16,7 @@ pub struct LocalFileEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
-    pub modified: u64, // Unix 秒级时间戳
+    pub modified: u64,     // Unix 秒级时间戳
     pub file_type: String, // "dir" | "file" | "symlink"
 }
 
@@ -44,7 +44,13 @@ pub async fn list_local_dir(path: String) -> Result<Vec<LocalFileEntry>, String>
             "file".to_string()
         };
         let size = if is_dir { 0 } else { metadata.len() };
-        entries.push(LocalFileEntry { name, is_dir, size, modified, file_type });
+        entries.push(LocalFileEntry {
+            name,
+            is_dir,
+            size,
+            modified,
+            file_type,
+        });
     }
     // 文件夹置顶，同类按名称排序
     entries.sort_by(|a, b| {

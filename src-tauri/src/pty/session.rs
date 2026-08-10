@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 
 use super::parser::OscParser;
 use super::{
-    CLOSED_EVENT, CWD_CHANGED_EVENT, DATA_EVENT, PtyClosedPayload, PtyCwdPayload, PtyDataPayload,
+    PtyClosedPayload, PtyCwdPayload, PtyDataPayload, CLOSED_EVENT, CWD_CHANGED_EVENT, DATA_EVENT,
 };
 
 /// Commands sent from the foreground (Tauri commands) to the background read
@@ -225,12 +225,18 @@ async fn read_loop(
         }
     }
 
-    eprintln!("[PTY] read_loop exited for host: {} tab: {}", host_id, tab_id);
+    eprintln!(
+        "[PTY] read_loop exited for host: {} tab: {}",
+        host_id, tab_id
+    );
     closed.store(true, Ordering::Release);
-    let _ = app.emit(CLOSED_EVENT, &PtyClosedPayload {
-        host_id: host_id.clone(),
-        tab_id: tab_id.clone(),
-    });
+    let _ = app.emit(
+        CLOSED_EVENT,
+        &PtyClosedPayload {
+            host_id: host_id.clone(),
+            tab_id: tab_id.clone(),
+        },
+    );
 }
 
 /// Feed a chunk of PTY output through the OSC parser, emit the cleaned bytes
@@ -248,18 +254,24 @@ fn handle_output(
     }
     let (clean, paths) = parser.feed(data);
     if !clean.is_empty() {
-        let _ = app.emit(DATA_EVENT, &PtyDataPayload {
-            host_id: host_id.to_string(),
-            tab_id: tab_id.to_string(),
-            data: clean,
-        });
+        let _ = app.emit(
+            DATA_EVENT,
+            &PtyDataPayload {
+                host_id: host_id.to_string(),
+                tab_id: tab_id.to_string(),
+                data: clean,
+            },
+        );
     }
     for path in paths {
-        let _ = app.emit(CWD_CHANGED_EVENT, &PtyCwdPayload {
-            host_id: host_id.to_string(),
-            tab_id: tab_id.to_string(),
-            path,
-        });
+        let _ = app.emit(
+            CWD_CHANGED_EVENT,
+            &PtyCwdPayload {
+                host_id: host_id.to_string(),
+                tab_id: tab_id.to_string(),
+                path,
+            },
+        );
     }
 }
 

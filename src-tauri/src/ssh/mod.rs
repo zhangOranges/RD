@@ -96,7 +96,10 @@ pub async fn connect_host(
             drop(map);
             let _ = old.disconnect().await;
             let mut map = state.connections.lock().await;
-            map.insert(host_id.clone(), ConnectionHandle::connecting(host_id.clone(), host_port.clone()));
+            map.insert(
+                host_id.clone(),
+                ConnectionHandle::connecting(host_id.clone(), host_port.clone()),
+            );
         } else {
             map.insert(
                 host_id.clone(),

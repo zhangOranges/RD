@@ -1,8 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-pub mod ssh;
-pub mod sftp;
-pub mod pty;
 pub mod local_fs;
+pub mod pty;
+pub mod sftp;
+pub mod ssh;
 mod storage;
 
 #[tauri::command]

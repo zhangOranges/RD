@@ -626,9 +626,7 @@ async fn download_single_file(
 
     // 打开远程文件
     let flags = OpenFlags::READ;
-    let mut remote_file = sftp
-        .open_with_flags(remote_path.to_string(), flags)
-        .await?;
+    let mut remote_file = sftp.open_with_flags(remote_path.to_string(), flags).await?;
 
     // 打开本地文件
     let mut local_file = tokio::fs::File::create(local_path)

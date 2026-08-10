@@ -119,10 +119,7 @@ pub async fn save_credential(
 }
 
 #[tauri::command]
-pub async fn get_credential(
-    host_id: String,
-    cred_type: String,
-) -> Result<Option<String>, String> {
+pub async fn get_credential(host_id: String, cred_type: String) -> Result<Option<String>, String> {
     credentials::get_credential(&host_id, &cred_type).map_err(|e| e.to_string())
 }
 
@@ -181,7 +178,9 @@ pub async fn set_setting(
 // ===== 分类（分组）CRUD =====
 
 #[tauri::command]
-pub async fn list_categories(state: State<'_, StorageState>) -> Result<Vec<CategoryConfig>, String> {
+pub async fn list_categories(
+    state: State<'_, StorageState>,
+) -> Result<Vec<CategoryConfig>, String> {
     let base_dir = state.base_dir().to_path_buf();
     categories::list_categories(&base_dir).map_err(|e| e.to_string())
 }
@@ -196,10 +195,7 @@ pub async fn save_category(
 }
 
 #[tauri::command]
-pub async fn delete_category(
-    id: String,
-    state: State<'_, StorageState>,
-) -> Result<(), String> {
+pub async fn delete_category(id: String, state: State<'_, StorageState>) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
     categories::delete_category(&base_dir, &id).map_err(|e| e.to_string())
 }
