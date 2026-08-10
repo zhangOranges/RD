@@ -134,6 +134,9 @@ jobs:
           echo ""
           echo "=== Any installer-like files anywhere under target? ==="
           find src-tauri/target -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) 2>/dev/null | head -50 || echo "(none)"
+          echo ""
+          echo "=== Diagnostic complete ==="
+          exit 0
 
       # ------------------------------------------------------------
       # 收集产物（各平台分别处理）
