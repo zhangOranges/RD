@@ -187,6 +187,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
     }
 
     setTesting(true);
+    const t0 = performance.now();
     try {
       const result = await invoke<{ home_dir: string; fingerprint: string }>('test_connection', {
         params: {
@@ -199,7 +200,8 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
           private_key: privateKey,
         },
       });
-      pushToast('success', `连接成功，主目录：${result.home_dir}`);
+      const latency = Math.round(performance.now() - t0);
+      pushToast('success', `连接成功，延迟 ${latency}ms`);
     } catch (err) {
       pushToast('error', `连接失败：${formatErr(err)}`);
     } finally {

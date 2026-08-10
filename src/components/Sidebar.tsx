@@ -178,6 +178,14 @@ export function Sidebar() {
   }
 
   function handleEdit(host: HostConfig) {
+    const connState = connectionStates[host.id];
+    if (connState === 'connected' || connState === 'connecting') {
+      if (!window.confirm('该主机当前已连接，编辑前需要先断开连接。是否立即断开并继续编辑？')) {
+        setMenuHostId(null);
+        return;
+      }
+      void disconnectHost(host.id);
+    }
     setEditingHost(host);
     setDuplicatePreset(null);
     setDialogOpen(true);
