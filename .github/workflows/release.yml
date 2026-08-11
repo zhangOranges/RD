@@ -138,11 +138,11 @@ jobs:
             echo "=== target 目录不存在（首次构建，无缓存） ==="
           fi
 
-      # ========== 6. 安装 tauri-cli（三层保障：rust-cache → actions/cache → 预编译下载） ==========
-      #   Layer 1: rust-cache 已在上方 restore，默认包含 $CARGO_HOME/bin
-      #   Layer 2: actions/cache@v4 单独缓存 cargo-tauri 二进制（fallback）
-      #   Layer 3: 直接下载 Tauri 官方预编译二进制（10 秒 vs cargo install 的 3-5 分钟）
-      #   兜底: cargo install tauri-cli --version "^2"（编译最保险但最慢）
+      # ========== 6. 安装 tauri-cli（三层保障） ==========
+      #   Layer 1: rust-cache 已 restore，若 $CARGO_BIN_DIR 已有 cargo-tauri 直接跳过
+      #   Layer 2: actions/cache@v4 缓存 cargo-tauri 二进制（跨构建复用）
+      #   Layer 3: npm install -g @tauri-apps/cli（自动识别平台，无需手动 case）
+      #   Fallback: 手动下载预编译二进制 → cargo install（兜底）
       - name: Cache prebuilt cargo-tauri binary
         id: cache-tauri-cli
         uses: actions/cache@v4
@@ -150,32 +150,35 @@ jobs:
           path: ${{ env.CARGO_BIN_DIR }}/cargo-tauri
           key: ${{ matrix.platform }}-cargo-tauri-v2.11.4
 
-      - name: Download official precompiled tauri-cli
+      - name: Install tauri-cli via npm (prebuilt binary)
         if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         shell: bash
         run: |
           export PATH="${CARGO_BIN_DIR}:$PATH"
-          BIN="${CARGO_BIN_DIR}/cargo-tauri"
           mkdir -p "$CARGO_BIN_DIR"
-          BASE_URL="https://github.com/tauri-apps/binary-releases/releases/download/tauri-cli-v2.11.4"
-          case "${{ matrix.platform }}" in
-            windows-latest)
-              curl -fsSL --retry 3 --connect-timeout 15 -o "${BIN}.exe" "${BASE_URL}/tauri-cli-x86_64-pc-windows-msvc.exe"
-              mv "${BIN}.exe" "$BIN"
-              ;;
-            ubuntu-22.04)
-              curl -fsSL --retry 3 --connect-timeout 15 -o "$BIN" "${BASE_URL}/tauri-cli-x86_64-unknown-linux-gnu"
-              chmod +x "$BIN"
-              ;;
-            macos-latest)
-              curl -fsSL --retry 3 --connect-timeout 15 -o "$BIN" "${BASE_URL}/tauri-cli-aarch64-apple-darwin"
-              chmod +x "$BIN"
-              ;;
-          esac
-          echo "下载完成，验证版本:"
-          "$BIN" --version 2>/dev/null || echo "⚠️ 预编译二进制验证失败，将 fallback 到 cargo install"
+          echo "使用 npm 安装 @tauri-apps/cli@2.11.4（自动识别平台预编译二进制）..."
+          npm install -g @tauri-apps/cli@2.11.4
+          # npm 全局 bin 目录里的 tauri 命令，复制到 CARGO_BIN_DIR 供 cargo 子命令调用
+          NPM_GLOBAL_BIN="$(npm bin -g 2>/dev/null || npm prefix -g)/bin"
+          TAURI_NPM="${NPM_GLOBAL_BIN}/tauri"
+          if [ -f "$TAURI_NPM" ]; then
+            cp "$TAURI_NPM" "${CARGO_BIN_DIR}/cargo-tauri"
+            chmod +x "${CARGO_BIN_DIR}/cargo-tauri" 2>/dev/null || true
+            echo "✅ 已从 npm 复制 tauri 二进制: $(ls -la "${CARGO_BIN_DIR}/cargo-tauri")"
+          else
+            # 兜底：在 npm 包目录里直接搜
+            FOUND=$(find "$(npm root -g)/@tauri-apps/cli" -name 'tauri' -type f 2>/dev/null | head -1)
+            if [ -n "$FOUND" ]; then
+              cp "$FOUND" "${CARGO_BIN_DIR}/cargo-tauri"
+              chmod +x "${CARGO_BIN_DIR}/cargo-tauri" 2>/dev/null || true
+              echo "✅ 兜底查找成功: $(ls -la "${CARGO_BIN_DIR}/cargo-tauri")"
+            else
+              echo "⚠️ npm 包中未找到 tauri 二进制，将 fallback"
+              exit 2
+            fi
+          fi
 
-      - name: Verify tauri-cli and fallback to cargo install
+      - name: Verify and fallback
         shell: bash
         run: |
           export PATH="${CARGO_BIN_DIR}:$PATH"
@@ -186,12 +189,32 @@ jobs:
             exit 0
           fi
 
-          echo "⚠️ 预编译二进制不可用，fallback 到 cargo install（首次构建或缓存失效）"
+          # ---- Fallback 1: 手动下载预编译二进制 ----
+          echo "⚠️ npm 方案未成功，尝试手动下载预编译二进制"
+          BASE_URL="https://github.com/tauri-apps/binary-releases/releases/download/tauri-cli-v2.11.4"
+          case "${{ matrix.platform }}" in
+            windows-latest)
+              curl -fsSL --retry 3 --connect-timeout 15 -o "${TAURI_BIN}.exe" "${BASE_URL}/tauri-cli-x86_64-pc-windows-msvc.exe" && mv "${TAURI_BIN}.exe" "$TAURI_BIN"
+              ;;
+            ubuntu-22.04)
+              curl -fsSL --retry 3 --connect-timeout 15 -o "$TAURI_BIN" "${BASE_URL}/tauri-cli-x86_64-unknown-linux-gnu" && chmod +x "$TAURI_BIN"
+              ;;
+            macos-latest)
+              curl -fsSL --retry 3 --connect-timeout 15 -o "$TAURI_BIN" "${BASE_URL}/tauri-cli-aarch64-apple-darwin" && chmod +x "$TAURI_BIN"
+              ;;
+          esac
+
+          if [ -f "$TAURI_BIN" ] && "$TAURI_BIN" --version >/dev/null 2>&1; then
+            echo "✅ 手动下载成功: $($TAURI_BIN --version 2>&1)"
+            exit 0
+          fi
+
+          # ---- Fallback 2: cargo install（兜底，最慢但最保险） ----
+          echo "⚠️ 所有预编译方案失败，最终 fallback 到 cargo install（3-5 分钟）"
           set +e
           cargo install tauri-cli --version "^2"
-          local BIN2="${CARGO_BIN_DIR}/cargo-tauri"
-          if [ -f "$BIN2" ]; then
-            echo "✅ cargo install 安装成功: $($BIN2 --version 2>&1)"
+          if [ -f "$TAURI_BIN" ]; then
+            echo "✅ cargo install 成功: $($TAURI_BIN --version 2>&1)"
             exit 0
           fi
           echo "❌ cargo-tauri 安装失败"
