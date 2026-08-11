@@ -48,6 +48,7 @@ export interface MirrorOption {
 const BUILTIN_MIRRORS: MirrorOption[] = [
   { id: 'github', name: 'GitHub 官方', desc: '直连，海外访问速度优先', builtin: true },
   { id: 'https://cdn.gh-proxy.org', name: 'cdn.gh-proxy 镜像', desc: '国内加速：cdn.gh-proxy.org', builtin: true },
+  { id: 'https://axisnow.gh-proxy.org', name: 'axisnow 镜像', desc: '国内加速：axisnow.gh-proxy.org', builtin: true },
 ];
 
 const CUSTOM_MIRRORS_KEY = 'app_updater_custom_mirrors';
