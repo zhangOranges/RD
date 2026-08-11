@@ -20,6 +20,7 @@ import {
   KeyRound,
   Puzzle,
   Search,
+  AlertTriangle,
 } from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore, type ToolType } from '../store/uiStore';
@@ -76,6 +77,77 @@ export function Sidebar() {
 
   const [newCategoryOpen, setNewCategoryOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+
+  // ========== 自定义确认 / 输入对话框（替代 window.confirm / window.prompt）==========
+  // Tauri WebView 环境下原生 window.confirm / window.prompt 常被禁用不弹框，
+  // 这里使用与其他对话框一致的 React Portal 自绘组件，样式上为紧凑 mini 版本。
+  type MiniDialogKind = 'confirm' | 'prompt';
+  interface MiniDialogState {
+    kind: MiniDialogKind;
+    title: string;
+    message: string;
+    // prompt 模式的默认值与 placeholder
+    promptDefault?: string;
+    promptPlaceholder?: string;
+    okLabel?: string;
+    cancelLabel?: string;
+    danger?: boolean; // 危险操作（删除 / 断开）：OK 按钮红色
+    onOk: (inputValue?: string) => void;
+  }
+  const [miniDialog, setMiniDialog] = useState<MiniDialogState | null>(null);
+  const [miniPromptInput, setMiniPromptInput] = useState('');
+
+  function closeMiniDialog() {
+    setMiniDialog(null);
+    setMiniPromptInput('');
+  }
+
+  function openConfirm(opts: {
+    title?: string;
+    message: string;
+    okLabel?: string;
+    cancelLabel?: string;
+    danger?: boolean;
+    onOk: () => void;
+  }) {
+    setMiniDialog({
+      kind: 'confirm',
+      title: opts.title ?? '请确认',
+      message: opts.message,
+      okLabel: opts.okLabel,
+      cancelLabel: opts.cancelLabel,
+      danger: opts.danger,
+      onOk: () => {
+        opts.onOk();
+        closeMiniDialog();
+      },
+    });
+  }
+
+  function openPrompt(opts: {
+    title?: string;
+    message: string;
+    defaultValue?: string;
+    placeholder?: string;
+    okLabel?: string;
+    cancelLabel?: string;
+    onOk: (value: string) => void;
+  }) {
+    setMiniPromptInput(opts.defaultValue ?? '');
+    setMiniDialog({
+      kind: 'prompt',
+      title: opts.title ?? '请输入',
+      message: opts.message,
+      promptDefault: opts.defaultValue,
+      promptPlaceholder: opts.placeholder,
+      okLabel: opts.okLabel,
+      cancelLabel: opts.cancelLabel,
+      onOk: (v) => {
+        if (typeof v === 'string') opts.onOk(v);
+        closeMiniDialog();
+      },
+    });
+  }
 
   // ========== 搜索框 ==========
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -180,11 +252,22 @@ export function Sidebar() {
   function handleEdit(host: HostConfig) {
     const connState = connectionStates[host.id];
     if (connState === 'connected' || connState === 'connecting') {
-      if (!window.confirm('该主机当前已连接，编辑前需要先断开连接。是否立即断开并继续编辑？')) {
-        setMenuHostId(null);
-        return;
-      }
-      void disconnectHost(host.id);
+      openConfirm({
+        title: '编辑前需断开连接',
+        message: `主机「${host.name}」当前已连接，编辑前需要先断开连接。是否立即断开并继续编辑？`,
+        okLabel: '断开并编辑',
+        cancelLabel: '取消',
+        danger: false,
+        onOk: () => {
+          void disconnectHost(host.id);
+          setEditingHost(host);
+          setDuplicatePreset(null);
+          setDialogOpen(true);
+          setMenuHostId(null);
+          closeContextMenu();
+        },
+      });
+      return;
     }
     setEditingHost(host);
     setDuplicatePreset(null);
@@ -230,18 +313,25 @@ export function Sidebar() {
     setDialogOpen(true);
   }
 
-  async function handleDelete(host: HostConfig) {
+  function handleDelete(host: HostConfig) {
     setMenuHostId(null);
-    const ok = window.confirm(`确认删除主机「${host.name}」？此操作不可撤销。`);
-    if (!ok) return;
-    try {
-      await removeHost(host.id);
-      // 清理该主机的终端标签持久化数据
-      useUIStore.getState().clearTerminalTabsForHost(host.id);
-      pushToast('success', '已删除主机');
-    } catch (err) {
-      pushToast('error', `删除失败：${formatErr(err)}`);
-    }
+    openConfirm({
+      title: '确认删除主机',
+      message: `确认删除主机「${host.name}」？此操作不可撤销。`,
+      okLabel: '确认删除',
+      cancelLabel: '取消',
+      danger: true,
+      onOk: async () => {
+        try {
+          await removeHost(host.id);
+          // 清理该主机的终端标签持久化数据
+          useUIStore.getState().clearTerminalTabsForHost(host.id);
+          pushToast('success', '已删除主机');
+        } catch (err) {
+          pushToast('error', `删除失败：${formatErr(err)}`);
+        }
+      },
+    });
   }
 
   async function handleToggleConnect(host: HostConfig) {
@@ -269,13 +359,27 @@ export function Sidebar() {
     toggleCategory(id);
   }
 
-  async function handleRenameCategory(cat: CategoryConfig) {
-    const name = window.prompt('重命名分类', cat.name);
-    if (!name) return;
-    await saveCategory({ ...cat, name: name.trim() });
+  function handleRenameCategory(cat: CategoryConfig) {
+    openPrompt({
+      title: '重命名分类',
+      message: `为分类「${cat.name}」设置新名称`,
+      defaultValue: cat.name,
+      placeholder: '分类名称',
+      okLabel: '保存',
+      cancelLabel: '取消',
+      onOk: async (name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        try {
+          await saveCategory({ ...cat, name: trimmed });
+        } catch (err) {
+          pushToast('error', `重命名失败：${formatErr(err)}`);
+        }
+      },
+    });
   }
 
-  async function handleDeleteCategory(cat: CategoryConfig) {
+  function handleDeleteCategory(cat: CategoryConfig) {
     if (cat.id === 'default') {
       pushToast('error', '默认分类不可删除');
       return;
@@ -284,13 +388,21 @@ export function Sidebar() {
     const msg = count > 0
       ? `分类「${cat.name}」下还有 ${count} 个主机，删除后这些主机将移至「默认」分类。确定删除？`
       : `确定删除分类「${cat.name}」？`;
-    if (!window.confirm(msg)) return;
-    try {
-      await deleteCategory(cat.id);
-      pushToast('success', '已删除分类');
-    } catch (err) {
-      pushToast('error', `删除失败：${formatErr(err)}`);
-    }
+    openConfirm({
+      title: '确认删除分类',
+      message: msg,
+      okLabel: '确认删除',
+      cancelLabel: '取消',
+      danger: true,
+      onOk: async () => {
+        try {
+          await deleteCategory(cat.id);
+          pushToast('success', '已删除分类');
+        } catch (err) {
+          pushToast('error', `删除失败：${formatErr(err)}`);
+        }
+      },
+    });
   }
 
   // ===== 右键菜单事件处理 =====
@@ -882,6 +994,82 @@ export function Sidebar() {
           }}
         />
       )}
+
+      {/* 自定义 mini 确认 / 输入对话框（紧凑版）：替代 window.confirm / window.prompt */}
+      {miniDialog &&
+        createPortal(
+          <div
+            className="dialog-overlay sidebar-mini-overlay"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => closeMiniDialog()}
+          >
+            <div
+              className="dialog dialog-mini"
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 420 }}
+            >
+              <div className="dialog-header">
+                <div className="sidebar-mini-title-wrap">
+                  {miniDialog.danger ? (
+                    <AlertTriangle
+                      size={16}
+                      className="sidebar-mini-icon sidebar-mini-icon-danger"
+                    />
+                  ) : (
+                    <AlertTriangle
+                      size={16}
+                      className="sidebar-mini-icon sidebar-mini-icon-info"
+                    />
+                  )}
+                  <h3 className="dialog-title">{miniDialog.title}</h3>
+                </div>
+              </div>
+              <div className="dialog-body sidebar-mini-body">
+                <p className="sidebar-mini-message">{miniDialog.message}</p>
+                {miniDialog.kind === 'prompt' && (
+                  <input
+                    type="text"
+                    className="sidebar-mini-input"
+                    autoFocus
+                    value={miniPromptInput}
+                    placeholder={miniDialog.promptPlaceholder}
+                    onChange={(e) => setMiniPromptInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        miniDialog.onOk(miniPromptInput);
+                      }
+                    }}
+                  />
+                )}
+              </div>
+              <div className="dialog-footer sidebar-mini-footer">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => closeMiniDialog()}
+                >
+                  {miniDialog.cancelLabel ?? '取消'}
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${miniDialog.danger ? 'btn-danger' : 'btn-primary'}`}
+                  onClick={() => {
+                    if (miniDialog.kind === 'prompt') {
+                      miniDialog.onOk(miniPromptInput);
+                    } else {
+                      miniDialog.onOk();
+                    }
+                  }}
+                >
+                  {miniDialog.okLabel ?? '确定'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </aside>
   );
 }

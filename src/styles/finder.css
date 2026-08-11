@@ -1577,6 +1577,66 @@ html[data-theme="dark"] body {
   animation: spin 1s linear infinite;
 }
 
+/* ---------- 紧凑版对话框（mini confirm / prompt）：替代原生 window.confirm/prompt ---------- */
+.dialog-mini {
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  animation: dialogPopIn 0.18s ease-out;
+}
+.sidebar-mini-overlay {
+  z-index: 100001;
+}
+.sidebar-mini-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-mini-icon-info {
+  color: var(--accent);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 35%, transparent));
+}
+.sidebar-mini-icon-danger {
+  color: var(--danger);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--danger) 40%, transparent));
+}
+.sidebar-mini-body {
+  padding: 14px 18px 12px;
+  gap: 12px;
+}
+.sidebar-mini-message {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sidebar-mini-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--divider-strong);
+  border-radius: var(--radius-control);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: var(--finder-font);
+}
+.sidebar-mini-input::placeholder {
+  color: var(--text-tertiary);
+}
+.sidebar-mini-input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-glow);
+}
+.sidebar-mini-footer {
+  padding: 10px 18px 16px;
+  justify-content: flex-end;
+  border-top: 0.5px solid var(--divider-soft);
+}
+
 /* ---------- 按钮体系：多态 + 科技感 ---------- */
 .btn {
   min-width: 76px;

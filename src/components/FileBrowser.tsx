@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText as clipboardWriteText } from '@tauri-apps/plugin-clipboard-manager';
+import { ask } from '@tauri-apps/plugin-dialog';
 import {
   Folder,
   File as FileIcon,
@@ -734,7 +735,6 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
   }
 
   async function handleCtxDelete(entry: FileEntry) {
-    // 多选删除：右击项已在选中集合内时，删除整个选中集合；否则只删除右击项
     const selectedSet = useFileStore.getState().selectedNames;
     const multiSelected = selectedSet.size > 1 && selectedSet.has(entry.name);
     const toDelete: FileEntry[] = multiSelected
@@ -744,7 +744,12 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     const label = multiSelected
       ? `已选 ${toDelete.length} 项`
       : `${entry.is_dir ? '文件夹' : '文件'}「${entry.name}」`;
-    const ok = window.confirm(`确认删除${label}？此操作不可撤销。`);
+    const ok = await ask(`确认删除${label}？此操作不可撤销。`, {
+      title: '确认删除',
+      kind: 'warning',
+      okLabel: '确认删除',
+      cancelLabel: '取消',
+    });
     if (!ok) return;
     closeCtxMenu();
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, Eye, Pencil } from 'lucide-react';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { useFileStore } from '../store/fileStore';
 import { useToastStore } from './Toast';
 
@@ -82,9 +83,15 @@ export function TextEditorDialog({
     }
   }
 
-  function handleClose() {
+  async function handleClose() {
     if (dirty) {
-      if (!window.confirm('文件已修改但未保存，确定关闭？')) return;
+      const ok = await ask('文件已修改但未保存，确定关闭？', {
+        title: '确认关闭',
+        kind: 'warning',
+        okLabel: '确认关闭',
+        cancelLabel: '继续编辑',
+      });
+      if (!ok) return;
     }
     onClose();
   }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, CheckCircle, AlertCircle, Ban, FolderOpen, Trash2 } from 'lucide-react';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { useTransferStore, formatBytes, formatSpeed } from '../store/transferStore';
 import { useToastStore } from './Toast';
 import type { TransferTask, TransferKind } from '../types';
@@ -41,9 +42,15 @@ export function TransferQueue() {
           type="button"
           className="rp-clear-btn rp-clear-all-btn"
           disabled={tasks.length === 0}
-          onClick={() => {
+          onClick={async () => {
             if (tasks.some((t) => t.status === 'running' || t.status === 'queued')) {
-              if (!window.confirm('有正在进行的传输任务，确定要清空全部吗？')) return;
+              const ok = await ask('有正在进行的传输任务，确定要清空全部吗？', {
+                title: '确认清空全部',
+                kind: 'warning',
+                okLabel: '确认清空',
+                cancelLabel: '取消',
+              });
+              if (!ok) return;
             }
             clearAll();
           }}
