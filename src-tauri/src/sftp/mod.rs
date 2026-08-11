@@ -25,6 +25,7 @@ use tauri::Emitter;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::ssh::SshState;
+use crate::{debug_log, LogLevel};
 
 pub use error::{is_session_closed, SftpError};
 pub use model::FileEntry;
@@ -100,6 +101,7 @@ impl SftpState {
         &self,
         host_id: &str,
         ssh_state: &SshState,
+        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<Arc<SftpSession>, SftpError> {
         // Fast path: a live session is already cached.
         {
@@ -110,26 +112,62 @@ impl SftpState {
         }
 
         // Slow path: open a fresh SFTP channel on the existing SSH session.
+        if let Some(app) = app_handle {
+            debug_log(app, LogLevel::Info, &format!("SFTP 创建会话: host_id={}", host_id));
+        }
         let shared_handle = ssh_state.get_connection(host_id).await?;
         let handle = shared_handle.lock().await;
 
         let channel = handle
             .channel_open_session()
             .await
-            .map_err(|e| SftpError::Sftp(format!("open session: {e}")))?;
+            .map_err(|e| {
+                let err = SftpError::Sftp(format!("open session: {e}"));
+                if let Some(app) = app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Error,
+                        &format!("SFTP open session 失败: host_id={} - {}", host_id, err),
+                    );
+                }
+                err
+            })?;
 
         channel
             .request_subsystem(true, "sftp")
             .await
-            .map_err(|e| SftpError::Sftp(format!("request sftp subsystem: {e}")))?;
+            .map_err(|e| {
+                let err = SftpError::Sftp(format!("request sftp subsystem: {e}"));
+                if let Some(app) = app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Error,
+                        &format!("SFTP request subsystem 失败: host_id={} - {}", host_id, err),
+                    );
+                }
+                err
+            })?;
 
         let sftp = SftpSession::new(channel.into_stream())
             .await
-            .map_err(|e| SftpError::Sftp(format!("init sftp: {e}")))?;
+            .map_err(|e| {
+                let err = SftpError::Sftp(format!("init sftp: {e}"));
+                if let Some(app) = app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Error,
+                        &format!("SFTP init session 失败: host_id={} - {}", host_id, err),
+                    );
+                }
+                err
+            })?;
 
         let sftp = Arc::new(sftp);
         let mut map = self.sessions.lock().await;
         map.insert(host_id.to_string(), sftp.clone());
+        if let Some(app) = app_handle {
+            debug_log(app, LogLevel::Info, &format!("SFTP 会话就绪: host_id={}", host_id));
+        }
         Ok(sftp)
     }
 
@@ -222,10 +260,13 @@ pub async fn sftp_list_dir(
     path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<Vec<FileEntry>, String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         match sftp.read_dir(path.clone()).await {
             Ok(rd) => {
                 let mut entries: Vec<FileEntry> = rd
@@ -237,10 +278,20 @@ pub async fn sftp_list_dir(
             Err(e) => {
                 let mapped: SftpError = e.into();
                 if is_session_closed(&mapped) && attempt == 0 {
+                    debug_log(
+                        &app_handle,
+                        LogLevel::Warn,
+                        &format!("sftp_list_dir 会话失效，重试: host_id={} path={}", host_id, path),
+                    );
                     sftp_state.invalidate(&host_id).await;
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!("sftp_list_dir 失败: host_id={} path={} - {}", host_id, path, mapped),
+                );
                 return Err(mapped.into());
             }
         }
@@ -254,10 +305,13 @@ pub async fn sftp_mkdir(
     path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         match sftp.create_dir(path.clone()).await {
             Ok(_) => return Ok(()),
             Err(e) => {
@@ -267,6 +321,11 @@ pub async fn sftp_mkdir(
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!("sftp_mkdir 失败: host_id={} path={} - {}", host_id, path, mapped),
+                );
                 return Err(mapped.into());
             }
         }
@@ -281,10 +340,13 @@ pub async fn sftp_rename(
     new_path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         match sftp.rename(old_path.clone(), new_path.clone()).await {
             Ok(_) => return Ok(()),
             Err(e) => {
@@ -294,6 +356,14 @@ pub async fn sftp_rename(
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!(
+                        "sftp_rename 失败: host_id={} {} -> {} - {}",
+                        host_id, old_path, new_path, mapped
+                    ),
+                );
                 return Err(mapped.into());
             }
         }
@@ -307,10 +377,13 @@ pub async fn sftp_remove_file(
     path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         match sftp.remove_file(path.clone()).await {
             Ok(_) => return Ok(()),
             Err(e) => {
@@ -320,6 +393,11 @@ pub async fn sftp_remove_file(
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!("sftp_remove_file 失败: host_id={} path={} - {}", host_id, path, mapped),
+                );
                 return Err(mapped.into());
             }
         }
@@ -380,10 +458,13 @@ pub async fn sftp_remove_dir(
     path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         match remove_dir_recursive(sftp.clone(), path.clone()).await {
             Ok(_) => return Ok(()),
             Err(e) => {
@@ -392,6 +473,11 @@ pub async fn sftp_remove_dir(
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!("sftp_remove_dir 失败: host_id={} path={} - {}", host_id, path, e),
+                );
                 return Err(e.into());
             }
         }
@@ -406,10 +492,13 @@ pub async fn sftp_resolve_path(
     path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         match sftp.canonicalize(path.clone()).await {
             Ok(v) => return Ok(v),
             Err(e) => {
@@ -419,6 +508,11 @@ pub async fn sftp_resolve_path(
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!("sftp_resolve_path 失败: host_id={} path={} - {}", host_id, path, mapped),
+                );
                 return Err(mapped.into());
             }
         }
@@ -459,12 +553,15 @@ pub async fn sftp_mkdir_all(
     path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let dirs = mkdir_p_helper(&path);
     for dir in dirs {
         let mut attempt = 0u32;
         loop {
-            let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+            let sftp = sftp_state
+                .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+                .await?;
             match sftp.create_dir(dir.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
@@ -482,6 +579,11 @@ pub async fn sftp_mkdir_all(
                         attempt += 1;
                         continue;
                     }
+                    debug_log(
+                        &app_handle,
+                        LogLevel::Warn,
+                        &format!("sftp_mkdir_all 失败: host_id={} dir={} - {}", host_id, dir, mapped),
+                    );
                     return Err(mapped.into());
                 }
             }
@@ -502,10 +604,13 @@ pub async fn sftp_write_file(
     data: Vec<u8>,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         let flags = OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE;
         match sftp.open_with_flags(path.clone(), flags).await {
             Ok(mut file) => match file.write_all(&data).await {
@@ -517,6 +622,11 @@ pub async fn sftp_write_file(
                         attempt += 1;
                         continue;
                     }
+                    debug_log(
+                        &app_handle,
+                        LogLevel::Warn,
+                        &format!("sftp_write_file 写入失败: host_id={} path={} - {}", host_id, path, mapped),
+                    );
                     return Err(mapped.into());
                 }
             },
@@ -527,6 +637,11 @@ pub async fn sftp_write_file(
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!("sftp_write_file 打开失败: host_id={} path={} - {}", host_id, path, mapped),
+                );
                 return Err(mapped.into());
             }
         }
@@ -540,10 +655,13 @@ pub async fn sftp_read_file(
     path: String,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<Vec<u8>, String> {
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         match sftp.read(path.clone()).await {
             Ok(data) => return Ok(data),
             Err(e) => {
@@ -553,6 +671,11 @@ pub async fn sftp_read_file(
                     attempt += 1;
                     continue;
                 }
+                debug_log(
+                    &app_handle,
+                    LogLevel::Warn,
+                    &format!("sftp_read_file 失败: host_id={} path={} - {}", host_id, path, mapped),
+                );
                 return Err(mapped.into());
             }
         }
@@ -686,7 +809,9 @@ pub async fn sftp_download_file(
 
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
 
         // 1. 探测文件大小
         let total = sftp
@@ -707,6 +832,17 @@ pub async fn sftp_download_file(
             local_pb.clone()
         };
 
+        if attempt == 0 {
+            debug_log(
+                &app_handle,
+                LogLevel::Info,
+                &format!(
+                    "sftp_download_file 开始: host_id={} {} -> {} ({} 字节)",
+                    host_id, remote_path, target_local.display(), total
+                ),
+            );
+        }
+
         let mut transferred = 0u64;
         match download_single_file(
             sftp.clone(),
@@ -721,6 +857,14 @@ pub async fn sftp_download_file(
         .await
         {
             Ok(_) => {
+                debug_log(
+                    &app_handle,
+                    LogLevel::Info,
+                    &format!(
+                        "sftp_download_file 完成: host_id={} {} ({} 字节)",
+                        host_id, remote_path, transferred
+                    ),
+                );
                 let evt = TransferProgressEvent {
                     task_id: task_id.clone(),
                     kind: "download".to_string(),
@@ -735,6 +879,11 @@ pub async fn sftp_download_file(
             }
             Err(e) => {
                 if matches!(e, SftpError::Cancelled) {
+                    debug_log(
+                        &app_handle,
+                        LogLevel::Info,
+                        &format!("sftp_download_file 取消: host_id={} {}", host_id, remote_path),
+                    );
                     let evt = TransferProgressEvent {
                         task_id: task_id.clone(),
                         kind: "download".to_string(),
@@ -753,6 +902,14 @@ pub async fn sftp_download_file(
                     continue;
                 }
                 let err_msg: String = e.into();
+                debug_log(
+                    &app_handle,
+                    LogLevel::Error,
+                    &format!(
+                        "sftp_download_file 失败: host_id={} {} - {}",
+                        host_id, remote_path, err_msg
+                    ),
+                );
                 let evt = TransferProgressEvent {
                     task_id: task_id.clone(),
                     kind: "download".to_string(),
@@ -790,7 +947,9 @@ pub async fn sftp_download_dir(
 
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
 
         // 1. 收集所有文件 + 统计总大小
         let files_arc = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<(String, u64)>::new()));
@@ -803,6 +962,14 @@ pub async fn sftp_download_dir(
                     continue;
                 }
                 let err_msg: String = e.into();
+                debug_log(
+                    &app_handle,
+                    LogLevel::Error,
+                    &format!(
+                        "sftp_download_dir 收集文件失败: host_id={} {} - {}",
+                        host_id, remote_path, err_msg
+                    ),
+                );
                 let evt = TransferProgressEvent {
                     task_id: task_id.clone(),
                     kind: "download".to_string(),
@@ -822,10 +989,26 @@ pub async fn sftp_download_dir(
         };
         let total_bytes: u64 = files.iter().map(|(_, s)| *s).sum();
 
+        if attempt == 0 {
+            debug_log(
+                &app_handle,
+                LogLevel::Info,
+                &format!(
+                    "sftp_download_dir 开始: host_id={} {} -> {} ({} 个文件, {} 字节)",
+                    host_id, remote_path, local_path, files.len(), total_bytes
+                ),
+            );
+        }
+
         // 2. 本地根目录：local_path / dir_name
         let local_root = PathBuf::from(&local_path).join(&dir_name);
         if let Err(e) = tokio::fs::create_dir_all(&local_root).await {
             let err_msg = format!("create local dir: {e}");
+            debug_log(
+                &app_handle,
+                LogLevel::Error,
+                &format!("sftp_download_dir 创建本地目录失败: {} - {}", local_root.display(), err_msg),
+            );
             let evt = TransferProgressEvent {
                 task_id: task_id.clone(),
                 kind: "download".to_string(),
@@ -886,6 +1069,14 @@ pub async fn sftp_download_dir(
 
         match result {
             Ok(_) => {
+                debug_log(
+                    &app_handle,
+                    LogLevel::Info,
+                    &format!(
+                        "sftp_download_dir 完成: host_id={} {} ({} 字节)",
+                        host_id, remote_path, transferred
+                    ),
+                );
                 let evt = TransferProgressEvent {
                     task_id: task_id.clone(),
                     kind: "download".to_string(),
@@ -900,6 +1091,11 @@ pub async fn sftp_download_dir(
             }
             Err(e) => {
                 if matches!(e, SftpError::Cancelled) {
+                    debug_log(
+                        &app_handle,
+                        LogLevel::Info,
+                        &format!("sftp_download_dir 取消: host_id={} {}", host_id, remote_path),
+                    );
                     let evt = TransferProgressEvent {
                         task_id: task_id.clone(),
                         kind: "download".to_string(),
@@ -918,6 +1114,14 @@ pub async fn sftp_download_dir(
                     continue;
                 }
                 let err_msg: String = e.into();
+                debug_log(
+                    &app_handle,
+                    LogLevel::Error,
+                    &format!(
+                        "sftp_download_dir 失败: host_id={} {} - {}",
+                        host_id, remote_path, err_msg
+                    ),
+                );
                 let evt = TransferProgressEvent {
                     task_id: task_id.clone(),
                     kind: "download".to_string(),
@@ -974,7 +1178,9 @@ pub async fn sftp_upload_chunk(
 
     let mut attempt = 0u32;
     loop {
-        let sftp = sftp_state.ensure_sftp(&host_id, &ssh_state).await?;
+        let sftp = sftp_state
+            .ensure_sftp(&host_id, &ssh_state, Some(&app_handle))
+            .await?;
         let flags = if is_first {
             OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE
         } else {
@@ -1001,13 +1207,24 @@ pub async fn sftp_upload_chunk(
                     Ok(_) => {
                         drop(file);
                         let transferred = bytes_offset + data.len() as u64;
+                        let is_completed = transferred >= total_bytes && total_bytes > 0;
+                        if is_completed {
+                            debug_log(
+                                &app_handle,
+                                LogLevel::Info,
+                                &format!(
+                                    "sftp_upload_chunk 完成: host_id={} {} ({} 字节)",
+                                    host_id, path, transferred
+                                ),
+                            );
+                        }
                         let evt = TransferProgressEvent {
                             task_id: task_id.clone(),
                             kind: "upload".to_string(),
                             name: name.clone(),
                             bytes_transferred: transferred,
                             total_bytes,
-                            status: if transferred >= total_bytes && total_bytes > 0 {
+                            status: if is_completed {
                                 "completed".to_string()
                             } else {
                                 "running".to_string()
@@ -1025,6 +1242,14 @@ pub async fn sftp_upload_chunk(
                             continue;
                         }
                         let err_msg: String = mapped.into();
+                        debug_log(
+                            &app_handle,
+                            LogLevel::Error,
+                            &format!(
+                                "sftp_upload_chunk 写入失败: host_id={} {} offset={} - {}",
+                                host_id, path, bytes_offset, err_msg
+                            ),
+                        );
                         let evt = TransferProgressEvent {
                             task_id: task_id.clone(),
                             kind: "upload".to_string(),
@@ -1047,6 +1272,14 @@ pub async fn sftp_upload_chunk(
                     continue;
                 }
                 let err_msg: String = mapped.into();
+                debug_log(
+                    &app_handle,
+                    LogLevel::Error,
+                    &format!(
+                        "sftp_upload_chunk 打开失败: host_id={} {} - {}",
+                        host_id, path, err_msg
+                    ),
+                );
                 let evt = TransferProgressEvent {
                     task_id: task_id.clone(),
                     kind: "upload".to_string(),

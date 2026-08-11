@@ -25,6 +25,7 @@ use super::parser::OscParser;
 use super::{
     PtyClosedPayload, PtyCwdPayload, PtyDataPayload, CLOSED_EVENT, CWD_CHANGED_EVENT, DATA_EVENT,
 };
+use crate::{debug_log, LogLevel};
 
 /// Commands sent from the foreground (Tauri commands) to the background read
 /// loop. The loop owns the russh `Channel` and is the only place that calls
@@ -53,7 +54,11 @@ impl PtySession {
         shared_handle: crate::ssh::SharedHandle,
         app: AppHandle,
     ) -> Result<Self, String> {
-        eprintln!("[PTY] creating session for host: {}", host_id);
+        debug_log(
+            &app,
+            LogLevel::Info,
+            &format!("[PTY] 创建会话: host_id={} tab_id={}", host_id, tab_id),
+        );
 
         // --- Open channel + request PTY + shell -------------------------------
         let channel = {
@@ -61,23 +66,44 @@ impl PtySession {
             handle
                 .channel_open_session()
                 .await
-                .map_err(|e| format!("open session channel: {e}"))?
+                .map_err(|e| {
+                    let msg = format!("open session channel: {e}");
+                    debug_log(
+                        &app,
+                        LogLevel::Error,
+                        &format!("[PTY] 打开 channel 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
+                    );
+                    msg
+                })?
         };
-        eprintln!("[PTY] channel opened for host: {}", host_id);
 
         // Use want_reply=false — some SSH servers don't send SSH_MSG_CHANNEL_SUCCESS
         // for pty/shell requests, causing want_reply=true to hang/fail.
         channel
             .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
             .await
-            .map_err(|e| format!("request pty: {e}"))?;
-        eprintln!("[PTY] pty requested for host: {}", host_id);
+            .map_err(|e| {
+                let msg = format!("request pty: {e}");
+                debug_log(
+                    &app,
+                    LogLevel::Error,
+                    &format!("[PTY] 请求 PTY 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
+                );
+                msg
+            })?;
 
         channel
             .request_shell(false)
             .await
-            .map_err(|e| format!("request shell: {e}"))?;
-        eprintln!("[PTY] shell requested for host: {}", host_id);
+            .map_err(|e| {
+                let msg = format!("request shell: {e}");
+                debug_log(
+                    &app,
+                    LogLevel::Error,
+                    &format!("[PTY] 请求 shell 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
+                );
+                msg
+            })?;
 
         // --- Inject PROMPT_COMMAND -------------------------------------------
         // Wait longer for the shell to fully start before sending PROMPT_COMMAND.
@@ -97,8 +123,15 @@ impl PtySession {
         channel
             .data(init.as_bytes())
             .await
-            .map_err(|e| format!("send prompt_command: {e}"))?;
-        eprintln!("[PTY] PROMPT_COMMAND injected for host: {}", host_id);
+            .map_err(|e| {
+                let msg = format!("send prompt_command: {e}");
+                debug_log(
+                    &app,
+                    LogLevel::Error,
+                    &format!("[PTY] 注入 PROMPT_COMMAND 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
+                );
+                msg
+            })?;
 
         // --- Spawn read loop --------------------------------------------------
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -109,10 +142,14 @@ impl PtySession {
             tab_id.clone(),
             channel,
             cmd_rx,
-            app,
+            app.clone(),
             closed.clone(),
         ));
-        eprintln!("[PTY] read_loop spawned for host: {}", host_id);
+        debug_log(
+            &app,
+            LogLevel::Info,
+            &format!("[PTY] 会话就绪: host_id={} tab_id={}", host_id, tab_id),
+        );
 
         Ok(Self {
             cmd_tx,
@@ -187,19 +224,35 @@ async fn read_loop(
                         handle_output(&host_id, &tab_id, &app, &mut parser, data);
                     }
                     Some(ChannelMsg::Eof) => {
-                        eprintln!("[PTY] channel EOF received for host: {}", host_id);
+                        debug_log(
+                            &app,
+                            LogLevel::Info,
+                            &format!("[PTY] 收到 EOF: host_id={} tab_id={}", host_id, tab_id),
+                        );
                         break;
                     }
                     Some(ChannelMsg::Close) => {
-                        eprintln!("[PTY] channel CLOSE received for host: {}", host_id);
+                        debug_log(
+                            &app,
+                            LogLevel::Info,
+                            &format!("[PTY] 收到 CLOSE: host_id={} tab_id={}", host_id, tab_id),
+                        );
                         break;
                     }
                     None => {
-                        eprintln!("[PTY] channel.wait() returned None for host: {}", host_id);
+                        debug_log(
+                            &app,
+                            LogLevel::Warn,
+                            &format!("[PTY] channel.wait() 返回 None: host_id={} tab_id={}", host_id, tab_id),
+                        );
                         break;
                     }
                     other => {
-                        eprintln!("[PTY] channel message: {:?} for host: {}", std::mem::discriminant(&other), host_id);
+                        debug_log(
+                            &app,
+                            LogLevel::Info,
+                            &format!("[PTY] channel 消息: {:?} host_id={} tab_id={}", std::mem::discriminant(&other), host_id, tab_id),
+                        );
                     }
                 }
             }
@@ -207,7 +260,11 @@ async fn read_loop(
                 match cmd {
                     Some(PtyCommand::Write(data)) => {
                         if let Err(e) = channel.data(&data[..]).await {
-                            eprintln!("[PTY] write error for host {}: {}", host_id, e);
+                            debug_log(
+                                &app,
+                                LogLevel::Error,
+                                &format!("[PTY] 写入失败: host_id={} tab_id={} - {}", host_id, tab_id, e),
+                            );
                             break;
                         }
                     }
@@ -215,7 +272,11 @@ async fn read_loop(
                         let _ = channel.window_change(cols, rows, 0, 0).await;
                     }
                     None => {
-                        eprintln!("[PTY] cmd_tx dropped for host: {}", host_id);
+                        debug_log(
+                            &app,
+                            LogLevel::Info,
+                            &format!("[PTY] cmd_tx 已关闭，正在退出: host_id={} tab_id={}", host_id, tab_id),
+                        );
                         let _ = channel.eof().await;
                         let _ = channel.close().await;
                         break;
@@ -225,9 +286,10 @@ async fn read_loop(
         }
     }
 
-    eprintln!(
-        "[PTY] read_loop exited for host: {} tab: {}",
-        host_id, tab_id
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!("[PTY] read_loop 已退出: host_id={} tab_id={}", host_id, tab_id),
     );
     closed.store(true, Ordering::Release);
     let _ = app.emit(

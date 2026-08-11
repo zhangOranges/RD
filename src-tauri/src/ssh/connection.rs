@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 
 use super::error::SshError;
 use super::handler::{ClientHandler, HandlerSharedState};
+use crate::{debug_log, LogLevel};
 
 /// Shared, lockable handle to a russh client session.
 ///
@@ -84,6 +85,17 @@ impl ConnectionHandle {
         let host_port = format!("{}:{}", params.host, params.port);
         let addr = (params.host.as_str(), params.port);
 
+        if let Some(app) = &app_handle {
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "SSH 连接开始: host_id={}, {} (auth={})",
+                    params.host_id, host_port, params.auth_type
+                ),
+            );
+        }
+
         // --- russh client config -------------------------------------------------
         let config = client::Config {
             keepalive_interval: Some(std::time::Duration::from_secs(15)),
@@ -91,7 +103,7 @@ impl ConnectionHandle {
             ..Default::default()
         };
 
-        let handler = ClientHandler::new(params.host_id.clone(), host_port.clone(), app_handle);
+        let handler = ClientHandler::new(params.host_id.clone(), host_port.clone(), app_handle.clone());
         let shared = handler.shared_state();
 
         // --- TCP + SSH handshake -------------------------------------------------
@@ -107,10 +119,25 @@ impl ConnectionHandle {
                     .ok()
                     .and_then(|mut guard| guard.take())
                 {
+                    if let Some(app) = &app_handle {
+                        debug_log(
+                            app,
+                            LogLevel::Error,
+                            &format!("SSH 连接失败: {} - {}", host_port, specific),
+                        );
+                    }
                     return Err(specific);
                 }
+                let mapped = map_connect_error(e);
+                if let Some(app) = &app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Error,
+                        &format!("SSH 连接失败: {} - {}", host_port, mapped),
+                    );
+                }
                 // Distinguish "can't reach host" from other failures.
-                return Err(map_connect_error(e));
+                return Err(mapped);
             }
         };
 
@@ -126,7 +153,22 @@ impl ConnectionHandle {
             let _ = handle
                 .disconnect(Disconnect::ByApplication, "auth abort", "en")
                 .await;
+            if let Some(app) = &app_handle {
+                debug_log(
+                    app,
+                    LogLevel::Error,
+                    &format!("SSH kex 阶段错误: {} - {}", host_port, specific),
+                );
+            }
             return Err(specific);
+        }
+
+        if let Some(app) = &app_handle {
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!("SSH 握手成功: {}", host_port),
+            );
         }
 
         // --- Authenticate --------------------------------------------------------
@@ -138,7 +180,16 @@ impl ConnectionHandle {
                 handle
                     .authenticate_password(&params.username, &password)
                     .await
-                    .map_err(SshError::Ssh)?
+                    .map_err(|e| {
+                        if let Some(app) = &app_handle {
+                            debug_log(
+                                app,
+                                LogLevel::Error,
+                                &format!("密码认证异常: {} - {}", host_port, e),
+                            );
+                        }
+                        SshError::Ssh(e)
+                    })?
             }
             "key" => {
                 let key_str = params
@@ -148,19 +199,42 @@ impl ConnectionHandle {
                 // Passphrase (if the key is encrypted) comes from the password
                 // field; otherwise None.
                 let passphrase = params.password.as_deref();
-                let key_pair =
-                    russh::keys::decode_secret_key(&key_str, passphrase).map_err(|e| {
-                        SshError::Internal(format!("failed to decode private key: {e}"))
-                    })?;
+                let key_pair = russh::keys::decode_secret_key(&key_str, passphrase).map_err(|e| {
+                    let err = SshError::Internal(format!("failed to decode private key: {e}"));
+                    if let Some(app) = &app_handle {
+                        debug_log(
+                            app,
+                            LogLevel::Error,
+                            &format!("私钥解析失败: {} - {}", host_port, err),
+                        );
+                    }
+                    err
+                })?;
                 handle
                     .authenticate_publickey(&params.username, Arc::new(key_pair))
                     .await
-                    .map_err(SshError::Ssh)?
+                    .map_err(|e| {
+                        if let Some(app) = &app_handle {
+                            debug_log(
+                                app,
+                                LogLevel::Error,
+                                &format!("公钥认证异常: {} - {}", host_port, e),
+                            );
+                        }
+                        SshError::Ssh(e)
+                    })?
             }
             other => {
                 let _ = handle
                     .disconnect(Disconnect::ByApplication, "bad auth_type", "en")
                     .await;
+                if let Some(app) = &app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Error,
+                        &format!("未知认证类型: {} - {}", host_port, other),
+                    );
+                }
                 return Err(SshError::Internal(format!("unknown auth_type: {other}")));
             }
         };
@@ -169,7 +243,22 @@ impl ConnectionHandle {
             let _ = handle
                 .disconnect(Disconnect::ByApplication, "auth failed", "en")
                 .await;
+            if let Some(app) = &app_handle {
+                debug_log(
+                    app,
+                    LogLevel::Warn,
+                    &format!("认证失败（凭据错误）: {}", host_port),
+                );
+            }
             return Err(SshError::AuthFailed);
+        }
+
+        if let Some(app) = &app_handle {
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!("认证成功: {} ({})", host_port, params.auth_type),
+            );
         }
 
         // --- Resolve home dir via a throwaway SFTP channel ----------------------
@@ -177,8 +266,26 @@ impl ConnectionHandle {
         // The persistent SFTP channel is established later in Task 4. If SFTP
         // is unavailable we fall back to "~" so the connect still succeeds.
         let home_dir = match resolve_home_dir(&handle).await {
-            Ok(path) => path,
-            Err(_) => "~".to_string(),
+            Ok(path) => {
+                if let Some(app) = &app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Info,
+                        &format!("home_dir 解析成功: {} -> {}", host_port, path),
+                    );
+                }
+                path
+            }
+            Err(e) => {
+                if let Some(app) = &app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Warn,
+                        &format!("home_dir 解析失败，回退到 ~: {} - {}", host_port, e),
+                    );
+                }
+                "~".to_string()
+            }
         };
 
         let fingerprint = shared
@@ -188,6 +295,18 @@ impl ConnectionHandle {
             .and_then(|guard| guard.clone());
 
         let handle_arc: SharedHandle = Arc::new(Mutex::new(handle));
+
+        if let Some(app) = &app_handle {
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "SSH 连接就绪: {} (fingerprint={})",
+                    host_port,
+                    fingerprint.as_deref().unwrap_or("?")
+                ),
+            );
+        }
 
         Ok(ConnectionHandle {
             host_id: params.host_id.clone(),

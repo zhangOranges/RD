@@ -21,6 +21,8 @@ pub use hosts::HostConfig;
 use std::path::{Path, PathBuf};
 use tauri::State;
 
+use crate::{debug_log, LogLevel};
+
 const APP_DIR_NAME: &str = "ssh-sftp-finder";
 
 /// 持有本地存储基础目录的 Tauri 状态。
@@ -66,9 +68,23 @@ pub async fn get_host(
 
 /// 仅保存非敏感配置；敏感凭据请使用 `save_credential`。
 #[tauri::command]
-pub async fn save_host(host: HostConfig, state: State<'_, StorageState>) -> Result<(), String> {
+pub async fn save_host(
+    host: HostConfig,
+    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
-    hosts::save_host(&base_dir, host).map_err(|e| e.to_string())
+    let host_id = host.id.clone();
+    let host_name = host.name.clone();
+    hosts::save_host(&base_dir, host).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("save_host 失败: host_id={} name={} - {}", host_id, host_name, msg),
+        );
+        msg
+    })
 }
 
 /// 删除主机，同时级联删除其凭据（password / private_key）与路径缓存。
@@ -76,8 +92,13 @@ pub async fn save_host(host: HostConfig, state: State<'_, StorageState>) -> Resu
 /// 路径缓存会同时清理「host.id 前缀」和「path_cache_id 前缀」，
 /// 避免新旧格式的缓存残留。
 #[tauri::command]
-pub async fn delete_host(id: String, state: State<'_, StorageState>) -> Result<(), String> {
+pub async fn delete_host(
+    id: String,
+    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
+    debug_log(&app, LogLevel::Info, &format!("delete_host 开始: id={}", id));
     // 先取出可能存在的 path_cache_id，删完主机配置后就拿不到了
     let cache_key = hosts::get_host(&base_dir, &id)
         .ok()
@@ -89,23 +110,39 @@ pub async fn delete_host(id: String, state: State<'_, StorageState>) -> Result<(
                 Some(h.path_cache_id)
             }
         });
-    hosts::delete_host(&base_dir, &id).map_err(|e| e.to_string())?;
+    hosts::delete_host(&base_dir, &id).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(&app, LogLevel::Error, &format!("delete_host 删除主机配置失败: id={} - {}", id, msg));
+        msg
+    })?;
     // 删除 host.id 前缀的路径缓存（旧格式或未分配 path_cache_id 的主机）
-    path_cache::delete_host_paths(&base_dir, &id).map_err(|e| e.to_string())?;
+    path_cache::delete_host_paths(&base_dir, &id).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(&app, LogLevel::Error, &format!("delete_host 删除路径缓存失败: id={} - {}", id, msg));
+        msg
+    })?;
     // 删除 path_cache_id 前缀的路径缓存（新格式），若与 id 相同则为幂等重复
     if let Some(ref k) = cache_key {
         if k != &id {
-            path_cache::delete_host_paths(&base_dir, k).map_err(|e| e.to_string())?;
+            path_cache::delete_host_paths(&base_dir, k).map_err(|e| {
+                let msg = e.to_string();
+                debug_log(
+                    &app,
+                    LogLevel::Error,
+                    &format!("delete_host 删除路径缓存失败: cache_key={} - {}", k, msg),
+                );
+                msg
+            })?;
         }
     }
     for cred_type in ["password", "private_key"] {
         if let Err(e) = credentials::delete_credential(&id, cred_type) {
-            return Err(format!(
-                "删除凭据失败 ({}): {}；主机配置与路径缓存已删除。",
-                cred_type, e
-            ));
+            let msg = format!("删除凭据失败 ({}): {}；主机配置与路径缓存已删除。", cred_type, e);
+            debug_log(&app, LogLevel::Error, &format!("delete_host {}: id={} - {}", cred_type, id, e));
+            return Err(msg);
         }
     }
+    debug_log(&app, LogLevel::Info, &format!("delete_host 完成: id={}", id));
     Ok(())
 }
 
@@ -114,13 +151,34 @@ pub async fn save_credential(
     host_id: String,
     cred_type: String,
     value: String,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
-    credentials::save_credential(&host_id, &cred_type, &value).map_err(|e| e.to_string())
+    credentials::save_credential(&host_id, &cred_type, &value).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("save_credential 失败: host_id={} type={} - {}", host_id, cred_type, msg),
+        );
+        msg
+    })
 }
 
 #[tauri::command]
-pub async fn get_credential(host_id: String, cred_type: String) -> Result<Option<String>, String> {
-    credentials::get_credential(&host_id, &cred_type).map_err(|e| e.to_string())
+pub async fn get_credential(
+    host_id: String,
+    cred_type: String,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    credentials::get_credential(&host_id, &cred_type).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("get_credential 失败: host_id={} type={} - {}", host_id, cred_type, msg),
+        );
+        msg
+    })
 }
 
 /// 把「前端传入的 host_id」解析成真正用于 path_cache 查询的键：
@@ -152,10 +210,22 @@ pub async fn set_path_cache(
     tab_id: String,
     path: String,
     state: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
     let key = resolve_cache_key(&base_dir, &host_id);
-    path_cache::set_path(&base_dir, &key, &tab_id, &path).map_err(|e| e.to_string())
+    path_cache::set_path(&base_dir, &key, &tab_id, &path).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "set_path_cache 失败: host_id={} tab_id={} path={} - {}",
+                host_id, tab_id, path, msg
+            ),
+        );
+        msg
+    })
 }
 
 /// 读取设置。键不存在时返回该键的默认值（无默认值则为空字符串）。
@@ -170,9 +240,18 @@ pub async fn set_setting(
     key: String,
     value: String,
     state: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
-    settings::set_setting(&base_dir, &key, &value).map_err(|e| e.to_string())
+    settings::set_setting(&base_dir, &key, &value).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("set_setting 失败: key={} value={} - {}", key, value, msg),
+        );
+        msg
+    })
 }
 
 // ===== 分类（分组）CRUD =====

@@ -27,6 +27,8 @@ pub use error::SshError;
 pub use exec::{get_server_stats, ServerStats};
 pub use handler::{ClientHandler, HandlerSharedState, DISCONNECTED_EVENT};
 
+use crate::{debug_log, LogLevel};
+
 /// Global SSH connection state, registered with Tauri via `.manage(new_state())`.
 pub struct SshState {
     connections: tokio::sync::Mutex<HashMap<String, ConnectionHandle>>,
@@ -109,7 +111,7 @@ pub async fn connect_host(
     }
 
     // Perform the actual connect + auth (outside the map lock).
-    let result = ConnectionHandle::connect(&params, Some(app)).await;
+    let result = ConnectionHandle::connect(&params, Some(app.clone())).await;
 
     match result {
         Ok(conn) => {
@@ -125,10 +127,16 @@ pub async fn connect_host(
             Ok(connect_result)
         }
         Err(e) => {
+            let err_str: String = e.into();
             // Remove the placeholder on failure.
             let mut map = state.connections.lock().await;
             map.remove(&host_id);
-            Err(e.into())
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("connect_host 注册失败: host_id={} {} - {}", host_id, host_port, err_str),
+            );
+            Err(err_str)
         }
     }
 }
@@ -138,13 +146,23 @@ pub async fn connect_host(
 pub async fn disconnect_host(
     host_id: String,
     state: tauri::State<'_, SshState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
+    debug_log(&app, LogLevel::Info, &format!("disconnect_host: host_id={}", host_id));
     let removed = {
         let mut map = state.connections.lock().await;
         map.remove(&host_id)
     };
     if let Some(conn) = removed {
-        conn.disconnect().await.map_err(String::from)?;
+        conn.disconnect().await.map_err(|e| {
+            let msg = String::from(e);
+            debug_log(
+                &app,
+                LogLevel::Warn,
+                &format!("disconnect_host 断开失败: host_id={} - {}", host_id, msg),
+            );
+            msg
+        })?;
     }
     Ok(())
 }

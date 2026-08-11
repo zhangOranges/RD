@@ -4,6 +4,7 @@ use russh::ChannelMsg;
 use serde::Serialize;
 
 use super::{SshError, SshState};
+use crate::{debug_log, LogLevel};
 
 /// Execute a command on the remote server and return its stdout.
 /// Intended for short-lived commands (server stats, etc.).
@@ -11,6 +12,7 @@ pub async fn ssh_exec_raw(
     state: &SshState,
     host_id: &str,
     command: &str,
+    app_handle: Option<&tauri::AppHandle>,
 ) -> Result<String, SshError> {
     let handle = state.get_connection(host_id).await?;
 
@@ -18,13 +20,33 @@ pub async fn ssh_exec_raw(
         let h = handle.lock().await;
         h.channel_open_session()
             .await
-            .map_err(|e| SshError::ChannelError(format!("open exec channel: {e}")))?
+            .map_err(|e| {
+                let err = SshError::ChannelError(format!("open exec channel: {e}"));
+                if let Some(app) = app_handle {
+                    debug_log(
+                        app,
+                        LogLevel::Error,
+                        &format!("ssh_exec_raw 打开 channel 失败: host_id={} - {}", host_id, err),
+                    );
+                }
+                err
+            })?
     };
 
     channel
         .exec(true, command)
         .await
-        .map_err(|e| SshError::ChannelError(format!("exec: {e}")))?;
+        .map_err(|e| {
+            let err = SshError::ChannelError(format!("exec: {e}"));
+            if let Some(app) = app_handle {
+                debug_log(
+                    app,
+                    LogLevel::Error,
+                    &format!("ssh_exec_raw exec 失败: host_id={} cmd={} - {}", host_id, command, err),
+                );
+            }
+            err
+        })?;
 
     let mut output = Vec::new();
     let mut exit_code: i32 = 0;
@@ -49,9 +71,15 @@ pub async fn ssh_exec_raw(
     }
 
     if exit_code != 0 {
-        return Err(SshError::ChannelError(format!(
-            "command exited with code {exit_code}"
-        )));
+        let err = SshError::ChannelError(format!("command exited with code {exit_code}"));
+        if let Some(app) = app_handle {
+            debug_log(
+                app,
+                LogLevel::Warn,
+                &format!("ssh_exec_raw 非零退出: host_id={} cmd={} - code {}", host_id, command, exit_code),
+            );
+        }
+        return Err(err);
     }
 
     Ok(String::from_utf8_lossy(&output).to_string())
@@ -107,12 +135,14 @@ fn parse_proc_stat_first_line(out: &str) -> Option<(u64, u64)> {
 pub async fn get_server_stats(
     host_id: String,
     state: tauri::State<'_, SshState>,
+    app: tauri::AppHandle,
 ) -> Result<ServerStats, String> {
     // CPU model + cores
     let cpu_out = ssh_exec_raw(
         &state,
         &host_id,
         "cat /proc/cpuinfo | grep 'model name' | head -1; echo '---'; nproc",
+        Some(&app),
     )
     .await
     .unwrap_or_default();
@@ -127,11 +157,11 @@ pub async fn get_server_stats(
 
     // CPU 占用率：采样两次 /proc/stat，间隔 500ms，按 (total-idle)/total 差值计算
     let cpu_usage: f64 = {
-        let s1 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat")
+        let s1 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat", Some(&app))
             .await
             .unwrap_or_default();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let s2 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat")
+        let s2 = ssh_exec_raw(&state, &host_id, "head -n1 /proc/stat", Some(&app))
             .await
             .unwrap_or_default();
         match (
@@ -152,7 +182,7 @@ pub async fn get_server_stats(
     };
 
     // Memory: parse /proc/meminfo
-    let mem_out = ssh_exec_raw(&state, &host_id, "cat /proc/meminfo")
+    let mem_out = ssh_exec_raw(&state, &host_id, "cat /proc/meminfo", Some(&app))
         .await
         .unwrap_or_default();
     let mut mem_total_kb: u64 = 0;
@@ -181,7 +211,7 @@ pub async fn get_server_stats(
     };
 
     // Disk: df -B1 /
-    let disk_out = ssh_exec_raw(&state, &host_id, "df -B1 / | tail -1")
+    let disk_out = ssh_exec_raw(&state, &host_id, "df -B1 / | tail -1", Some(&app))
         .await
         .unwrap_or_default();
     let disk_parts: Vec<&str> = disk_out.split_whitespace().collect();
@@ -191,19 +221,36 @@ pub async fn get_server_stats(
     let disk_used_gb = disk_used_bytes as f64 / 1_073_741_824.0;
 
     // Load average
-    let load_out = ssh_exec_raw(&state, &host_id, "cat /proc/loadavg | awk '{print $1}'")
-        .await
-        .unwrap_or_default();
+    let load_out = ssh_exec_raw(
+        &state,
+        &host_id,
+        "cat /proc/loadavg | awk '{print $1}'",
+        Some(&app),
+    )
+    .await
+    .unwrap_or_default();
     let load_avg: f64 = load_out.trim().parse().unwrap_or(0.0);
 
     // OS info
-    let os_out = ssh_exec_raw(&state, &host_id, "cat /etc/os-release 2>/dev/null | grep '^PRETTY_NAME=' | cut -d= -f2- | tr -d '\"' || uname -s").await.unwrap_or_default();
+    let os_out = ssh_exec_raw(
+        &state,
+        &host_id,
+        "cat /etc/os-release 2>/dev/null | grep '^PRETTY_NAME=' | cut -d= -f2- | tr -d '\"' || uname -s",
+        Some(&app),
+    )
+    .await
+    .unwrap_or_default();
     let os_info = os_out.trim().to_string();
 
     // Uptime
-    let up_out = ssh_exec_raw(&state, &host_id, "cat /proc/uptime | awk '{print $1}'")
-        .await
-        .unwrap_or_default();
+    let up_out = ssh_exec_raw(
+        &state,
+        &host_id,
+        "cat /proc/uptime | awk '{print $1}'",
+        Some(&app),
+    )
+    .await
+    .unwrap_or_default();
     let uptime_secs: u64 = up_out
         .trim()
         .split('.')

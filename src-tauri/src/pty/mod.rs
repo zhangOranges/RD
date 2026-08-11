@@ -33,6 +33,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::ssh::SshState;
+use crate::{debug_log, LogLevel};
 use session::PtySession;
 
 // --- Event names -----------------------------------------------------------
@@ -147,13 +148,35 @@ pub async fn pty_open(
     let shared_handle = ssh_state
         .get_connection(&host_id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            let msg = e.to_string();
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("[PTY] pty_open 获取 SSH 连接失败: host_id={} - {}", host_id, msg),
+            );
+            msg
+        })?;
 
     let tab_id_resolved = tab_id.unwrap_or_else(|| "default".to_string());
 
     // Create the PTY session: opens channel, requests PTY + shell, injects
     // PROMPT_COMMAND, spawns the background read loop.
-    let session = PtySession::create(host_id.clone(), tab_id_resolved, shared_handle, app).await?;
+    let session = PtySession::create(
+        host_id.clone(),
+        tab_id_resolved.clone(),
+        shared_handle,
+        app.clone(),
+    )
+    .await
+    .map_err(|e| {
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("[PTY] pty_open 创建会话失败: host_id={} tab_id={} - {}", host_id, tab_id_resolved, e),
+        );
+        e
+    })?;
 
     // Register in the state map.
     {
@@ -171,6 +194,7 @@ pub async fn pty_close(
     host_id: String,
     tab_id: Option<String>,
     pty_state: State<'_, PtyState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let sessions = pty_state.sessions.clone();
     let key = session_key(&host_id, &tab_id);
@@ -179,6 +203,11 @@ pub async fn pty_close(
         map.remove(&key)
     };
     if let Some(session) = session {
+        debug_log(
+            &app,
+            LogLevel::Info,
+            &format!("[PTY] pty_close: host_id={} tab_id={}", host_id, tab_id.unwrap_or_else(|| "default".to_string())),
+        );
         session.shutdown().await;
     }
     Ok(())

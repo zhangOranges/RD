@@ -11,7 +11,7 @@ use tauri::{Emitter, Manager};
 
 /// 日志级别
 #[derive(Clone, Copy)]
-enum LogLevel {
+pub enum LogLevel {
     Info,
     Warn,
     Error,
@@ -82,6 +82,14 @@ fn write_update_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
 
     // 同时输出到 stderr，方便开发调试
     eprint!("[UPDATE-LOG] {}", line);
+}
+
+/// 全局调试日志：受 DebugLogState 控制
+/// - Info 级别仅在调试开启时写入
+/// - Warn/Error 始终写入
+/// 供其他模块调用，统一写入 update.log
+pub fn debug_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
+    write_update_log(app, level, msg);
 }
 
 /// 前端调用：写入一条更新日志
@@ -191,14 +199,21 @@ fn greet(name: &str) -> String {
 /// 测量对指定 URL 的 HTTP 请求延迟（毫秒）。
 /// 成功返回延迟 ms，失败返回 -1。超时 6 秒。
 #[tauri::command]
-async fn probe_url(url: String) -> i64 {
+async fn probe_url(app: tauri::AppHandle, url: String) -> i64 {
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(6))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
     {
         Ok(c) => c,
-        Err(_) => return -1,
+        Err(e) => {
+            write_update_log(
+                &app,
+                LogLevel::Error,
+                &format!("probe_url 创建客户端失败: {} - {}", url, e),
+            );
+            return -1;
+        }
     };
 
     let start = Instant::now();
@@ -207,12 +222,33 @@ async fn probe_url(url: String) -> i64 {
         Err(_) => false,
     };
     if head_ok {
-        return start.elapsed().as_millis() as i64;
+        let ms = start.elapsed().as_millis() as i64;
+        write_update_log(
+            &app,
+            LogLevel::Info,
+            &format!("probe_url HEAD 成功: {} ({} ms)", url, ms),
+        );
+        return ms;
     }
     let start2 = Instant::now();
     match client.get(&url).send().await {
-        Ok(_) => start2.elapsed().as_millis() as i64,
-        Err(_) => -1,
+        Ok(_) => {
+            let ms = start2.elapsed().as_millis() as i64;
+            write_update_log(
+                &app,
+                LogLevel::Info,
+                &format!("probe_url GET 成功: {} ({} ms)", url, ms),
+            );
+            ms
+        }
+        Err(e) => {
+            write_update_log(
+                &app,
+                LogLevel::Warn,
+                &format!("probe_url 不可达: {} - {}", url, e),
+            );
+            -1
+        }
     }
 }
 
