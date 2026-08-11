@@ -5,6 +5,9 @@ on:
       - 'v*'
 permissions:
   contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   # ------------------------------------------------------------
   # 三平台构建：Windows / Linux / macOS (Apple Silicon)
@@ -57,20 +60,11 @@ jobs:
       - name: Install npm deps
         run: npm ci --prefer-offline --no-audit --no-fund
 
-      # ========== 2. Rust 工具链 + sccache 编译加速（核心增量优化） ==========
+      # ========== 2. Rust 工具链 ==========
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      # 安装 sccache 全局编译缓存工具
-      - name: Install sccache
-        run: cargo install sccache
-      - name: 启用 sccache 包装 rustc
-        run: echo "Enabled sccache wrapper"
-        env:
-          RUSTC_WRAPPER: sccache
-          SCCACHE_CACHE_SIZE: 5G
 
       # ========== 3. 系统依赖（Linux 专用） ==========
       - name: Install Linux system dependencies
@@ -96,7 +90,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/tauri
-          key: ${{ matrix.platform }}-tauri-v2
+          key: ${{ matrix.platform }}-tauri-cli-${{ hashFiles('src-tauri/Cargo.lock') }}
       - name: Install cargo-tauri
         if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2"
@@ -109,17 +103,22 @@ jobs:
           path: src-tauri/.tauri-cache
           key: ${{ matrix.platform }}-tauri-wix-v1
       - name: Set Tauri cache dir env
+        if: matrix.platform == 'windows-latest'
+        shell: bash
         run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
 
       # ========== 6. rust-cache 智能增量缓存（改造重点） ==========
+      # - cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
+      # - cache-extension-objects: true 缓存 .rlib 扩展对象，链接阶段也能复用
+      # 这两项是增量编译生效的关键
       - name: Rust incremental compile cache
         id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
-          cache-all-crates: false
+          cache-all-crates: true
           target-names: ${{ matrix.target }}
-          cache-extension-objects: false
+          cache-extension-objects: true
       - name: Print cache hit status
         run: |
           echo "Rust cache hit: ${{ steps.rust-cache.outputs.cache-hit }}"
@@ -134,18 +133,21 @@ jobs:
             exit 1
           fi
           echo "Key length: ${#KEY} chars"
-          echo "Key prefix (first 40 chars): ${KEY:0:40}..."
+          echo "Key is set: $([[ -n "$KEY" ]] && echo yes || echo no)"
 
-      # ========== Tauri 构建，继承 sccache 环境变量 ==========
+      # ========== Tauri 构建（开启增量编译） ==========
+      # CARGO_INCREMENTAL=1 让 release 模式也启用增量编译
+      # 第二次构建时未变更的 crate 直接复用缓存，仅重编译改动部分
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          RUSTC_WRAPPER: sccache
+          CARGO_INCREMENTAL: 1
 
-      # ========== 诊断产物目录 ==========
-      - name: Diagnose bundle output (all platforms)
+      # ========== 诊断产物目录（仅在构建失败时执行，减少日志噪音） ==========
+      - name: Diagnose bundle output (on failure)
+        if: failure()
         shell: bash
         run: |
           set +o pipefail

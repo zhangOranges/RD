@@ -60,14 +60,6 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
-      - name: Install sccache
-        run: cargo install sccache
-      - name: Enable sccache compile cache
-        run: echo "Enabled sccache compile cache"
-        env:
-          RUSTC_WRAPPER: sccache
-          SCCACHE_CACHE_SIZE: 5G
-
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
         with:
@@ -96,14 +88,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-
-      - name: Install sccache
-        run: cargo install sccache
-      - name: Enable sccache compile cache
-        run: echo "Enabled sccache compile cache"
-        env:
-          RUSTC_WRAPPER: sccache
-          SCCACHE_CACHE_SIZE: 5G
 
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
