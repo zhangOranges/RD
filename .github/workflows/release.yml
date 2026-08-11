@@ -94,9 +94,19 @@ jobs:
         id: rustc-hash
         shell: bash
         run: |
-          # 绝对路径字符串写入 GITHUB_ENV（bash 先展开 $HOME，actions/cache 不会二次展开 $HOME）
+          # actions/cache@v4 在 Windows 上不认 Git Bash 的 /c/Users/X 格式，
+          # 必须用原生 Windows 路径格式 (C:/Users/X)。
+          # 用 cygpath -w 把 /c/Users/X → C:\Users/X，再把反斜杠替换成正斜杠，
+          # 这样 bash 和 actions/cache 都能识别。
           HOME_ABS="$(cd "$HOME" && pwd)"
-          CARGO_BIN_DIR="${HOME_ABS}/.cargo/bin"
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            WIN_HOME=$(cygpath -w "$HOME_ABS" 2>/dev/null || echo "$USERPROFILE")
+            # 反斜杠 → 正斜杠：C:\Users\X → C:/Users/X
+            WIN_HOME_FWD="${WIN_HOME//\\//}"
+            CARGO_BIN_DIR="${WIN_HOME_FWD}/.cargo/bin"
+          else
+            CARGO_BIN_DIR="${HOME_ABS}/.cargo/bin"
+          fi
           mkdir -p "$CARGO_BIN_DIR"
           echo "CARGO_BIN_DIR=${CARGO_BIN_DIR}" >> "$GITHUB_ENV"
           echo "Resolved CARGO_BIN_DIR: ${CARGO_BIN_DIR}"
