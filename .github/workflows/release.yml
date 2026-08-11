@@ -447,14 +447,19 @@ jobs:
             for (const f of fs.readdirSync(manifestsDir)) {
               if (!f.endsWith('.json')) continue;
               const m = JSON.parse(fs.readFileSync(path.join(manifestsDir, f), 'utf8'));
-              if (!m.key || !m.url_filename || !m.signature) {
+              // signature 可选：客户端手动实现更新逻辑，不依赖 Tauri updater 签名校验
+              // 只要 key 和 url_filename 存在即可
+              if (!m.key || !m.url_filename) {
                 console.error(`Skipping incomplete manifest: ${f}`, m);
                 continue;
               }
+              if (!m.signature) {
+                console.error(`Warning: manifest ${f} has empty signature, including anyway`);
+              }
               const entry = {
-                signature: m.signature,
                 url: m.url,
               };
+              if (m.signature) entry.signature = m.signature;
               if (m.format) entry.format = m.format;
               if (typeof m.size === 'number' && m.size > 0) {
                 entry.size = m.size;
