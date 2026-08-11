@@ -44,14 +44,5 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU2Q0U5NjFFNDgyNEUyMjQKUldRazRpUklIcGJPNWxsaUx0TUZQT0hEZE1VTG1YTU84TjNrSjM0d2J0UjZDMmQ4aFdFSjBMaisK",
-      "endpoints": [
-        "https://github.com/zhangOranges/RD/releases/latest/download/latest.json"
-      ],
-      "dialog": false
-    }
   }
 }

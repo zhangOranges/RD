@@ -49,6 +49,20 @@ function UpdateBadge() {
     );
   }
 
+  if (updater.status === 'up-to-date') {
+    return (
+      <button
+        type="button"
+        className="statusbar-item update-badge is-up-to-date"
+        onClick={() => updater.check()}
+        title="当前已是最新版本，点击重新检查"
+      >
+        <CheckCircle2 size={11} />
+        <span>当前已是最新版本</span>
+      </button>
+    );
+  }
+
   if (updater.status === 'error') {
     return (
       <button

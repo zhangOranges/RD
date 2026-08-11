@@ -23,11 +23,6 @@
     "fs:allow-write-file",
     "fs:allow-read-file",
     "fs:allow-read-dir",
-    "fs:allow-exists",
-    "updater:default",
-    "updater:allow-check",
-    "updater:allow-download",
-    "updater:allow-install",
-    "updater:allow-download-and-install"
+    "fs:allow-exists"
   ]
 }

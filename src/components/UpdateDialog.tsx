@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -8,11 +9,14 @@ import {
   PackageCheck,
   DownloadCloud,
   RefreshCw,
+  AlertTriangle,
+  FolderOpen,
 } from 'lucide-react';
 import {
   useAppUpdater,
-  UPDATE_MIRROR_OPTIONS,
+  getMirrorOptions,
   type UpdateMirror,
+  type MirrorOption,
 } from '../hooks/useAppUpdater';
 
 /**
@@ -102,6 +106,11 @@ function renderNotes(notes: string | null): string {
 
 export function UpdateDialog() {
   const updater = useAppUpdater();
+  const [mirrorOptions, setMirrorOptions] = useState<MirrorOption[]>([]);
+
+  useEffect(() => {
+    setMirrorOptions(getMirrorOptions());
+  }, [updater.dialogVisible]);
 
   if (!updater.dialogVisible) return null;
 
@@ -113,12 +122,14 @@ export function UpdateDialog() {
   const isDownloading = status === 'downloading';
   const isDownloaded = status === 'downloaded'; // 下载完成，待确认安装
   const isInstalling = status === 'installing';
+  const isError = status === 'error';
 
   // 标题
   let title = '发现新版本';
   if (isDownloading) title = '正在下载更新';
   else if (isDownloaded) title = '更新包已下载完成';
   else if (isInstalling) title = '正在安装更新';
+  else if (isError) title = '更新失败';
 
   // 安装中禁用关闭按钮（安装过程不可打断）；下载中允许关闭，继续后台下载
   const closeDisabled = isInstalling;
@@ -135,9 +146,23 @@ export function UpdateDialog() {
     updater.installLater();
   };
 
+  const handleOpenFolder = () => {
+    void updater.openFolder();
+  };
+
   const handleClose = () => {
     if (closeDisabled) return;
     updater.hideDialog();
+  };
+
+  // 错误重试：如果已有可用版本号，说明是下载失败，重试下载；否则重试检查
+  const handleErrorRetry = () => {
+    updater.dismissError();
+    if (updater.availableVersion) {
+      void updater.download();
+    } else {
+      void updater.check();
+    }
   };
 
   return createPortal(
@@ -151,7 +176,9 @@ export function UpdateDialog() {
       <div className="dialog dialog-update" onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <div className="update-dialog-title-wrap">
-            {isDownloaded ? (
+            {isError ? (
+              <AlertTriangle size={18} className="update-dialog-spark update-dialog-icon-error" />
+            ) : isDownloaded ? (
               <PackageCheck size={18} className="update-dialog-spark update-dialog-icon-ready" />
             ) : isDownloading ? (
               <RefreshCw size={18} className="update-dialog-spark spin" />
@@ -177,12 +204,25 @@ export function UpdateDialog() {
         </div>
 
         <div className="dialog-body update-dialog-body">
+          {/* 错误状态：显示错误详情 */}
+          {isError && (
+            <div className="update-banner update-banner-error">
+              <AlertTriangle size={14} />
+              <div className="update-banner-error-detail">
+                <div className="update-banner-error-title">检查或下载更新时出错：</div>
+                <pre className="update-banner-error-msg">{updater.errorMsg ?? '未知错误'}</pre>
+              </div>
+            </div>
+          )}
+
           {/* 下载中提示条：提示用户进度在状态栏 */}
           {isDownloading && (
             <div className="update-banner update-banner-downloading">
               <RefreshCw size={14} className="spin" />
               <span>
-                正在后台下载更新，可关闭此对话框继续使用。下载进度可在右下角状态栏查看，下载完成后将自动弹出确认。
+                {updater.progressPct === 0
+                  ? '正在获取下载地址，请稍候…可关闭此对话框继续使用。'
+                  : '正在后台下载更新，可关闭此对话框继续使用。下载进度可在右下角状态栏查看，下载完成后将自动弹出确认。'}
               </span>
             </div>
           )}
@@ -257,8 +297,27 @@ export function UpdateDialog() {
             <div className="update-mirror-section">
               <div className="update-mirror-title">下载源（国内网络建议选择镜像加速）</div>
               <div className="update-mirror-grid">
-                {UPDATE_MIRROR_OPTIONS.map((opt) => {
+                {mirrorOptions.map((opt) => {
                   const selected = updater.mirror === opt.id;
+                  const delay = updater.mirrorDelays?.[opt.id];
+                  let delayLabel: string;
+                  let delayClass: string;
+                  if (delay === undefined || delay === null) {
+                    delayLabel = '不可达';
+                    delayClass = 'mirror-delay mirror-delay-bad';
+                  } else if (delay < 0) {
+                    delayLabel = '超时';
+                    delayClass = 'mirror-delay mirror-delay-bad';
+                  } else if (delay < 300) {
+                    delayLabel = `${delay} ms`;
+                    delayClass = 'mirror-delay mirror-delay-good';
+                  } else if (delay < 1000) {
+                    delayLabel = `${delay} ms`;
+                    delayClass = 'mirror-delay mirror-delay-ok';
+                  } else {
+                    delayLabel = `${(delay / 1000).toFixed(1)} s`;
+                    delayClass = 'mirror-delay mirror-delay-bad';
+                  }
                   return (
                     <button
                       key={opt.id}
@@ -269,7 +328,10 @@ export function UpdateDialog() {
                     >
                       <div className="mirror-card-header">
                         <span className="mirror-card-name">{opt.name}</span>
-                        {selected && <Check size={14} className="mirror-card-check" />}
+                        <div className="mirror-card-right">
+                          <span className={delayClass}>{delayLabel}</span>
+                          {selected && <Check size={14} className="mirror-card-check" />}
+                        </div>
                       </div>
                       <div className="mirror-card-desc">{opt.desc}</div>
                     </button>
@@ -315,9 +377,18 @@ export function UpdateDialog() {
             </div>
           )}
 
-          {/* 下载完成 → 立即安装 / 下次启动 */}
+          {/* 下载完成 → 打开文件夹 / 下次启动安装 / 立即安装 */}
           {isDownloaded && !isInstalling && (
             <>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleOpenFolder}
+                title="在文件管理器中打开安装包所在目录"
+              >
+                <FolderOpen size={14} />
+                <span>打开文件夹</span>
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -341,8 +412,25 @@ export function UpdateDialog() {
           {isInstalling && (
             <div className="update-footer-busy update-footer-installing">
               <DownloadCloud size={12} />
-              <span>安装中，完成后程序将自动重启…</span>
+              <span>安装中，完成后程序将自动退出…</span>
             </div>
+          )}
+
+          {/* 错误 → 重试 + 关闭 */}
+          {isError && (
+            <>
+              <button type="button" className="btn btn-ghost" onClick={handleClose}>
+                关闭
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleErrorRetry}
+              >
+                <RefreshCw size={14} />
+                <span>{updater.availableVersion ? '重新下载' : '重试'}</span>
+              </button>
+            </>
           )}
         </div>
       </div>

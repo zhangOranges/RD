@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Check, Palette, Sliders, DownloadCloud, Network, RefreshCw, Gauge, Plus, Trash2 } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
 import {
   getMirrorOptions,
   getUpdateMirror,
+  setUpdateMirror,
   addCustomMirror,
   removeCustomMirror,
   probeMirrorLatency,
@@ -133,9 +134,6 @@ export function SettingsDialog() {
       );
       if (reachable.length === 0) {
         pushToast('error', '所有镜像均无法连通，请检查网络后重试', 4000);
-      } else {
-        const min = Math.min(...reachable);
-        pushToast('success', `延迟检测完成，最快 ${min}ms`, 3000);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -145,12 +143,13 @@ export function SettingsDialog() {
     }
   }
 
-  /** 延迟分级颜色：<300 绿 / <1000 黄 / 其他 红 / null 灰 */
-  function latencyLevel(ms: number | null): 'fast' | 'mid' | 'slow' | 'unknown' {
-    if (ms === null || !Number.isFinite(ms)) return 'unknown';
-    if (ms < 300) return 'fast';
-    if (ms < 1000) return 'mid';
-    return 'slow';
+  /** 延迟标签：与 UpdateDialog 保持一致的分级逻辑 */
+  function delayLabelFor(delay: number | null | undefined, probing: boolean): { label: string; cls: string } {
+    if (probing) return { label: '检测中…', cls: 'mirror-delay mirror-delay-bad' };
+    if (delay === undefined || delay === null) return { label: '不可达', cls: 'mirror-delay mirror-delay-bad' };
+    if (delay < 300) return { label: `${delay} ms`, cls: 'mirror-delay mirror-delay-good' };
+    if (delay < 1000) return { label: `${delay} ms`, cls: 'mirror-delay mirror-delay-ok' };
+    return { label: `${(delay / 1000).toFixed(1)} s`, cls: 'mirror-delay mirror-delay-bad' };
   }
 
   function handleAddCustomMirror() {
@@ -319,43 +318,26 @@ export function SettingsDialog() {
 
                 <div className="settings-mirror-grid">
                   {mirrorOptions.map((opt) => {
-                    const delay = delays[opt.id] ?? null;
-                    const level = latencyLevel(delay);
+                    const selected = updateMirror === opt.id;
+                    const delay = delays[opt.id];
+                    const { label: delayLabel, cls: delayClass } = delayLabelFor(delay, probing);
                     return (
                       <div
                         key={opt.id}
-                        className={`mirror-card ${!opt.builtin ? 'is-custom' : ''}`}
+                        className={`mirror-card ${selected ? 'is-selected' : ''} ${!opt.builtin ? 'is-custom' : ''}`}
+                        onClick={() => {
+                          setUpdateMirrorState(opt.id as UpdateMirror);
+                          setUpdateMirror(opt.id as UpdateMirror);
+                        }}
+                        style={{ cursor: 'pointer' }}
                       >
                         <div className="mirror-card-info">
                           <div className="mirror-card-header">
                             <span className="mirror-card-name">{opt.name}</span>
-                            <span
-                              className={`mirror-latency mirror-latency-${level}`}
-                              title={
-                                delay === null
-                                  ? probing
-                                    ? '等待检测…'
-                                    : '未检测或连接失败'
-                                  : `延迟 ${delay} ms`
-                              }
-                            >
-                              {probing ? (
-                                <>
-                                  <Network size={10} />
-                                  <span>检测中</span>
-                                </>
-                              ) : delay === null ? (
-                                <>
-                                  <Network size={10} />
-                                  <span>—</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Network size={10} />
-                                  <span>{delay} ms</span>
-                                </>
-                              )}
-                            </span>
+                            <div className="mirror-card-right">
+                              <span className={delayClass}>{delayLabel}</span>
+                              {selected && <Check size={14} className="mirror-card-check" />}
+                            </div>
                           </div>
                           <div className="mirror-card-desc">{opt.desc}</div>
                         </div>
@@ -364,7 +346,10 @@ export function SettingsDialog() {
                             type="button"
                             className="mirror-card-delete"
                             title="删除此自定义镜像源"
-                            onClick={() => handleRemoveCustomMirror(opt.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveCustomMirror(opt.id);
+                            }}
                           >
                             <Trash2 size={12} />
                           </button>
@@ -402,6 +387,53 @@ export function SettingsDialog() {
                   </div>
                   <div className="settings-add-mirror-hint">
                     输入镜像站点地址（如 https://v4.gh-proxy.org），会作为 GitHub URL 的前缀拼接。
+                  </div>
+                </div>
+
+                {/* 更新日志 */}
+                <div className="settings-update-log-section">
+                  <div className="settings-pane-row">
+                    <div>
+                      <div className="settings-pane-title">更新日志</div>
+                      <div className="settings-update-mirror-desc">
+                        记录检查更新、下载、安装过程中的关键事件和错误，用于排查更新问题。点击按钮在文件管理器中打开日志文件所在目录。
+                      </div>
+                    </div>
+                    <div className="settings-log-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={async () => {
+                          try {
+                            // 打开日志文件所在文件夹（通过 open_folder 命令，传入日志文件路径）
+                            // 需要先获取日志文件路径，这里直接调用 open_folder 传入一个占位路径
+                            // 实际上我们需要一个新的命令来打开日志文件夹
+                            await invoke('open_update_log_folder');
+                            pushToast('success', '已打开日志文件夹');
+                          } catch (err) {
+                            pushToast('error', `打开日志文件夹失败：${formatErr(err)}`);
+                          }
+                        }}
+                      >
+                        <FolderOpen size={13} />
+                        <span>打开日志文件夹</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={async () => {
+                          try {
+                            await invoke('clear_update_log');
+                            pushToast('success', '日志已清空');
+                          } catch (err) {
+                            pushToast('error', `清空日志失败：${formatErr(err)}`);
+                          }
+                        }}
+                      >
+                        <Eraser size={13} />
+                        <span>清空日志</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
