@@ -120,7 +120,8 @@ jobs:
           target-names: ${{ matrix.target }}
           cache-extension-objects: false
       - name: Print cache hit status
-        run: echo "Rust cache hit: ${{ steps.rust-cache.outputs.cache-hit }}"
+        run: |
+          echo "Rust cache hit: ${{ steps.rust-cache.outputs.cache-hit }}"
 
       # ========== 原有签名校验步骤不变 ==========
       - name: Verify signing key secret (debug)
