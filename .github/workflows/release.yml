@@ -84,143 +84,15 @@ jobs:
             dpkg \
             file
 
-      # ========== 4. 先 Rust 增量缓存 RESTORE，再安装 tauri-cli ==========
-      # 顺序很重要：Swatinem/rust-cache 在这一步 restore target + CARGO_BIN_DIR，
-      # 这样下一步 Install cargo-tauri 就能检测到缓存里的 cargo-tauri 而跳过安装。
-      - name: Resolve cargo bin dir
-        shell: bash
-        run: |
-          HOME_ABS="$(cd "$HOME" && pwd)"
-          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
-            WIN_HOME=$(cygpath -w "$HOME_ABS" 2>/dev/null || echo "$USERPROFILE")
-            WIN_HOME_FWD="${WIN_HOME//\\//}"
-            CARGO_BIN_DIR="${WIN_HOME_FWD}/.cargo/bin"
-          else
-            CARGO_BIN_DIR="${HOME_ABS}/.cargo/bin"
-          fi
-          mkdir -p "$CARGO_BIN_DIR"
-          echo "CARGO_BIN_DIR=${CARGO_BIN_DIR}" >> "$GITHUB_ENV"
-          echo "Resolved CARGO_BIN_DIR: ${CARGO_BIN_DIR}"
-
-      # ========== 5. rust-cache 智能增量缓存（RESTORE 必须在 Install cargo-tauri 之前） ==========
-      # cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
-      # cache-targets: true 缓存 target 下所有 target 的编译产物
-      # 注：不要传 cache-directories 给绝对路径，会干扰 rust-cache 的缓存 key 哈希算法
-      #   rust-cache 默认已包含 $CARGO_HOME/{bin,registry}，足够用。
-      # 注：不要使用 shared-key，它会改变 cache key 结构导致 restore 不匹配
+      # ========== 4. Rust 增量缓存（第三方依赖 + target，跟 v0.1.12 一样简单可靠） ==========
       - name: Rust incremental compile cache
-        id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
           cache-all-crates: true
           cache-targets: true
 
-      - name: Print cache hit status & restored contents
-        shell: bash
-        run: |
-          echo "Rust cache-hit (primary key exact): ${{ steps.rust-cache.outputs.cache-hit }}"
-          echo "Primary cache key:        ${{ steps.rust-cache.outputs.cache-primary-key }}"
-          echo ""
-          echo "=== CARGO_BIN_DIR 已恢复的内容（关键：cargo-tauri 是否存在） ==="
-          ls -la "${CARGO_BIN_DIR}" 2>/dev/null | head -20 || echo "(空目录，首次构建)"
-          echo ""
-          # 注意：cache-hit=false ≠ 没恢复！Swatinem/rust-cache 命中 restore-key 时也会恢复 target
-          # 只看 cache-hit 不可靠，直接检查 target 目录的大小和内容
-          TARGET_DIR="src-tauri/target"
-          if [ -d "$TARGET_DIR" ]; then
-            echo "=== target 目录已恢复（来自 restore-key 命中） ==="
-            du -sh "$TARGET_DIR" 2>/dev/null || true
-            # 数一下已编译的 .rlib 数量（第三方依赖的编译产物）
-            RLIB_COUNT=$(find "$TARGET_DIR" -name "*.rlib" 2>/dev/null | wc -l)
-            echo "已缓存的 .rlib 文件数: $RLIB_COUNT"
-          else
-            echo "=== target 目录不存在（首次构建，无缓存） ==="
-          fi
-
-      # ========== 6. 安装 tauri-cli（三层保障） ==========
-      #   Layer 1: rust-cache 已 restore，若 $CARGO_BIN_DIR 已有 cargo-tauri 直接跳过
-      #   Layer 2: actions/cache@v4 缓存 cargo-tauri 二进制（跨构建复用）
-      #   Layer 3: npm install -g @tauri-apps/cli（自动识别平台，无需手动 case）
-      #   Fallback: 手动下载预编译二进制 → cargo install（兜底）
-      - name: Cache prebuilt cargo-tauri binary
-        id: cache-tauri-cli
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CARGO_BIN_DIR }}/cargo-tauri
-          key: ${{ matrix.platform }}-cargo-tauri-v2.11.4
-
-      - name: Install tauri-cli via npm (prebuilt binary)
-        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          export PATH="${CARGO_BIN_DIR}:$PATH"
-          mkdir -p "$CARGO_BIN_DIR"
-          echo "使用 npm 安装 @tauri-apps/cli@2.11.4（自动识别平台预编译二进制）..."
-          npm install -g @tauri-apps/cli@2.11.4
-          # npm 全局 bin 目录里的 tauri 命令，复制到 CARGO_BIN_DIR 供 cargo 子命令调用
-          NPM_GLOBAL_BIN="$(npm bin -g 2>/dev/null || npm prefix -g)/bin"
-          TAURI_NPM="${NPM_GLOBAL_BIN}/tauri"
-          if [ -f "$TAURI_NPM" ]; then
-            cp "$TAURI_NPM" "${CARGO_BIN_DIR}/cargo-tauri"
-            chmod +x "${CARGO_BIN_DIR}/cargo-tauri" 2>/dev/null || true
-            echo "✅ 已从 npm 复制 tauri 二进制: $(ls -la "${CARGO_BIN_DIR}/cargo-tauri")"
-          else
-            # 兜底：在 npm 包目录里直接搜
-            FOUND=$(find "$(npm root -g)/@tauri-apps/cli" -name 'tauri' -type f 2>/dev/null | head -1)
-            if [ -n "$FOUND" ]; then
-              cp "$FOUND" "${CARGO_BIN_DIR}/cargo-tauri"
-              chmod +x "${CARGO_BIN_DIR}/cargo-tauri" 2>/dev/null || true
-              echo "✅ 兜底查找成功: $(ls -la "${CARGO_BIN_DIR}/cargo-tauri")"
-            else
-              echo "⚠️ npm 包中未找到 tauri 二进制，将 fallback"
-              exit 2
-            fi
-          fi
-
-      - name: Verify and fallback
-        shell: bash
-        run: |
-          export PATH="${CARGO_BIN_DIR}:$PATH"
-          TAURI_BIN="${CARGO_BIN_DIR}/cargo-tauri"
-
-          if [ -f "$TAURI_BIN" ] && "$TAURI_BIN" --version >/dev/null 2>&1; then
-            echo "✅ cargo-tauri 可用: $($TAURI_BIN --version 2>&1)"
-            exit 0
-          fi
-
-          # ---- Fallback 1: 手动下载预编译二进制 ----
-          echo "⚠️ npm 方案未成功，尝试手动下载预编译二进制"
-          BASE_URL="https://github.com/tauri-apps/binary-releases/releases/download/tauri-cli-v2.11.4"
-          case "${{ matrix.platform }}" in
-            windows-latest)
-              curl -fsSL --retry 3 --connect-timeout 15 -o "${TAURI_BIN}.exe" "${BASE_URL}/tauri-cli-x86_64-pc-windows-msvc.exe" && mv "${TAURI_BIN}.exe" "$TAURI_BIN"
-              ;;
-            ubuntu-22.04)
-              curl -fsSL --retry 3 --connect-timeout 15 -o "$TAURI_BIN" "${BASE_URL}/tauri-cli-x86_64-unknown-linux-gnu" && chmod +x "$TAURI_BIN"
-              ;;
-            macos-latest)
-              curl -fsSL --retry 3 --connect-timeout 15 -o "$TAURI_BIN" "${BASE_URL}/tauri-cli-aarch64-apple-darwin" && chmod +x "$TAURI_BIN"
-              ;;
-          esac
-
-          if [ -f "$TAURI_BIN" ] && "$TAURI_BIN" --version >/dev/null 2>&1; then
-            echo "✅ 手动下载成功: $($TAURI_BIN --version 2>&1)"
-            exit 0
-          fi
-
-          # ---- Fallback 2: cargo install（兜底，最慢但最保险） ----
-          echo "⚠️ 所有预编译方案失败，最终 fallback 到 cargo install（3-5 分钟）"
-          set +e
-          cargo install tauri-cli --version "^2"
-          if [ -f "$TAURI_BIN" ]; then
-            echo "✅ cargo install 成功: $($TAURI_BIN --version 2>&1)"
-            exit 0
-          fi
-          echo "❌ cargo-tauri 安装失败"
-          exit 1
-
-      # ========== 7. Windows 缓存 Wix 打包工具（解决每次下载Wix） ==========
+      # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
       - name: Cache Tauri Wix tools (Windows only)
         if: matrix.platform == 'windows-latest'
         uses: actions/cache@v4
@@ -232,8 +104,8 @@ jobs:
         shell: bash
         run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
 
-      # ========== 原有签名校验步骤不变 ==========
-      - name: Verify signing key secret (debug)
+      # ========== 6. 签名密钥校验 ==========
+      - name: Verify signing key secret
         shell: bash
         run: |
           KEY="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
@@ -242,11 +114,10 @@ jobs:
             exit 1
           fi
           echo "Key length: ${#KEY} chars"
-          echo "Key is set: $([[ -n "$KEY" ]] && echo yes || echo no)"
 
-      # ========== Tauri 构建（开启增量编译） ==========
-      # CARGO_INCREMENTAL=1 让 release 模式也启用增量编译
-      # 第二次构建时未变更的 crate 直接复用缓存，仅重编译改动部分
+      # ========== 7. Tauri 构建（增量编译） ==========
+      # 注意：tauri-cli 不需要单独安装！因为 package.json devDeps 有 @tauri-apps/cli，
+      # 上面 npm ci 时已经装好 node_modules/.bin/tauri，直接走 npm run tauri 调用。
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
         env:
