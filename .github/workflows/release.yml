@@ -84,24 +84,15 @@ jobs:
             dpkg \
             file
 
-      # ========== 4. 缓存 ~/.cargo/bin 目录（包含 tauri-cli、cargo-binstall 二进制） ==========
-      # 之前只缓存单个 tauri 文件总是报路径不存在，原因：
-      #   1. cargo-binstall / cargo install 的安装位置可能与预期不完全一致
-      #   2. 单个文件路径对 PATH 环境、执行权限、文件名大小写都敏感
-      # 改为直接缓存整个 ~/.cargo/bin 目录（~15 MB，极快），所有安装过的二进制一次性包含，
-      # 既解决路径问题，下次 restore 时 cargo-binstall 也一起带回来，不用重复下载。
-      - name: Resolve cargo bin dir for cache
-        id: rustc-hash
+      # ========== 4. 预安装 tauri-cli（仅在首次构建时执行） ==========
+      # 安装完成后，cargo-bin 目录会通过 rust-cache 的 cache-directories 参数
+      # 合并到 Rust 增量缓存里一起保存，避免被单独淘汰。
+      - name: Resolve cargo bin dir
         shell: bash
         run: |
-          # actions/cache@v4 在 Windows 上不认 Git Bash 的 /c/Users/X 格式，
-          # 必须用原生 Windows 路径格式 (C:/Users/X)。
-          # 用 cygpath -w 把 /c/Users/X → C:\Users/X，再把反斜杠替换成正斜杠，
-          # 这样 bash 和 actions/cache 都能识别。
           HOME_ABS="$(cd "$HOME" && pwd)"
           if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
             WIN_HOME=$(cygpath -w "$HOME_ABS" 2>/dev/null || echo "$USERPROFILE")
-            # 反斜杠 → 正斜杠：C:\Users\X → C:/Users/X
             WIN_HOME_FWD="${WIN_HOME//\\//}"
             CARGO_BIN_DIR="${WIN_HOME_FWD}/.cargo/bin"
           else
@@ -110,33 +101,28 @@ jobs:
           mkdir -p "$CARGO_BIN_DIR"
           echo "CARGO_BIN_DIR=${CARGO_BIN_DIR}" >> "$GITHUB_ENV"
           echo "Resolved CARGO_BIN_DIR: ${CARGO_BIN_DIR}"
-          echo "目录当前内容（cache 前）:"
-          ls -la "$CARGO_BIN_DIR" 2>/dev/null | head -20 || true
 
-      - name: Cache cargo bin directory (tauri-cli + cargo-binstall + more)
-        id: cache-cargo-bin
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CARGO_BIN_DIR }}
-          key: ${{ matrix.platform }}-cargo-bin-v2
-          restore-keys: |
-            ${{ matrix.platform }}-cargo-bin-v2-
-            ${{ matrix.platform }}-tauri-cli-prebuilt-v2-
-            ${{ matrix.platform }}-tauri-cli-v2-
-
-      # 安装 tauri-cli（cache miss 时执行）
-      # 策略：cargo-binstall（自带预编译包，10 秒）→ 失败回退 cargo install（8-10 分钟）
-      - name: Install cargo-tauri via cargo-binstall
-        if: steps.cache-cargo-bin.outputs.cache-hit != 'true'
+      # 只在 Rust 缓存里没有 cargo-tauri 时才安装（首次构建或缓存失效时）
+      - name: Install cargo-tauri if not cached
         shell: bash
         run: |
-          set +e
           export PATH="${CARGO_BIN_DIR}:$PATH"
-          INSTALL_DIR="${CARGO_BIN_DIR}"
+          TAURI_BIN="${CARGO_BIN_DIR}/cargo-tauri"
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            TAURI_BIN="${CARGO_BIN_DIR}/cargo-tauri.exe"
+          fi
 
-          # ---- 如果没有 cargo-binstall，先下载它（自带官方预编译包） ----
+          if [ -f "$TAURI_BIN" ]; then
+            echo "✅ cargo-tauri 已存在于缓存中，跳过安装"
+            "$TAURI_BIN" --version 2>/dev/null || true
+            exit 0
+          fi
+
+          echo "=== cargo-tauri 不存在，开始安装（首次构建） ==="
+          set +e
+
+          # 先尝试 cargo-binstall（自带预编译包，10 秒）
           if ! command -v cargo-binstall >/dev/null 2>&1; then
-            echo "=== 安装 cargo-binstall（自带预编译包） ==="
             BINSTALL_VERSION="1.10.20"
             case "${{ matrix.platform }}" in
               ubuntu-22.04)
@@ -149,58 +135,58 @@ jobs:
                 BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-x86_64-pc-windows-msvc.zip"
                 ;;
               *)
-                echo "Unknown platform, skip cargo-binstall download"
                 BINSTALL_URL=""
                 ;;
             esac
-
             if [ -n "$BINSTALL_URL" ]; then
-              echo "Download: $BINSTALL_URL"
+              echo "下载 cargo-binstall: $BINSTALL_URL"
               curl -fsSL --retry 3 --connect-timeout 15 -o "/tmp/binstall-archive" "$BINSTALL_URL" || \
               wget -q --tries=3 --timeout=15 -O "/tmp/binstall-archive" "$BINSTALL_URL" || true
-
               if [ -f "/tmp/binstall-archive" ]; then
                 case "$BINSTALL_URL" in
                   *.tgz|*.tar.gz)
-                    tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR" --strip-components=1 2>/dev/null || \
-                    tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR"
+                    tar -xzf "/tmp/binstall-archive" -C "$CARGO_BIN_DIR" --strip-components=1 2>/dev/null || \
+                    tar -xzf "/tmp/binstall-archive" -C "$CARGO_BIN_DIR"
                     ;;
                   *.zip)
                     if command -v unzip >/dev/null 2>&1; then
-                      unzip -j -o "/tmp/binstall-archive" -d "$INSTALL_DIR" 2>/dev/null || \
-                      unzip -o "/tmp/binstall-archive" -d "$INSTALL_DIR"
+                      unzip -j -o "/tmp/binstall-archive" -d "$CARGO_BIN_DIR" 2>/dev/null || \
+                      unzip -o "/tmp/binstall-archive" -d "$CARGO_BIN_DIR"
                     else
-                      powershell -NoProfile -Command "Expand-Archive -Force -Path '/tmp/binstall-archive' -DestinationPath '$INSTALL_DIR'"
+                      powershell -NoProfile -Command "Expand-Archive -Force -Path '/tmp/binstall-archive' -DestinationPath '$CARGO_BIN_DIR'"
                     fi
                     ;;
                 esac
-                chmod +x "$INSTALL_DIR/cargo-binstall" "$INSTALL_DIR/cargo-binstall.exe" 2>/dev/null || true
+                chmod +x "$CARGO_BIN_DIR"/cargo-binstall "$CARGO_BIN_DIR"/cargo-binstall.exe 2>/dev/null || true
                 rm -f "/tmp/binstall-archive"
-                echo "cargo-binstall 下载解压完成"
+                echo "cargo-binstall 安装完成"
               fi
             fi
           fi
 
           if command -v cargo-binstall >/dev/null 2>&1; then
-            echo "=== cargo-binstall: $(cargo-binstall --version 2>&1) ==="
-            echo "=== 尝试 cargo-binstall 安装 tauri-cli（查找预编译包，10-30 秒） ==="
-            # --strategy=auto：优先预编译二进制；找不到时自动回退从源码编译
+            echo "cargo-binstall: $(cargo-binstall --version 2>&1)"
+            echo "尝试 cargo-binstall 安装 tauri-cli ..."
             if cargo binstall --no-confirm --strategy=auto "tauri-cli@^2"; then
               echo "✅ tauri-cli 安装完成"
-              tauri --version 2>/dev/null || echo "(tauri not in PATH immediately, expected ok)"
-              echo "安装后 INSTALL_DIR 内容:"
-              ls -la "$INSTALL_DIR" 2>/dev/null | head -30 || true
-              exit 0
+            else
+              echo "cargo-binstall 安装失败，fallback to cargo install"
+              cargo install tauri-cli --version "^2"
             fi
-            echo "cargo-binstall 安装 tauri-cli 失败，fallback to cargo install"
           else
-            echo "cargo-binstall 不可用，fallback to cargo install"
+            echo "cargo-binstall 不可用，使用 cargo install"
+            cargo install tauri-cli --version "^2"
           fi
 
-          echo "=== 回退：cargo install tauri-cli（从源码编译 ~8-10 分钟） ==="
-          cargo install tauri-cli --version "^2"
-          echo "安装后 INSTALL_DIR 内容:"
-          ls -la "$INSTALL_DIR" 2>/dev/null | head -30 || true
+          echo "验证安装结果:"
+          ls -la "$CARGO_BIN_DIR" 2>/dev/null | head -20 || true
+          if [ -f "$TAURI_BIN" ]; then
+            echo "✅ cargo-tauri 安装成功: $TAURI_BIN"
+            "$TAURI_BIN" --version 2>/dev/null || true
+          else
+            echo "❌ cargo-tauri 未找到，可能安装失败"
+            exit 1
+          fi
 
       # ========== 5. Windows 缓存 Wix 打包工具（解决每次下载Wix） ==========
       - name: Cache Tauri Wix tools (Windows only)
@@ -217,6 +203,8 @@ jobs:
       # ========== 6. rust-cache 智能增量缓存 ==========
       # cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
       # cache-targets: true 缓存 target 下所有 target 的编译产物
+      # cache-directories: 把 cargo-bin 目录合并进来，与 Rust 缓存同生共死，
+      #   避免被单独淘汰（GitHub 10GB 配额下小缓存容易被挤掉）
       # 注意：不要使用 shared-key，它会改变 cache key 结构导致 restore 不匹配
       - name: Rust incremental compile cache
         id: rust-cache
@@ -225,6 +213,7 @@ jobs:
           workspaces: 'src-tauri -> target'
           cache-all-crates: true
           cache-targets: true
+          cache-directories: ${{ env.CARGO_BIN_DIR }}
       - name: Print cache hit status
         shell: bash
         run: |
