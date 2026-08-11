@@ -84,9 +84,9 @@ jobs:
             dpkg \
             file
 
-      # ========== 4. 预安装 tauri-cli（仅在首次构建时执行） ==========
-      # 安装完成后，cargo-bin 目录会通过 rust-cache 的 cache-directories 参数
-      # 合并到 Rust 增量缓存里一起保存，避免被单独淘汰。
+      # ========== 4. 先 Rust 增量缓存 RESTORE，再安装 tauri-cli ==========
+      # 顺序很重要：Swatinem/rust-cache 在这一步 restore target + CARGO_BIN_DIR，
+      # 这样下一步 Install cargo-tauri 就能检测到缓存里的 cargo-tauri 而跳过安装。
       - name: Resolve cargo bin dir
         shell: bash
         run: |
@@ -102,7 +102,46 @@ jobs:
           echo "CARGO_BIN_DIR=${CARGO_BIN_DIR}" >> "$GITHUB_ENV"
           echo "Resolved CARGO_BIN_DIR: ${CARGO_BIN_DIR}"
 
-      # 只在 Rust 缓存里没有 cargo-tauri 时才安装（首次构建或缓存失效时）
+      # ========== 5. rust-cache 智能增量缓存（RESTORE 必须在 Install cargo-tauri 之前） ==========
+      # cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
+      # cache-targets: true 缓存 target 下所有 target 的编译产物
+      # cache-directories: 把 cargo-bin 目录合并进来，与 Rust 缓存同生共死，
+      #   避免被单独淘汰（GitHub 10GB 配额下小缓存容易被挤掉）
+      # 注意：不要使用 shared-key，它会改变 cache key 结构导致 restore 不匹配
+      - name: Rust incremental compile cache
+        id: rust-cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'src-tauri -> target'
+          cache-all-crates: true
+          cache-targets: true
+          cache-directories: ${{ env.CARGO_BIN_DIR }}
+
+      - name: Print cache hit status & restored contents
+        shell: bash
+        run: |
+          echo "Rust cache-hit (primary key exact): ${{ steps.rust-cache.outputs.cache-hit }}"
+          echo "Primary cache key:        ${{ steps.rust-cache.outputs.cache-primary-key }}"
+          echo ""
+          echo "=== CARGO_BIN_DIR 已恢复的内容（关键：cargo-tauri 是否存在） ==="
+          ls -la "${CARGO_BIN_DIR}" 2>/dev/null | head -20 || echo "(空目录，首次构建)"
+          echo ""
+          # 注意：cache-hit=false ≠ 没恢复！Swatinem/rust-cache 命中 restore-key 时也会恢复 target
+          # 只看 cache-hit 不可靠，直接检查 target 目录的大小和内容
+          TARGET_DIR="src-tauri/target"
+          if [ -d "$TARGET_DIR" ]; then
+            echo "=== target 目录已恢复（来自 restore-key 命中） ==="
+            du -sh "$TARGET_DIR" 2>/dev/null || true
+            # 数一下已编译的 .rlib 数量（第三方依赖的编译产物）
+            RLIB_COUNT=$(find "$TARGET_DIR" -name "*.rlib" 2>/dev/null | wc -l)
+            echo "已缓存的 .rlib 文件数: $RLIB_COUNT"
+          else
+            echo "=== target 目录不存在（首次构建，无缓存） ==="
+          fi
+
+      # ========== 6. 安装 tauri-cli（仅在缓存里没有时才执行） ==========
+      # 安装完成后，cargo-bin 目录会通过 rust-cache 的 cache-directories 参数
+      # 在 job 结束时（post 阶段）和 Rust 增量缓存一起保存。
       - name: Install cargo-tauri if not cached
         shell: bash
         run: |
@@ -118,7 +157,7 @@ jobs:
             exit 0
           fi
 
-          echo "=== cargo-tauri 不存在，开始安装（首次构建） ==="
+          echo "=== cargo-tauri 不存在，开始安装（首次构建或缓存失效） ==="
           set +e
 
           # 先尝试 cargo-binstall（自带预编译包，10 秒）
@@ -167,7 +206,7 @@ jobs:
           if command -v cargo-binstall >/dev/null 2>&1; then
             echo "cargo-binstall: $(cargo-binstall --version 2>&1)"
             echo "尝试 cargo-binstall 安装 tauri-cli ..."
-            if cargo binstall --no-confirm --strategy=auto "tauri-cli@^2"; then
+            if cargo binstall --no-confirm --strategies auto "tauri-cli@^2"; then
               echo "✅ tauri-cli 安装完成"
             else
               echo "cargo-binstall 安装失败，fallback to cargo install"
@@ -188,7 +227,7 @@ jobs:
             exit 1
           fi
 
-      # ========== 5. Windows 缓存 Wix 打包工具（解决每次下载Wix） ==========
+      # ========== 7. Windows 缓存 Wix 打包工具（解决每次下载Wix） ==========
       - name: Cache Tauri Wix tools (Windows only)
         if: matrix.platform == 'windows-latest'
         uses: actions/cache@v4
@@ -199,40 +238,6 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: bash
         run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
-
-      # ========== 6. rust-cache 智能增量缓存 ==========
-      # cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
-      # cache-targets: true 缓存 target 下所有 target 的编译产物
-      # cache-directories: 把 cargo-bin 目录合并进来，与 Rust 缓存同生共死，
-      #   避免被单独淘汰（GitHub 10GB 配额下小缓存容易被挤掉）
-      # 注意：不要使用 shared-key，它会改变 cache key 结构导致 restore 不匹配
-      - name: Rust incremental compile cache
-        id: rust-cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: 'src-tauri -> target'
-          cache-all-crates: true
-          cache-targets: true
-          cache-directories: ${{ env.CARGO_BIN_DIR }}
-      - name: Print cache hit status
-        shell: bash
-        run: |
-          echo "Rust cache-hit (primary key exact): ${{ steps.rust-cache.outputs.cache-hit }}"
-          echo "Primary cache key:        ${{ steps.rust-cache.outputs.cache-primary-key }}"
-          # 注意：cache-hit=false ≠ 没恢复！Swatinem/rust-cache 命中 restore-key 时也会恢复 target
-          # 只看 cache-hit 不可靠，直接检查 target 目录的大小和内容
-          TARGET_DIR="src-tauri/target"
-          if [ -d "$TARGET_DIR" ]; then
-            echo ""
-            echo "=== target 目录已恢复（来自 restore-key 命中） ==="
-            du -sh "$TARGET_DIR" 2>/dev/null || true
-            # 数一下已编译的 .rlib 数量（第三方依赖的编译产物）
-            RLIB_COUNT=$(find "$TARGET_DIR" -name "*.rlib" 2>/dev/null | wc -l)
-            echo "已缓存的 .rlib 文件数: $RLIB_COUNT"
-          else
-            echo ""
-            echo "=== target 目录不存在（首次构建，无缓存） ==="
-          fi
 
       # ========== 原有签名校验步骤不变 ==========
       - name: Verify signing key secret (debug)
