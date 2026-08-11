@@ -127,16 +127,10 @@ jobs:
         shell: bash
         run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
 
-      # ========== 6. rust-cache 智能增量缓存（改造重点） ==========
-      # Swatinem/rust-cache@v2 支持的参数：
-      #   workspaces, cache-all-crates, cache-targets, cache-directories,
-      #   shared-key, key, prefix-key, env-vars, cache-on-failure, save-if
-      # 不支持：target-names, cache-extension-objects（会导致参数警告，缓存行为降级）
-      # cache-targets: true 缓存 target 下所有 target 的编译产物（= 原 target-names 的效果）
+      # ========== 6. rust-cache 智能增量缓存 ==========
       # cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
-      # shared-key: CI 和 Release workflow 共用第三方依赖缓存
-      #   （两个 workflow 跑同一平台同一 Cargo.lock 时，共享一份 rlib，
-      #    省掉重复缓存，给 Actions 10 GB 配额腾空间）
+      # cache-targets: true 缓存 target 下所有 target 的编译产物
+      # 注意：不要使用 shared-key，它会改变 cache key 结构导致 restore 不匹配
       - name: Rust incremental compile cache
         id: rust-cache
         uses: Swatinem/rust-cache@v2
@@ -144,7 +138,6 @@ jobs:
           workspaces: 'src-tauri -> target'
           cache-all-crates: true
           cache-targets: true
-          shared-key: rust-${{ matrix.target }}
       - name: Print cache hit status
         shell: bash
         run: |
