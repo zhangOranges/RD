@@ -105,9 +105,9 @@ jobs:
       # ========== 5. rust-cache 智能增量缓存（RESTORE 必须在 Install cargo-tauri 之前） ==========
       # cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
       # cache-targets: true 缓存 target 下所有 target 的编译产物
-      # cache-directories: 把 cargo-bin 目录合并进来，与 Rust 缓存同生共死，
-      #   避免被单独淘汰（GitHub 10GB 配额下小缓存容易被挤掉）
-      # 注意：不要使用 shared-key，它会改变 cache key 结构导致 restore 不匹配
+      # 注：不要传 cache-directories 给绝对路径，会干扰 rust-cache 的缓存 key 哈希算法
+      #   rust-cache 默认已包含 $CARGO_HOME/{bin,registry}，足够用。
+      # 注：不要使用 shared-key，它会改变 cache key 结构导致 restore 不匹配
       - name: Rust incremental compile cache
         id: rust-cache
         uses: Swatinem/rust-cache@v2
@@ -115,7 +115,6 @@ jobs:
           workspaces: 'src-tauri -> target'
           cache-all-crates: true
           cache-targets: true
-          cache-directories: ${{ env.CARGO_BIN_DIR }}
 
       - name: Print cache hit status & restored contents
         shell: bash
