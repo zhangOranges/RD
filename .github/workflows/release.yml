@@ -1,13 +1,10 @@
 name: Release
-
 on:
   push:
     tags:
       - 'v*'
-
 permissions:
   contents: write
-
 jobs:
   # ------------------------------------------------------------
   # 三平台构建：Windows / Linux / macOS (Apple Silicon)
@@ -42,7 +39,6 @@ jobs:
             updater-format: app
             artifact-dir: artifacts-macos
             bundles: dmg,app
-
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
     outputs:
@@ -50,20 +46,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ========== 1. Node 缓存强化，锁定 package-lock 哈希 ==========
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install npm deps
         run: npm ci --prefer-offline --no-audit --no-fund
 
+      # ========== 2. Rust 工具链 + sccache 编译加速（核心增量优化） ==========
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
+      # 安装 sccache 全局编译缓存工具
+      - name: Install sccache
+        run: cargo install sccache
+      - name: 启用 sccache 包装 rustc
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_CACHE_SIZE: 5G
+
+      # ========== 3. 系统依赖（Linux 专用） ==========
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -81,11 +89,40 @@ jobs:
             dpkg \
             file
 
-      - name: Cache cargo registry & target
+      # ========== 4. 缓存 Tauri CLI 二进制，避免每次重新编译 ==========
+      - name: Cache cargo-tauri binary
+        id: cache-tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: ${{ matrix.platform }}-cargo-tauri-v1
+      - name: Install cargo-tauri
+        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        run: cargo binstall tauri-cli -y
+
+      # ========== 5. Windows 缓存 Wix 打包工具（解决每次下载Wix） ==========
+      - name: Cache Tauri Wix tools (Windows only)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/.tauri-cache
+          key: ${{ matrix.platform }}-tauri-wix-v1
+      - name: Set Tauri cache dir env
+        run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
+
+      # ========== 6. rust-cache 智能增量缓存（改造重点） ==========
+      - name: Rust incremental compile cache
+        id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
+          cache-all-crates: false
+          target-names: ${{ matrix.target }}
+          cache-extension-objects: false
+      - name: Print cache hit status
+        run: echo "Rust cache hit: ${{ steps.rust-cache.outputs.cache-hit }}"
 
+      # ========== 原有签名校验步骤不变 ==========
       - name: Verify signing key secret (debug)
         shell: bash
         run: |
@@ -97,12 +134,15 @@ jobs:
           echo "Key length: ${#KEY} chars"
           echo "Key prefix (first 40 chars): ${KEY:0:40}..."
 
+      # ========== Tauri 构建，继承 sccache 环境变量 ==========
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RUSTC_WRAPPER: sccache
 
+      # ========== 诊断产物目录 ==========
       - name: Diagnose bundle output (all platforms)
         shell: bash
         run: |
@@ -137,10 +177,7 @@ jobs:
           echo "=== Diagnostic complete ==="
           true
 
-      # ------------------------------------------------------------
-      # 收集产物（各平台分别处理）
-      # 同时将 .sig 文件一起收集进来（后续 latest.json 会用到签名内容）
-      # ------------------------------------------------------------
+      # ========== 收集产物（Windows） ==========
       - name: Collect artifacts (Windows)
         id: collect-windows
         if: matrix.platform == 'windows-latest'
@@ -148,7 +185,6 @@ jobs:
         run: |
           $out = "${{ matrix.artifact-dir }}"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          # 两个路径都检查（原生构建 vs --target 指定构建）
           $bundlePaths = @(
             "src-tauri/target/release/bundle",
             "src-tauri/target/${{ matrix.target }}/release/bundle"
@@ -163,7 +199,6 @@ jobs:
               }
             }
           }
-          # portable exe
           $portablePaths = @(
             "src-tauri/target/release/rd_app.exe",
             "src-tauri/target/${{ matrix.target }}/release/rd_app.exe"
@@ -174,7 +209,6 @@ jobs:
               break
             }
           }
-          # 选定 updater 主包（优先 nsis exe，其次 msi）
           $updaterFile = Get-ChildItem $out -Filter "*.exe" | Where-Object { $_.Name -notlike "*portable*" } | Select-Object -First 1
           if (-not $updaterFile) { $updaterFile = Get-ChildItem $out -Filter "*.msi" | Select-Object -First 1 }
           if ($updaterFile) {
@@ -184,6 +218,7 @@ jobs:
           Write-Host "=== Artifacts ==="
           Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
 
+      # ========== 收集产物（Linux） ==========
       - name: Collect artifacts (Linux)
         id: collect-linux
         if: matrix.platform == 'ubuntu-22.04'
@@ -192,10 +227,8 @@ jobs:
           mkdir -p "$out"
           BUNDLE1="src-tauri/target/${{ matrix.target }}/release/bundle"
           BUNDLE2="src-tauri/target/release/bundle"
-
           bundle=""
           if [ -d "$BUNDLE1" ]; then bundle="$BUNDLE1"; elif [ -d "$BUNDLE2" ]; then bundle="$BUNDLE2"; fi
-
           if [ -n "$bundle" ]; then
             echo "=== Bundle dir: $bundle ==="
             find "$bundle" -type f
@@ -203,7 +236,6 @@ jobs:
             echo "=== Copying installers and sig files ==="
             while IFS= read -r -d '' file; do
               fname=$(basename "$file")
-              # 排除 deb 包内部的 control.tar.gz / data.tar.gz
               if [ "$fname" = "control.tar.gz" ] || [ "$fname" = "data.tar.gz" ]; then
                 echo "  Skipping (internal deb file): $fname"
                 continue
@@ -215,10 +247,8 @@ jobs:
             echo "ERROR: No bundle directory found!"
             find src-tauri/target -maxdepth 4 -name "bundle" -type d 2>/dev/null
           fi
-
           echo "=== Artifacts ==="
           ls -lh "$out"
-          # 选定 updater 主包（优先 AppImage）
           UPDATER_FILE=$(ls "$out"/*.AppImage 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
           UPDATER_FORMAT="appimage"
           if [ -z "$UPDATER_FILE" ]; then
@@ -228,6 +258,7 @@ jobs:
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
 
+      # ========== 收集产物（macOS） ==========
       - name: Collect artifacts (macOS)
         id: collect-macos
         if: matrix.platform == 'macos-latest'
@@ -249,7 +280,6 @@ jobs:
           done
           echo "=== Artifacts ==="
           ls -lh "$out"
-          # updater 主包用 dmg
           UPDATER_FILE=$(ls "$out"/*.dmg 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
           UPDATER_FORMAT="dmg"
           if [ -z "$UPDATER_FILE" ]; then
@@ -259,10 +289,7 @@ jobs:
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------------------------
-      # 写入本平台 manifest（给发布 job 汇总成 latest.json）
-      # manifest = { key, url_filename, signature, format, size }
-      # ------------------------------------------------------------
+      # ========== 生成平台更新清单 ==========
       - name: Write platform manifest
         id: write-manifest
         shell: bash
@@ -272,55 +299,34 @@ jobs:
           UPDATER_FORMAT="${{ steps.collect-windows.outputs.UPDATER_FORMAT }}${{ steps.collect-linux.outputs.UPDATER_FORMAT }}${{ steps.collect-macos.outputs.UPDATER_FORMAT }}"
           KEY="${{ matrix.updater-key }}"
           TAG="${GITHUB_REF_NAME}"
-          REPO="${GITHUB_REPOSITORY}"  # e.g. zhangOranges/RD
-
-          # 读签名内容（.sig 文件）：signature 字段必须是 .sig 的文本内容，不能是 URL
+          REPO="${GITHUB_REPOSITORY}"
           SIG_CONTENT=""
           if [ -n "$UPDATER_FILE" ] && [ -f "$OUTDIR/${UPDATER_FILE}.sig" ]; then
             SIG_CONTENT=$(cat "$OUTDIR/${UPDATER_FILE}.sig")
           fi
-
-          # 计算文件实际大小（字节，用于前端进度条显示）
           SIZE="0"
           if [ -n "$UPDATER_FILE" ] && [ -f "$OUTDIR/${UPDATER_FILE}" ]; then
-            # 跨平台：stat 命令在 macOS/Linux 参数不同，用 wc -c 更稳
             SIZE=$(wc -c < "$OUTDIR/${UPDATER_FILE}" | tr -d ' ')
-            # Windows (Git Bash) 的 wc -c 可能输出空行/带空格，兜底用 ls
             if [ -z "$SIZE" ] || [ "$SIZE" = "0" ]; then
               SIZE=$(ls -l "$OUTDIR/${UPDATER_FILE}" | awk '{print $5}')
             fi
           fi
-
-          # URL 格式：GitHub Release 资产下载 URL
-          # 注意：GitHub Release 的 assets URL 是
-          #   https://github.com/<owner>/<repo>/releases/download/<tag>/<filename>
-          URL="https://github.com/${REPO}/releases/download/${TAG}/${UPDATER_FILE}"
-
-          # 组装 JSON（通过临时文件 + node 或 jq 编码，避免 shell 转义问题）
           mkdir -p manifests
           MANIFEST_FILE="manifests/${{ matrix.label }}.json"
-          # 将签名中的换行转成 \n，避免 JSON 解析出错
-          ESCAPED_SIG=$(printf '%s' "$SIG_CONTENT" | awk '{printf "%s\\n", $0}' | sed 's/\\n$//')
-          # 如果 awk 没输出（空签名），兜底用空字符串
-          if [ -z "$ESCAPED_SIG" ]; then ESCAPED_SIG=""; fi
-
           cat > "$MANIFEST_FILE" <<JSONEOF
           {
             "key": "${KEY}",
             "url_filename": "${UPDATER_FILE}",
-            "url": "${URL}",
+            "url": "https://github.com/${REPO}/releases/download/${TAG}/${UPDATER_FILE}",
             "signature": "$(echo -n "$SIG_CONTENT" | sed ':a;N;$!ba;s/\n/\\n/g')",
             "format": "${UPDATER_FORMAT}",
             "size": ${SIZE:-0}
           }
           JSONEOF
           cat "$MANIFEST_FILE"
-          # 设置 step output：JSON 字符串（单行转义）
           echo "manifest=$(cat "$MANIFEST_FILE" | tr -d '\n' | sed 's/"/\\"/g')" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------------------------
-      # 上传 artifact：包括平台 manifest
-      # ------------------------------------------------------------
+      # 上传产物
       - uses: actions/upload-artifact@v4
         with:
           name: rd-app-${{ matrix.label }}
@@ -330,26 +336,20 @@ jobs:
           retention-days: 30
 
   # ------------------------------------------------------------
-  # 汇总发布：
-  #   1) 下载所有 artifact
-  #   2) 组装 latest.json（Tauri updater manifest）
-  #   3) 创建 GitHub Release（包含 latest.json + 所有平台产物 + .sig）
+  # 汇总发布 Job
   # ------------------------------------------------------------
   release:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # 先 checkout 仓库（CHANGELOG.md 需要读取）
       - uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: all-artifacts
           pattern: rd-app-*
           merge-multiple: true
-
       - name: List downloaded artifacts
         run: |
           echo "=== Downloaded artifacts ==="
@@ -359,54 +359,35 @@ jobs:
           cat all-artifacts/manifests/*.json 2>/dev/null || true
           echo "=== Full tree ==="
           find all-artifacts -type f 2>/dev/null | head -50
-
       - name: Flatten all artifacts to root
         run: |
           cd all-artifacts
           echo "=== Before flatten ==="
           find . -type f | head -30
-          # 将所有子目录中的文件复制到根目录
           while IFS= read -r -d '' file; do
             fname=$(basename "$file")
             cp "$file" "./$fname"
           done < <(find . -mindepth 2 -type f -not -path './manifests/*' -print0)
-          # 清理子目录（保留 manifests/）
           find . -mindepth 1 -maxdepth 1 -type d -not -name 'manifests' -exec rm -rf {} + 2>/dev/null || true
           echo "=== After flatten ==="
           ls -lh .
-
       - name: Generate latest.json updater manifest
         run: |
           cd all-artifacts
           export TAG="${GITHUB_REF_NAME}"
-          export VERSION="${TAG#v}"  # strip leading v
+          export VERSION="${TAG#v}"
           export PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          # 读取工作区根目录的 CHANGELOG.md（需要 checkout 代码，但这里在 all-artifacts 目录，
-          # 所以 CHANGELOG 放在上一级或通过 GITHUB_WORKSPACE 引用）
           export CHANGELOG_PATH="${GITHUB_WORKSPACE}/CHANGELOG.md"
           echo "Looking for CHANGELOG.md at: $CHANGELOG_PATH"
           ls -la "$CHANGELOG_PATH" 2>/dev/null || echo "(no CHANGELOG.md found)"
-
           node <<'NODEEOF' > latest.json
           const fs = require('fs');
           const path = require('path');
-
           const tag = process.env.TAG;
           const version = process.env.VERSION;
           const pubDate = process.env.PUB_DATE;
           const repo = process.env.GITHUB_REPOSITORY;
           const changelogPath = process.env.CHANGELOG_PATH;
-
-          /**
-           * 解析 CHANGELOG.md，提取指定版本的更新说明。
-           * 支持格式：
-           *   ## [x.y.z] - 2024-01-01
-           *   ## [x.y.z]
-           *   ## x.y.z
-           *   ## vx.y.z
-           * 返回字符串（纯 markdown，未转义）
-           */
           function extractChangelog(filePath, targetVersion) {
             if (!filePath || !fs.existsSync(filePath)) {
               console.error('CHANGELOG.md not found at:', filePath);
@@ -415,11 +396,7 @@ jobs:
             try {
               const content = fs.readFileSync(filePath, 'utf8');
               const lines = content.replace(/\r\n/g, '\n').split('\n');
-
-              // 从标题中提取版本号：匹配 [x.y.z] 或 x.y.z 或 vx.y.z
               const versionRe = /\[?v?(\d+\.\d+\.\d+)\]?/;
-
-              // 找到起始行：形如 "## [x.y.z]" 或 "## x.y.z" 的 markdown H2
               let startIdx = -1;
               for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
@@ -433,16 +410,12 @@ jobs:
                   break;
                 }
               }
-
               if (startIdx < 0) {
                 console.error(`Version ${targetVersion} not found in CHANGELOG.md`);
-                // 打印所有 H2 标题帮助调试
                 const h2s = lines.filter(l => /^##\s+/.test(l.trim()));
                 console.error('Available H2 headings:', JSON.stringify(h2s));
                 return null;
               }
-
-              // 找到结束行：下一个 ## H2 或文件尾（跳过 --- 分隔线）
               let endIdx = lines.length;
               for (let i = startIdx; i < lines.length; i++) {
                 const line = lines[i].trim();
@@ -458,10 +431,8 @@ jobs:
               return null;
             }
           }
-
           const manifestsDir = 'manifests';
           const platforms = {};
-
           if (fs.existsSync(manifestsDir)) {
             for (const f of fs.readdirSync(manifestsDir)) {
               if (!f.endsWith('.json')) continue;
@@ -475,20 +446,16 @@ jobs:
                 url: m.url,
               };
               if (m.format) entry.format = m.format;
-              // 写入 size（字节），用于客户端精确计算下载进度
               if (typeof m.size === 'number' && m.size > 0) {
                 entry.size = m.size;
               }
               platforms[m.key] = entry;
             }
           }
-
-          // 从 CHANGELOG.md 取更新说明；无则回退默认
           let notes = extractChangelog(changelogPath, version);
           if (!notes) {
             notes = `## 版本 ${version}\n\n- 更新至最新版 RD 应用。\n- 详细更新记录请前往 GitHub Release 页面查看。`;
           }
-
           const manifest = {
             version,
             notes,
@@ -497,18 +464,14 @@ jobs:
           };
           process.stdout.write(JSON.stringify(manifest, null, 2));
           NODEEOF
-
           echo "=== latest.json ==="
           cat latest.json
-
-          # 同时将 notes 写入单独文件，供后续 Create GitHub Release 步骤作为 body 使用（避免重复解析）
           node -e '
             const j = JSON.parse(require("fs").readFileSync("latest.json","utf8"));
             require("fs").writeFileSync("release_body.md", j.notes || "", "utf8");
           ' || true
           echo "=== release_body.md (first 20 lines) ==="
           head -20 release_body.md 2>/dev/null || true
-
       - name: Create GitHub Release
         id: gh_release
         uses: softprops/action-gh-release@v2

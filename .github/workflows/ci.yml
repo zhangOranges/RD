@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     branches: [main, master]
@@ -9,11 +8,9 @@ on:
     branches: [main, master]
     paths-ignore:
       - '**.md'
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   # ------------------------------------------------------------
   # 1) TypeScript / Frontend: install deps, type-check, build frontend
@@ -23,22 +20,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
+          cache-dependency-path: package-lock.json
       - name: Install npm deps
         run: npm ci --prefer-offline --no-audit --no-fund
-
       - name: TypeScript type-check (tsc --noEmit)
         run: npx tsc --noEmit
-
       - name: Build frontend (vite build)
         run: npm run build
-
   # ------------------------------------------------------------
   # 2) Rust backend: cargo check / clippy / fmt (Ubuntu)
   # ------------------------------------------------------------
@@ -50,12 +43,10 @@ jobs:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
@@ -69,20 +60,26 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Enable sccache compile cache
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_CACHE_SIZE: 5G
+
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
+          cache-all-crates: false
+          cache-extension-objects: false
 
-      - name: cargo fmt (check)
+      - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
-
-      - name: cargo check
+      - name: cargo check --locked
         run: cargo check --locked
-
-      - name: cargo clippy
+      - name: cargo clippy linter
         run: cargo clippy --locked --all-targets -- -D warnings
-
   # ------------------------------------------------------------
   # 3) Rust backend: cargo check on Windows (native target for Tauri)
   # ------------------------------------------------------------
@@ -94,16 +91,25 @@ jobs:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Rust toolchain (stable-x86_64-pc-windows-msvc)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Install sccache
+        run: cargo install sccache
+      - name: Enable sccache compile cache
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_CACHE_SIZE: 5G
+
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
+          cache-all-crates: false
+          cache-extension-objects: false
+          target-names: x86_64-pc-windows-msvc
 
       - name: cargo check --target x86_64-pc-windows-msvc
         run: cargo check --locked --target x86_64-pc-windows-msvc

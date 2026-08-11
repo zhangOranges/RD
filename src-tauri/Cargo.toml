@@ -2,10 +2,8 @@
 name = "rd-app"
 version = "0.1.27"
 description = "RD - SSH/SFTP Remote Desktop"
-authors = ["you"]
+authors = ["orange"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -41,3 +39,25 @@ tauri-plugin-window-state = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 chrono = "0.4"
 
+# ========== 新增编译优化配置（解决CI无法增量编译、减小包体积） ==========
+[profile.release]
+# 开启release模式增量编译，rust-cache才能实现增量复用
+incremental = true
+# 最高优化等级
+opt-level = 3
+# 全局链接时优化，大幅缩减二进制体积
+lto = true
+# 单代码生成单元，配合LTO进一步瘦身
+codegen-units = 1
+# 崩溃直接abort，移除panic unwind相关冗余代码
+panic = "abort"
+# 移除调试符号，减小target缓存体积
+debug = false
+# 关闭运行时边界检查，提升运行速度+缩小文件
+overflow-checks = false
+
+# 开发调试配置（本地开发用，不影响CI发布）
+[profile.dev]
+incremental = true
+opt-level = 0
+debug = true
