@@ -84,123 +84,113 @@ jobs:
             dpkg \
             file
 
-      # ========== 4. 缓存 Tauri CLI 二进制，避免每次重新编译 ==========
-      # 步骤顺序很重要：
-      #   ① 先算出 TAURI_CLI_PATH 绝对路径 → 写入 GITHUB_ENV
-      #   ② actions/cache 读取 env.TAURI_CLI_PATH → restore/save
-      #   ③ cache miss → 下载预编译二进制（~10 秒），失败回退 cargo install（~8-10 分钟）
-      - name: Resolve tauri-cli absolute path for cache
+      # ========== 4. 缓存 ~/.cargo/bin 目录（包含 tauri-cli、cargo-binstall 二进制） ==========
+      # 之前只缓存单个 tauri 文件总是报路径不存在，原因：
+      #   1. cargo-binstall / cargo install 的安装位置可能与预期不完全一致
+      #   2. 单个文件路径对 PATH 环境、执行权限、文件名大小写都敏感
+      # 改为直接缓存整个 ~/.cargo/bin 目录（~15 MB，极快），所有安装过的二进制一次性包含，
+      # 既解决路径问题，下次 restore 时 cargo-binstall 也一起带回来，不用重复下载。
+      - name: Resolve cargo bin dir for cache
         id: rustc-hash
         shell: bash
         run: |
-          # 预编译二进制与 rustc 版本无关，key 绑定平台 + 是否为 prebuilt 即可
-          echo "RUSTC_HASH=$(rustc --version | sha256sum | cut -c1-8)" >> "$GITHUB_ENV"
-          # 必须写入绝对路径字符串（bash 先展开 $HOME），actions/cache 不会二次展开 $HOME
+          # 绝对路径字符串写入 GITHUB_ENV（bash 先展开 $HOME，actions/cache 不会二次展开 $HOME）
           HOME_ABS="$(cd "$HOME" && pwd)"
-          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
-            TAURI_CLI_PATH_ABS="${HOME_ABS}/.cargo/bin/tauri.exe"
-          else
-            TAURI_CLI_PATH_ABS="${HOME_ABS}/.cargo/bin/tauri"
-          fi
-          echo "TAURI_CLI_PATH=${TAURI_CLI_PATH_ABS}" >> "$GITHUB_ENV"
-          echo "Resolved TAURI_CLI_PATH: ${TAURI_CLI_PATH_ABS}"
+          CARGO_BIN_DIR="${HOME_ABS}/.cargo/bin"
+          mkdir -p "$CARGO_BIN_DIR"
+          echo "CARGO_BIN_DIR=${CARGO_BIN_DIR}" >> "$GITHUB_ENV"
+          echo "Resolved CARGO_BIN_DIR: ${CARGO_BIN_DIR}"
+          echo "目录当前内容（cache 前）:"
+          ls -la "$CARGO_BIN_DIR" 2>/dev/null | head -20 || true
 
-      - name: Cache cargo-tauri binary
-        id: cache-tauri-cli
+      - name: Cache cargo bin directory (tauri-cli + cargo-binstall + more)
+        id: cache-cargo-bin
         uses: actions/cache@v4
         with:
-          path: ${{ env.TAURI_CLI_PATH }}
-          key: ${{ matrix.platform }}-tauri-cli-prebuilt-v2
+          path: ${{ env.CARGO_BIN_DIR }}
+          key: ${{ matrix.platform }}-cargo-bin-v2
           restore-keys: |
+            ${{ matrix.platform }}-cargo-bin-v2-
             ${{ matrix.platform }}-tauri-cli-prebuilt-v2-
             ${{ matrix.platform }}-tauri-cli-v2-
 
-      # 先用 cargo-binstall（本身提供预编译包，10 秒内装完）安装 tauri-cli
-      # cargo-binstall 会自动查找多来源的预编译二进制（GitHub Release、binstall 协议等）
-      # 找不到时再回退 cargo install 从源码编译
+      # 安装 tauri-cli（cache miss 时执行）
+      # 策略：cargo-binstall（自带预编译包，10 秒）→ 失败回退 cargo install（8-10 分钟）
       - name: Install cargo-tauri via cargo-binstall
-        if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
+        if: steps.cache-cargo-bin.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set +e
-          echo "=== 安装 cargo-binstall（自带预编译包） ==="
-          BINSTALL_VERSION="1.10.20"
-          case "${{ matrix.platform }}" in
-            ubuntu-22.04)
-              BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-x86_64-unknown-linux-gnu.tgz"
-              BINSTALL_EXE="cargo-binstall"
-              ;;
-            macos-14)
-              BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-aarch64-apple-darwin.tgz"
-              BINSTALL_EXE="cargo-binstall"
-              ;;
-            windows-latest)
-              BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-x86_64-pc-windows-msvc.zip"
-              BINSTALL_EXE="cargo-binstall.exe"
-              ;;
-            *)
-              echo "Unknown platform ${{ matrix.platform }}, fallback to cargo install"
-              cargo install tauri-cli --version "^2"
-              exit $?
-              ;;
-          esac
+          export PATH="${CARGO_BIN_DIR}:$PATH"
+          INSTALL_DIR="${CARGO_BIN_DIR}"
 
-          # 安装 cargo-binstall 到 ~/.cargo/bin
-          INSTALL_DIR="$(dirname "$TAURI_CLI_PATH")"
-          mkdir -p "$INSTALL_DIR"
-          echo "cargo-binstall download URL: $BINSTALL_URL"
-          echo "Install dir: $INSTALL_DIR"
-
-          curl -fsSL --retry 3 --connect-timeout 15 -o "/tmp/binstall-archive" "$BINSTALL_URL" || \
-          wget -q --tries=3 --timeout=15 -O "/tmp/binstall-archive" "$BINSTALL_URL" || true
-
-          if [ -f "/tmp/binstall-archive" ]; then
-            case "$BINSTALL_URL" in
-              *.tgz|*.tar.gz)
-                tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR" --strip-components=1 2>/dev/null || \
-                tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR"
+          # ---- 如果没有 cargo-binstall，先下载它（自带官方预编译包） ----
+          if ! command -v cargo-binstall >/dev/null 2>&1; then
+            echo "=== 安装 cargo-binstall（自带预编译包） ==="
+            BINSTALL_VERSION="1.10.20"
+            case "${{ matrix.platform }}" in
+              ubuntu-22.04)
+                BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-x86_64-unknown-linux-gnu.tgz"
                 ;;
-              *.zip)
-                if command -v unzip >/dev/null 2>&1; then
-                  unzip -j -o "/tmp/binstall-archive" -d "$INSTALL_DIR" 2>/dev/null || \
-                  unzip -o "/tmp/binstall-archive" -d "$INSTALL_DIR"
-                else
-                  powershell -NoProfile -Command "Expand-Archive -Force -Path '/tmp/binstall-archive' -DestinationPath '$INSTALL_DIR'"
-                fi
+              macos-14)
+                BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-aarch64-apple-darwin.tgz"
+                ;;
+              windows-latest)
+                BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-x86_64-pc-windows-msvc.zip"
+                ;;
+              *)
+                echo "Unknown platform, skip cargo-binstall download"
+                BINSTALL_URL=""
                 ;;
             esac
-            chmod +x "$INSTALL_DIR/$BINSTALL_EXE" 2>/dev/null || true
-            rm -f "/tmp/binstall-archive"
-          fi
 
-          if ! command -v cargo-binstall >/dev/null 2>&1; then
-            # 兜底：~/.cargo/bin 可能在 PATH 末尾，确保能找到
-            export PATH="$INSTALL_DIR:$PATH"
+            if [ -n "$BINSTALL_URL" ]; then
+              echo "Download: $BINSTALL_URL"
+              curl -fsSL --retry 3 --connect-timeout 15 -o "/tmp/binstall-archive" "$BINSTALL_URL" || \
+              wget -q --tries=3 --timeout=15 -O "/tmp/binstall-archive" "$BINSTALL_URL" || true
+
+              if [ -f "/tmp/binstall-archive" ]; then
+                case "$BINSTALL_URL" in
+                  *.tgz|*.tar.gz)
+                    tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR" --strip-components=1 2>/dev/null || \
+                    tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR"
+                    ;;
+                  *.zip)
+                    if command -v unzip >/dev/null 2>&1; then
+                      unzip -j -o "/tmp/binstall-archive" -d "$INSTALL_DIR" 2>/dev/null || \
+                      unzip -o "/tmp/binstall-archive" -d "$INSTALL_DIR"
+                    else
+                      powershell -NoProfile -Command "Expand-Archive -Force -Path '/tmp/binstall-archive' -DestinationPath '$INSTALL_DIR'"
+                    fi
+                    ;;
+                esac
+                chmod +x "$INSTALL_DIR/cargo-binstall" "$INSTALL_DIR/cargo-binstall.exe" 2>/dev/null || true
+                rm -f "/tmp/binstall-archive"
+                echo "cargo-binstall 下载解压完成"
+              fi
+            fi
           fi
 
           if command -v cargo-binstall >/dev/null 2>&1; then
-            echo "=== cargo-binstall 安装成功，用它装 tauri-cli ==="
-            echo "cargo-binstall --version: $(cargo-binstall --version 2>&1)"
-            # --no-confirm 免交互；--strategy=auto 如果没预编译包就回退 cargo install 从源码编译
+            echo "=== cargo-binstall: $(cargo-binstall --version 2>&1) ==="
+            echo "=== 尝试 cargo-binstall 安装 tauri-cli（查找预编译包，10-30 秒） ==="
+            # --strategy=auto：优先预编译二进制；找不到时自动回退从源码编译
             if cargo binstall --no-confirm --strategy=auto "tauri-cli@^2"; then
-              echo "tauri-cli 通过 cargo-binstall 安装完成 ✅"
-              # 确保二进制存在于缓存路径
-              if [ ! -f "$TAURI_CLI_PATH" ]; then
-                FOUND=$(which tauri 2>/dev/null || find "$INSTALL_DIR" -maxdepth 2 \( -name "tauri" -o -name "tauri.exe" \) 2>/dev/null | head -1)
-                if [ -n "$FOUND" ] && [ -f "$FOUND" ]; then
-                  cp -f "$FOUND" "$TAURI_CLI_PATH" 2>/dev/null || true
-                  chmod +x "$TAURI_CLI_PATH" 2>/dev/null || true
-                fi
-              fi
+              echo "✅ tauri-cli 安装完成"
+              tauri --version 2>/dev/null || echo "(tauri not in PATH immediately, expected ok)"
+              echo "安装后 INSTALL_DIR 内容:"
+              ls -la "$INSTALL_DIR" 2>/dev/null | head -30 || true
               exit 0
             fi
             echo "cargo-binstall 安装 tauri-cli 失败，fallback to cargo install"
           else
-            echo "cargo-binstall 安装失败，fallback to cargo install"
+            echo "cargo-binstall 不可用，fallback to cargo install"
           fi
 
           echo "=== 回退：cargo install tauri-cli（从源码编译 ~8-10 分钟） ==="
           cargo install tauri-cli --version "^2"
+          echo "安装后 INSTALL_DIR 内容:"
+          ls -la "$INSTALL_DIR" 2>/dev/null | head -30 || true
 
       # ========== 5. Windows 缓存 Wix 打包工具（解决每次下载Wix） ==========
       - name: Cache Tauri Wix tools (Windows only)
