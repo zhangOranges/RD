@@ -115,99 +115,92 @@ jobs:
             ${{ matrix.platform }}-tauri-cli-prebuilt-v2-
             ${{ matrix.platform }}-tauri-cli-v2-
 
-      # 优先下载官方预编译 tauri-cli 二进制（5-15 秒），比 cargo install 从源码编译快 10-20 倍
-      # 仅在 cache miss 且下载失败时回退到 cargo install
-      - name: Install cargo-tauri (prebuilt binary, fallback to cargo install)
+      # 先用 cargo-binstall（本身提供预编译包，10 秒内装完）安装 tauri-cli
+      # cargo-binstall 会自动查找多来源的预编译二进制（GitHub Release、binstall 协议等）
+      # 找不到时再回退 cargo install 从源码编译
+      - name: Install cargo-tauri via cargo-binstall
         if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set +e
-          TAURI_CLI_VERSION="2"
-          INSTALL_DIR="$(dirname "$TAURI_CLI_PATH")"
-          mkdir -p "$INSTALL_DIR"
-
-          echo "=== 尝试下载官方预编译 tauri-cli ==="
+          echo "=== 安装 cargo-binstall（自带预编译包） ==="
+          BINSTALL_VERSION="1.10.20"
           case "${{ matrix.platform }}" in
             ubuntu-22.04)
-              BIN_NAME="tauri-x86_64-unknown-linux-gnu.tgz"
-              BIN_IN_ARCHIVE="tauri"
+              BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-x86_64-unknown-linux-gnu.tgz"
+              BINSTALL_EXE="cargo-binstall"
               ;;
             macos-14)
-              BIN_NAME="tauri-aarch64-apple-darwin.tgz"
-              BIN_IN_ARCHIVE="tauri"
+              BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-aarch64-apple-darwin.tgz"
+              BINSTALL_EXE="cargo-binstall"
               ;;
             windows-latest)
-              BIN_NAME="tauri-x86_64-pc-windows-msvc.zip"
-              BIN_IN_ARCHIVE="tauri.exe"
+              BINSTALL_URL="https://github.com/cargo-bins/cargo-binstall/releases/download/v${BINSTALL_VERSION}/cargo-binstall-x86_64-pc-windows-msvc.zip"
+              BINSTALL_EXE="cargo-binstall.exe"
               ;;
             *)
               echo "Unknown platform ${{ matrix.platform }}, fallback to cargo install"
-              cargo install tauri-cli --version "^${TAURI_CLI_VERSION}"
+              cargo install tauri-cli --version "^2"
               exit $?
               ;;
           esac
 
-          URL="https://github.com/tauri-apps/tauri/releases/latest/download/${BIN_NAME}"
-          echo "Download URL: $URL"
+          # 安装 cargo-binstall 到 ~/.cargo/bin
+          INSTALL_DIR="$(dirname "$TAURI_CLI_PATH")"
+          mkdir -p "$INSTALL_DIR"
+          echo "cargo-binstall download URL: $BINSTALL_URL"
           echo "Install dir: $INSTALL_DIR"
 
-          DOWNLOAD_OK=0
-          if command -v curl >/dev/null 2>&1; then
-            curl -fsSL --retry 3 --connect-timeout 15 -o "/tmp/tauri-cli-archive" "$URL" && DOWNLOAD_OK=1
-          fi
-          if [ "$DOWNLOAD_OK" != "1" ] && command -v wget >/dev/null 2>&1; then
-            wget -q --tries=3 --timeout=15 -O "/tmp/tauri-cli-archive" "$URL" && DOWNLOAD_OK=1
-          fi
+          curl -fsSL --retry 3 --connect-timeout 15 -o "/tmp/binstall-archive" "$BINSTALL_URL" || \
+          wget -q --tries=3 --timeout=15 -O "/tmp/binstall-archive" "$BINSTALL_URL" || true
 
-          if [ "$DOWNLOAD_OK" = "1" ]; then
-            echo "下载成功（$(du -h /tmp/tauri-cli-archive | cut -f1)），解压..."
-            case "$BIN_NAME" in
+          if [ -f "/tmp/binstall-archive" ]; then
+            case "$BINSTALL_URL" in
               *.tgz|*.tar.gz)
-                tar -xzf "/tmp/tauri-cli-archive" -C "$INSTALL_DIR" "$BIN_IN_ARCHIVE" 2>/dev/null || \
-                tar -xzf "/tmp/tauri-cli-archive" -C "$INSTALL_DIR" --strip-components=1 2>/dev/null || \
-                tar -xzf "/tmp/tauri-cli-archive" -C "$INSTALL_DIR"
+                tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR" --strip-components=1 2>/dev/null || \
+                tar -xzf "/tmp/binstall-archive" -C "$INSTALL_DIR"
                 ;;
               *.zip)
                 if command -v unzip >/dev/null 2>&1; then
-                  unzip -j -o "/tmp/tauri-cli-archive" "$BIN_IN_ARCHIVE" -d "$INSTALL_DIR" 2>/dev/null || \
-                  unzip -o "/tmp/tauri-cli-archive" -d "$INSTALL_DIR"
+                  unzip -j -o "/tmp/binstall-archive" -d "$INSTALL_DIR" 2>/dev/null || \
+                  unzip -o "/tmp/binstall-archive" -d "$INSTALL_DIR"
                 else
-                  powershell -NoProfile -Command "Expand-Archive -Force -Path '/tmp/tauri-cli-archive' -DestinationPath '$INSTALL_DIR'"
+                  powershell -NoProfile -Command "Expand-Archive -Force -Path '/tmp/binstall-archive' -DestinationPath '$INSTALL_DIR'"
                 fi
                 ;;
             esac
+            chmod +x "$INSTALL_DIR/$BINSTALL_EXE" 2>/dev/null || true
+            rm -f "/tmp/binstall-archive"
+          fi
 
-            # 归档内文件结构不确定，做兜底搜索
-            if [ ! -f "$TAURI_CLI_PATH" ]; then
-              echo "预期位置未找到二进制，在解压目录搜索..."
-              FOUND=$(find "$INSTALL_DIR" -maxdepth 4 \( -name "tauri" -o -name "tauri.exe" \) 2>/dev/null | head -1)
-              if [ -n "$FOUND" ]; then
-                mv -f "$FOUND" "$TAURI_CLI_PATH"
-                echo "Moved $FOUND -> $TAURI_CLI_PATH"
-              fi
-            fi
+          if ! command -v cargo-binstall >/dev/null 2>&1; then
+            # 兜底：~/.cargo/bin 可能在 PATH 末尾，确保能找到
+            export PATH="$INSTALL_DIR:$PATH"
+          fi
 
-            if [ -f "$TAURI_CLI_PATH" ]; then
-              chmod +x "$TAURI_CLI_PATH" 2>/dev/null || true
-              VERSION_OUT="$("$TAURI_CLI_PATH" --version 2>&1)"
-              if [ $? -eq 0 ] && [ -n "$VERSION_OUT" ]; then
-                echo "预编译 tauri-cli 安装完成 ✅  ${VERSION_OUT}"
-                rm -f "/tmp/tauri-cli-archive"
-                exit 0
+          if command -v cargo-binstall >/dev/null 2>&1; then
+            echo "=== cargo-binstall 安装成功，用它装 tauri-cli ==="
+            echo "cargo-binstall --version: $(cargo-binstall --version 2>&1)"
+            # --no-confirm 免交互；--strategy=auto 如果没预编译包就回退 cargo install 从源码编译
+            if cargo binstall --no-confirm --strategy=auto "tauri-cli@^2"; then
+              echo "tauri-cli 通过 cargo-binstall 安装完成 ✅"
+              # 确保二进制存在于缓存路径
+              if [ ! -f "$TAURI_CLI_PATH" ]; then
+                FOUND=$(which tauri 2>/dev/null || find "$INSTALL_DIR" -maxdepth 2 \( -name "tauri" -o -name "tauri.exe" \) 2>/dev/null | head -1)
+                if [ -n "$FOUND" ] && [ -f "$FOUND" ]; then
+                  cp -f "$FOUND" "$TAURI_CLI_PATH" 2>/dev/null || true
+                  chmod +x "$TAURI_CLI_PATH" 2>/dev/null || true
+                fi
               fi
-              echo "安装但无法执行（$VERSION_OUT），fallback to cargo install"
-            else
-              echo "解压产物不包含 tauri 二进制，fallback to cargo install"
-              echo "INSTALL_DIR 内容："
-              ls -la "$INSTALL_DIR" 2>/dev/null | head -20 || true
+              exit 0
             fi
+            echo "cargo-binstall 安装 tauri-cli 失败，fallback to cargo install"
           else
-            echo "下载预编译二进制失败（URL: $URL），fallback to cargo install"
+            echo "cargo-binstall 安装失败，fallback to cargo install"
           fi
 
           echo "=== 回退：cargo install tauri-cli（从源码编译 ~8-10 分钟） ==="
-          rm -f "/tmp/tauri-cli-archive"
-          cargo install tauri-cli --version "^${TAURI_CLI_VERSION}"
+          cargo install tauri-cli --version "^2"
 
       # ========== 5. Windows 缓存 Wix 打包工具（解决每次下载Wix） ==========
       - name: Cache Tauri Wix tools (Windows only)
