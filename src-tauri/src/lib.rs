@@ -87,6 +87,7 @@ fn write_update_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
 /// 全局调试日志：受 DebugLogState 控制
 /// - Info 级别仅在调试开启时写入
 /// - Warn/Error 始终写入
+///
 /// 供其他模块调用，统一写入 update.log
 pub fn debug_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
     write_update_log(app, level, msg);
@@ -228,10 +229,7 @@ async fn probe_url(app: tauri::AppHandle, url: String) -> i64 {
     };
 
     let start = Instant::now();
-    let head_ok = match client.head(&url).send().await {
-        Ok(_) => true,
-        Err(_) => false,
-    };
+    let head_ok = client.head(&url).send().await.is_ok();
     if head_ok {
         let ms = start.elapsed().as_millis() as i64;
         write_update_log(
