@@ -5,9 +5,42 @@ pub mod sftp;
 pub mod ssh;
 mod storage;
 
+use std::time::Instant;
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// 测量对指定 URL 的 HTTP 请求延迟（毫秒）。
+/// 成功返回延迟 ms，失败返回 -1。超时 6 秒。
+/// 在 Rust 侧发起请求，完全绕过浏览器 CORS 限制。
+/// 用 async + reqwest 异步客户端，不阻塞主线程（避免窗口"未响应"）。
+#[tauri::command]
+async fn probe_url(url: String) -> i64 {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return -1,
+    };
+
+    let start = Instant::now();
+    // 优先 HEAD（轻量），失败则 fallback GET
+    let head_ok = match client.head(&url).send().await {
+        Ok(_) => true,
+        Err(_) => false,
+    };
+    if head_ok {
+        return start.elapsed().as_millis() as i64;
+    }
+    let start2 = Instant::now();
+    match client.get(&url).send().await {
+        Ok(_) => start2.elapsed().as_millis() as i64,
+        Err(_) => -1,
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +58,7 @@ pub fn run() {
         .manage(storage::new_state())
         .invoke_handler(tauri::generate_handler![
             greet,
+            probe_url,
             local_fs::list_local_dir,
             local_fs::local_home_dir,
             local_fs::read_local_file_bytes,

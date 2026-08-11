@@ -1,24 +1,43 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Check } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, Network, RefreshCw, Gauge, Plus, Trash2 } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
 import {
-  UPDATE_MIRROR_OPTIONS,
+  getMirrorOptions,
   getUpdateMirror,
-  setUpdateMirror,
+  addCustomMirror,
+  removeCustomMirror,
+  probeMirrorLatency,
   type UpdateMirror,
+  type MirrorDelayResult,
+  type MirrorOption,
 } from '../hooks/useAppUpdater';
+
+type SettingsTab = 'general' | 'theme' | 'update';
+
+interface TabItem {
+  id: SettingsTab;
+  label: string;
+  icon: typeof Palette;
+}
+
+const TABS: TabItem[] = [
+  { id: 'general', label: '通用', icon: Sliders },
+  { id: 'theme', label: '主题', icon: Palette },
+  { id: 'update', label: '更新', icon: DownloadCloud },
+];
 
 /**
  * 设置弹窗（Finder 风格模态）。
  *
+ * 左侧分类菜单 + 右侧内容切换布局。
  * 当前包含：
- * - 通用设置：目录记忆全局开关（remember_dir_global）
- *   读取 get_setting('remember_dir_global')，默认 "true"。
- *   修改时调用 set_setting('remember_dir_global', value) 即时生效。
+ * - 通用：目录记忆全局开关（remember_dir_global）
+ * - 主题：多主题选择
+ * - 更新：下载源 / 镜像选择
  *
  * 弹窗可见性由 uiStore.settingsVisible 控制；
  * 通过 Ctrl+,（Windows）/ Cmd+,（macOS）快捷键打开（监听在 App.tsx）。
@@ -30,10 +49,15 @@ export function SettingsDialog() {
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
 
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [rememberDirGlobal, setRememberDirGlobal] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [updateMirror, setUpdateMirrorState] = useState<UpdateMirror>('github');
+  const [mirrorOptions, setMirrorOptions] = useState<MirrorOption[]>([]);
+  const [customUrlInput, setCustomUrlInput] = useState('');
+  const [delays, setDelays] = useState<MirrorDelayResult>({});
+  const [probing, setProbing] = useState(false);
 
   // 弹窗打开时加载设置
   useEffect(() => {
@@ -48,6 +72,8 @@ export function SettingsDialog() {
         setRememberDirGlobal(val !== 'false');
         // 加载已保存的更新源（localStorage）
         setUpdateMirrorState(getUpdateMirror());
+        // 加载镜像选项列表（内置 + 自定义）
+        setMirrorOptions(getMirrorOptions());
       } catch (err) {
         if (!cancelled) {
           pushToast('error', `读取设置失败：${formatErr(err)}`);
@@ -96,6 +122,73 @@ export function SettingsDialog() {
     setSettingsVisible(false);
   }
 
+  async function handleProbeLatency() {
+    if (probing) return;
+    setProbing(true);
+    try {
+      const result = await probeMirrorLatency();
+      setDelays(result);
+      const reachable = Object.values(result).filter(
+        (v): v is number => typeof v === 'number' && Number.isFinite(v),
+      );
+      if (reachable.length === 0) {
+        pushToast('error', '所有镜像均无法连通，请检查网络后重试', 4000);
+      } else {
+        const min = Math.min(...reachable);
+        pushToast('success', `延迟检测完成，最快 ${min}ms`, 3000);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      pushToast('error', `延迟检测失败：${msg}`, 5000);
+    } finally {
+      setProbing(false);
+    }
+  }
+
+  /** 延迟分级颜色：<300 绿 / <1000 黄 / 其他 红 / null 灰 */
+  function latencyLevel(ms: number | null): 'fast' | 'mid' | 'slow' | 'unknown' {
+    if (ms === null || !Number.isFinite(ms)) return 'unknown';
+    if (ms < 300) return 'fast';
+    if (ms < 1000) return 'mid';
+    return 'slow';
+  }
+
+  function handleAddCustomMirror() {
+    const url = customUrlInput.trim();
+    if (!url) {
+      pushToast('error', '请输入镜像地址', 2500);
+      return;
+    }
+    const ok = addCustomMirror(url);
+    if (!ok) {
+      pushToast('error', '该镜像已存在', 2500);
+      return;
+    }
+    setMirrorOptions(getMirrorOptions());
+    setCustomUrlInput('');
+    pushToast('success', '已添加自定义镜像源', 2500);
+  }
+
+  function handleRemoveCustomMirror(url: string) {
+    const ok = removeCustomMirror(url);
+    if (!ok) {
+      pushToast('error', '删除失败', 2500);
+      return;
+    }
+    // 如果删除的是当前选中的源，回退到 github
+    if (updateMirror === url) {
+      setUpdateMirrorState('github');
+    }
+    setMirrorOptions(getMirrorOptions());
+    // 清除该源的延迟记录
+    setDelays((prev) => {
+      const next = { ...prev };
+      delete next[url];
+      return next;
+    });
+    pushToast('success', '已删除自定义镜像源', 2500);
+  }
+
   return createPortal(
     <div
       className="dialog-overlay"
@@ -119,81 +212,200 @@ export function SettingsDialog() {
           </button>
         </div>
 
-        <div className="dialog-body">
-          <div className="settings-section-title">主题</div>
-
-          <div className="settings-theme-grid">
-            {THEME_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`theme-card ${theme === opt.id ? 'is-selected' : ''}`}
-                onClick={() => {
-                  setTheme(opt.id);
-                  pushToast('success', `已切换主题：${opt.name}`);
-                }}
-                aria-pressed={theme === opt.id}
-              >
-                <span className="theme-card-swatch" style={{ background: opt.swatch }} />
-                <span className="theme-card-name">{opt.name}</span>
-                <span className="theme-card-desc">{opt.desc}</span>
-                {theme === opt.id && <Check size={14} className="theme-card-check" />}
-              </button>
-            ))}
-          </div>
-
-          <div className="settings-section-title">通用</div>
-
-          <div className="settings-row">
-            <div className="settings-row-main">
-              <div className="settings-row-label">目录记忆（全局默认）</div>
-              <div className="settings-row-desc">
-                关闭后，新建主机的目录记忆默认关闭。已有主机的目录记忆由各自配置决定。
-              </div>
-            </div>
-            <label className="form-switch">
-              <input
-                type="checkbox"
-                checked={rememberDirGlobal}
-                onChange={(e) => void handleToggleRememberDir(e.target.checked)}
-                disabled={loading || saving}
-              />
-              <span className="form-switch-track" aria-hidden="true" />
-              <span className="form-switch-label">
-                {loading ? '加载中…' : saving ? '保存中…' : rememberDirGlobal ? '开启' : '关闭'}
-              </span>
-            </label>
-          </div>
-
-          <div className="settings-section-title">更新</div>
-
-          <div className="settings-update-mirror-desc">
-            检查更新和下载安装包时使用的下载源。国内网络建议选择镜像以加速下载。
-          </div>
-          <div className="settings-mirror-grid">
-            {UPDATE_MIRROR_OPTIONS.map((opt) => {
-              const selected = updateMirror === opt.id;
+        <div className="settings-layout">
+          {/* 左侧分类菜单 */}
+          <nav className="settings-sidebar">
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
               return (
                 <button
-                  key={opt.id}
+                  key={tab.id}
                   type="button"
-                  className={`mirror-card ${selected ? 'is-selected' : ''}`}
-                  onClick={() => {
-                    setUpdateMirrorState(opt.id as UpdateMirror);
-                    setUpdateMirror(opt.id as UpdateMirror);
-                    pushToast('success', `已切换下载源：${opt.name}`);
-                  }}
-                  aria-pressed={selected}
-                  disabled={loading}
+                  className={`settings-nav-item ${active ? 'is-active' : ''}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  aria-pressed={active}
                 >
-                  <div className="mirror-card-header">
-                    <span className="mirror-card-name">{opt.name}</span>
-                    {selected && <Check size={14} className="mirror-card-check" />}
-                  </div>
-                  <div className="mirror-card-desc">{opt.desc}</div>
+                  <Icon size={15} className="settings-nav-icon" />
+                  <span>{tab.label}</span>
                 </button>
               );
             })}
+          </nav>
+
+          {/* 右侧内容区 */}
+          <div className="settings-content">
+            {/* 通用 */}
+            {activeTab === 'general' && (
+              <div className="settings-pane">
+                <div className="settings-pane-title">通用设置</div>
+
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <div className="settings-row-label">目录记忆（全局默认）</div>
+                    <div className="settings-row-desc">
+                      关闭后，新建主机的目录记忆默认关闭。已有主机的目录记忆由各自配置决定。
+                    </div>
+                  </div>
+                  <label className="form-switch">
+                    <input
+                      type="checkbox"
+                      checked={rememberDirGlobal}
+                      onChange={(e) => void handleToggleRememberDir(e.target.checked)}
+                      disabled={loading || saving}
+                    />
+                    <span className="form-switch-track" aria-hidden="true" />
+                    <span className="form-switch-label">
+                      {loading ? '加载中…' : saving ? '保存中…' : rememberDirGlobal ? '开启' : '关闭'}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* 主题 */}
+            {activeTab === 'theme' && (
+              <div className="settings-pane">
+                <div className="settings-pane-title">主题外观</div>
+                <div className="settings-pane-desc">
+                  选择应用的配色风格，切换后即时生效。
+                </div>
+                <div className="settings-theme-grid">
+                  {THEME_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`theme-card ${theme === opt.id ? 'is-selected' : ''}`}
+                      onClick={() => {
+                        setTheme(opt.id);
+                        pushToast('success', `已切换主题：${opt.name}`);
+                      }}
+                      aria-pressed={theme === opt.id}
+                    >
+                      <span className="theme-card-swatch" style={{ background: opt.swatch }} />
+                      <span className="theme-card-name">{opt.name}</span>
+                      <span className="theme-card-desc">{opt.desc}</span>
+                      {theme === opt.id && <Check size={14} className="theme-card-check" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 更新 */}
+            {activeTab === 'update' && (
+              <div className="settings-pane">
+                <div className="settings-pane-header">
+                  <div className="settings-pane-title-wrap">
+                    <div className="settings-pane-title">更新下载源</div>
+                    <div className="settings-update-mirror-desc">
+                      检查更新和下载安装包时使用的下载源。国内网络建议选择镜像以加速下载。
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-compact settings-probe-btn"
+                    onClick={() => void handleProbeLatency()}
+                    disabled={probing}
+                  >
+                    {probing ? (
+                      <RefreshCw size={13} className="is-spin" />
+                    ) : (
+                      <Gauge size={13} />
+                    )}
+                    <span>{probing ? '检测中…' : '检测延迟'}</span>
+                  </button>
+                </div>
+
+                <div className="settings-mirror-grid">
+                  {mirrorOptions.map((opt) => {
+                    const delay = delays[opt.id] ?? null;
+                    const level = latencyLevel(delay);
+                    return (
+                      <div
+                        key={opt.id}
+                        className={`mirror-card ${!opt.builtin ? 'is-custom' : ''}`}
+                      >
+                        <div className="mirror-card-info">
+                          <div className="mirror-card-header">
+                            <span className="mirror-card-name">{opt.name}</span>
+                            <span
+                              className={`mirror-latency mirror-latency-${level}`}
+                              title={
+                                delay === null
+                                  ? probing
+                                    ? '等待检测…'
+                                    : '未检测或连接失败'
+                                  : `延迟 ${delay} ms`
+                              }
+                            >
+                              {probing ? (
+                                <>
+                                  <Network size={10} />
+                                  <span>检测中</span>
+                                </>
+                              ) : delay === null ? (
+                                <>
+                                  <Network size={10} />
+                                  <span>—</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Network size={10} />
+                                  <span>{delay} ms</span>
+                                </>
+                              )}
+                            </span>
+                          </div>
+                          <div className="mirror-card-desc">{opt.desc}</div>
+                        </div>
+                        {!opt.builtin && (
+                          <button
+                            type="button"
+                            className="mirror-card-delete"
+                            title="删除此自定义镜像源"
+                            onClick={() => handleRemoveCustomMirror(opt.id)}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 添加自定义镜像源 */}
+                <div className="settings-add-mirror">
+                  <div className="settings-add-mirror-label">添加自定义镜像源</div>
+                  <div className="settings-add-mirror-row">
+                    <input
+                      type="text"
+                      className="form-input settings-add-mirror-input"
+                      placeholder="https://v4.gh-proxy.org"
+                      value={customUrlInput}
+                      onChange={(e) => setCustomUrlInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomMirror();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-compact"
+                      onClick={handleAddCustomMirror}
+                    >
+                      <Plus size={13} />
+                      <span>添加</span>
+                    </button>
+                  </div>
+                  <div className="settings-add-mirror-hint">
+                    输入镜像站点地址（如 https://v4.gh-proxy.org），会作为 GitHub URL 的前缀拼接。
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

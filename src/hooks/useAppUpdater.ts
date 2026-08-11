@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { getVersion } from '@tauri-apps/api/app';
+import { invoke } from '@tauri-apps/api/core';
 import {
   check as checkUpdater,
   type Update,
@@ -28,22 +29,105 @@ export type UpdateStatus =
   | 'done'
   | 'error';
 
-/** 更新源镜像 */
-export type UpdateMirror = 'github' | 'ghproxy' | 'ghmirror' | 'kgithub';
+/** 更新源镜像：'github' 为内置官方源，其他字符串为自定义镜像 URL 前缀（如 'https://gh-proxy.com'） */
+export type UpdateMirror = string;
 
-export const UPDATE_MIRROR_OPTIONS: {
+export interface MirrorOption {
   id: UpdateMirror;
   name: string;
   desc: string;
-}[] = [
-  { id: 'github', name: 'GitHub 官方', desc: '直连，海外访问速度优先' },
-  { id: 'ghproxy', name: 'ghproxy 镜像', desc: '国内推荐：ghproxy.com 加速' },
-  { id: 'ghmirror', name: 'gh-mirror 镜像', desc: '国内推荐：gh-api.com 加速' },
-  { id: 'kgithub', name: 'kgithub 镜像', desc: 'kgithub.com 镜像加速' },
+  /** 是否内置（不可删除） */
+  builtin: boolean;
+}
+
+const BUILTIN_MIRRORS: MirrorOption[] = [
+  { id: 'github', name: 'GitHub 官方', desc: '直连，海外访问速度优先', builtin: true },
+  { id: 'https://v4.gh-proxy.org', name: 'v4.gh-proxy 镜像', desc: '国内推荐：v4.gh-proxy.org 加速', builtin: true },
 ];
 
+const CUSTOM_MIRRORS_KEY = 'app_updater_custom_mirrors';
 const UPDATE_MIRROR_KEY = 'app_updater_mirror';
 const UPDATE_PENDING_KEY = 'app_updater_pending';
+
+/** 读取用户自定义镜像列表 */
+function getCustomMirrors(): string[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_MIRRORS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((v) => typeof v === 'string' && v.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** 保存用户自定义镜像列表 */
+function setCustomMirrors(list: string[]) {
+  try {
+    localStorage.setItem(CUSTOM_MIRRORS_KEY, JSON.stringify(list));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 添加自定义镜像，返回是否添加成功（重复返回 false） */
+export function addCustomMirror(url: string): boolean {
+  const normalized = normalizeMirrorUrl(url);
+  if (!normalized) return false;
+  const list = getCustomMirrors();
+  if (list.includes(normalized) || BUILTIN_MIRRORS.some((m) => m.id === normalized)) return false;
+  list.push(normalized);
+  setCustomMirrors(list);
+  return true;
+}
+
+/** 删除自定义镜像 */
+export function removeCustomMirror(url: string): boolean {
+  const normalized = normalizeMirrorUrl(url);
+  if (!normalized) return false;
+  const list = getCustomMirrors();
+  const idx = list.indexOf(normalized);
+  if (idx === -1) return false;
+  list.splice(idx, 1);
+  setCustomMirrors(list);
+  // 如果删除的是当前选中的源，回退到 github
+  if (getUpdateMirror() === normalized) {
+    setUpdateMirror('github');
+  }
+  return true;
+}
+
+/** 规范化镜像 URL：去尾部斜杠，补 https:// */
+function normalizeMirrorUrl(url: string): string {
+  let v = url.trim();
+  if (!v) return '';
+  // 补协议
+  if (!v.startsWith('http://') && !v.startsWith('https://')) {
+    v = 'https://' + v;
+  }
+  // 去尾部斜杠
+  v = v.replace(/\/+$/, '');
+  return v;
+}
+
+/** 获取所有镜像选项（内置 + 自定义） */
+export function getMirrorOptions(): MirrorOption[] {
+  const customs = getCustomMirrors();
+  const customOpts: MirrorOption[] = customs.map((url) => {
+    let name: string;
+    try {
+      name = new URL(url).hostname;
+    } catch {
+      name = url;
+    }
+    return { id: url, name: `${name} 镜像`, desc: url, builtin: false };
+  });
+  return [...BUILTIN_MIRRORS, ...customOpts];
+}
+
+/** 兼容旧代码的静态导出（动态读取一次） */
+export const UPDATE_MIRROR_OPTIONS = BUILTIN_MIRRORS;
 
 interface PendingUpdate {
   version: string;
@@ -54,8 +138,7 @@ export function getUpdateMirror(): UpdateMirror {
   try {
     const raw = localStorage.getItem(UPDATE_MIRROR_KEY);
     if (!raw) return 'github';
-    const valid = UPDATE_MIRROR_OPTIONS.some((o) => o.id === raw);
-    return (valid ? (raw as UpdateMirror) : 'github') ?? 'github';
+    return raw;
   } catch {
     return 'github';
   }
@@ -90,65 +173,69 @@ function setPendingUpdate(p: PendingUpdate | null) {
   }
 }
 
+export type MirrorDelayResult = Record<string, number | null>;
+
+/** 默认的 latest.json endpoint（与 check() 内保持一致，模块外调用时可直接用） */
+const DEFAULT_LATEST_ENDPOINT =
+  'https://github.com/zhangOranges/RD/releases/latest/download/latest.json';
+
+/**
+ * 并行测试所有镜像源对 latest.json 的访问延迟，返回每个源的耗时（毫秒）或 null（失败/超时）。
+ * 通过 Rust 后端 invoke('probe_url') 发 HTTP HEAD 请求，完全绕过浏览器 CORS 限制。
+ * 超 6 秒返回 -1（失败）。
+ */
+export async function probeMirrorLatency(
+  endpoint: string = DEFAULT_LATEST_ENDPOINT,
+): Promise<MirrorDelayResult> {
+  const options = getMirrorOptions();
+  const results = await Promise.all(
+    options.map(async (opt) => {
+      const url = opt.id === 'github' ? endpoint : applyMirror(endpoint, opt.id);
+      try {
+        const ms = await invoke<number>('probe_url', { url });
+        return { mirror: opt.id, ms };
+      } catch {
+        return { mirror: opt.id, ms: -1 };
+      }
+    }),
+  );
+
+  const out: MirrorDelayResult = {};
+  for (const r of results) {
+    out[r.mirror] = typeof r.ms === 'number' && r.ms >= 0 ? r.ms : null;
+  }
+  return out;
+}
+
 /**
  * 并行测试所有镜像源对 latest.json 的访问延迟，返回延迟最低的镜像。
- * 每个镜像只发一个 HEAD 请求（不下载 body），带 6 秒超时。
  * 所有镜像都失败时回退到用户当前设定的源。
  */
 async function pickFastestMirror(
   endpoints: readonly string[],
   userMirror: UpdateMirror,
 ): Promise<UpdateMirror> {
-  const allMirrors = UPDATE_MIRROR_OPTIONS.map((o) => o.id);
-  const results = await Promise.all(
-    allMirrors.map(async (m) => {
-      const url = m === 'github' ? endpoints[0] : applyMirror(endpoints[0], m);
-      const start = performance.now();
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 6000);
-        const resp = await fetch(url, {
-          method: 'HEAD',
-          cache: 'no-store',
-          signal: ctrl.signal,
-        });
-        clearTimeout(timer);
-        const elapsed = performance.now() - start;
-        // HEAD 可能返回 405（部分镜像不支持 HEAD），但只要能连上就算可用
-        return { mirror: m, elapsed, ok: resp.ok || resp.status === 405 };
-      } catch {
-        return { mirror: m, elapsed: Infinity, ok: false };
-      }
-    }),
-  );
-
-  // 过滤出能连通的，按延迟升序取最快
-  const reachable = results.filter((r) => r.ok && r.elapsed < Infinity);
+  const all = await probeMirrorLatency(endpoints[0]);
+  const options = getMirrorOptions();
+  const reachable = options
+    .map((o) => ({ mirror: o.id, elapsed: all[o.id] ?? Infinity }))
+    .filter((r) => typeof r.elapsed === 'number' && Number.isFinite(r.elapsed)) as Array<{
+    mirror: UpdateMirror;
+    elapsed: number;
+  }>;
   if (reachable.length === 0) return userMirror;
   reachable.sort((a, b) => a.elapsed - b.elapsed);
   return reachable[0].mirror;
 }
 
-/** 将 GitHub 下载 URL 根据选择的镜像源进行转换 */
+/**
+ * 将 GitHub 下载 URL 根据选择的镜像源进行转换。
+ * mirror 为 'github' 时原样返回；否则作为 URL 前缀拼接（如 'https://gh-proxy.com' + '/' + url）。
+ */
 function applyMirror(url: string, mirror: UpdateMirror): string {
   if (mirror === 'github') return url;
-  try {
-    const u = new URL(url);
-    if (u.hostname !== 'github.com' && !u.hostname.endsWith('.github.com')) return url;
-    const pathname = u.pathname;
-    switch (mirror) {
-      case 'ghproxy':
-        return `https://ghproxy.com/${url}`;
-      case 'ghmirror':
-        return `https://gh-api.com/${url}`;
-      case 'kgithub':
-        return `https://kgithub.com${pathname}`;
-      default:
-        return url;
-    }
-  } catch {
-    return url;
-  }
+  // mirror 是自定义镜像前缀，直接拼接
+  return `${mirror}/${url}`;
 }
 
 export interface AppUpdaterState {
@@ -230,14 +317,12 @@ async function fetchLatestMeta(endpoints: readonly string[], mirror: UpdateMirro
     }
   }
 
-  // 2) 如首选没拿到 size，依次 fallback 各镜像（仅在未取到任何 size 时）
+  // 2) 如首选没拿到 size，依次 fallback 其他镜像（仅在未取到任何 size 时）
   if (Object.keys(sizes).length === 0) {
-    const fallbacks: UpdateMirror[] =
-      mirror === 'github'
-        ? ['ghproxy', 'ghmirror', 'kgithub']
-        : (['github', 'ghproxy', 'ghmirror', 'kgithub'] as UpdateMirror[]).filter(
-            (m) => m !== mirror,
-          );
+    const allOpts = getMirrorOptions();
+    const fallbacks = allOpts
+      .map((o) => o.id)
+      .filter((m) => m !== mirror);
     for (const fb of fallbacks) {
       for (const ep of endpoints) {
         const url = applyMirror(ep, fb);
