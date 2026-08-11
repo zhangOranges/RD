@@ -273,15 +273,25 @@ export default function LocalFilePane() {
     let dirCount = 0;
     let fileCount = 0;
     let totalSize = 0;
+    let selectedSize = 0;
+    let selectedDirs = 0;
+    let selectedFiles = 0;
     for (const e of entries) {
       if (e.isDir) dirCount += 1;
       else {
         fileCount += 1;
         totalSize += e.size;
       }
+      if (selectedNames.has(e.name)) {
+        if (e.isDir) selectedDirs += 1;
+        else {
+          selectedFiles += 1;
+          selectedSize += e.size;
+        }
+      }
     }
-    return { dirCount, fileCount, totalSize };
-  }, [entries]);
+    return { dirCount, fileCount, totalSize, selectedSize, selectedDirs, selectedFiles };
+  }, [entries, selectedNames]);
 
   const canBack = historyIndex > 0;
   const canForward = historyIndex >= 0 && historyIndex < history.length - 1;
@@ -523,7 +533,12 @@ export default function LocalFilePane() {
             {selectedNames.size > 0 && (
               <>
                 <span className="local-stats-sep">|</span>
-                <span style={{ color: 'var(--accent)' }}>已选 {selectedNames.size} 项</span>
+                <span style={{ color: 'var(--accent)' }}>
+                  已选 {selectedNames.size} 项
+                  {stats.selectedSize > 0 && (
+                    <span> · {formatSize(stats.selectedSize)}</span>
+                  )}
+                </span>
               </>
             )}
           </>

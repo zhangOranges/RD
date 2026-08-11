@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText as clipboardWriteText } from '@tauri-apps/plugin-clipboard-manager';
-import { ask } from '@tauri-apps/plugin-dialog';
 import {
   Folder,
   File as FileIcon,
@@ -20,6 +20,7 @@ import {
   Lock,
   ArrowUp,
   ArrowDown,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   useFileStore,
@@ -265,6 +266,41 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
   // ---- 排序状态 ----
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  // ---- 排序后的条目（文件夹置顶）----
+  // 必须放在 onRowSingleClick 之前声明，因为后者依赖它做 shift 范围选择
+  const sortedEntries = useMemo(() => {
+    const sorted = [...entries];
+    sorted.sort((a, b) => {
+      // 文件夹始终置顶
+      if (a.is_dir && !b.is_dir) return -1;
+      if (!a.is_dir && b.is_dir) return 1;
+      let cmp = 0;
+      switch (sortKey) {
+        case 'name':
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case 'size':
+          cmp = a.size - b.size;
+          break;
+        case 'type':
+          cmp = (a.file_type || '').localeCompare(b.file_type || '');
+          break;
+        case 'modified':
+          cmp = a.modified - b.modified;
+          break;
+        case 'permissions':
+          cmp = (a.permissions || '').localeCompare(b.permissions || '');
+          break;
+        case 'owner':
+          cmp = (a.owner || '').localeCompare(b.owner || '');
+          break;
+      }
+      if (cmp === 0) cmp = a.name.localeCompare(b.name);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [entries, sortKey, sortDir]);
 
   // ---- 面包屑输入模式 ----
   const [editingPath, setEditingPath] = useState(false);
@@ -645,18 +681,49 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     [currentPath, navigate, hostId, pushToast],
   );
 
+  // ---- Shift 范围选择锚点（基于 sortedEntries 的顺序） ----
+  // replace 模式下记住锚点；shift+点击时在 [锚点, 当前] 之间全部选中
+  const [shiftAnchorName, setShiftAnchorName] = useState<string | null>(null);
+
   const onRowSingleClick = useCallback(
     (e: React.MouseEvent, entry: FileEntry) => {
       if (e.shiftKey) {
-        selectOne(entry.name, 'range');
+        // 组件内直接按 sortedEntries 的顺序做范围选择，避免 store 用原始 entries 错位
+        const ordered = sortedEntries.map((en) => en.name);
+        const anchor = shiftAnchorName ?? ordered[0] ?? '';
+        let anchorIdx = ordered.indexOf(anchor);
+        if (anchorIdx < 0) anchorIdx = 0;
+        const targetIdx = ordered.indexOf(entry.name);
+        if (targetIdx < 0) return;
+        const [lo, hi] = anchorIdx < targetIdx
+          ? [anchorIdx, targetIdx]
+          : [targetIdx, anchorIdx];
+        const next = new Set<string>();
+        for (let i = lo; i <= hi; i++) {
+          const n = ordered[i];
+          if (n !== undefined) next.add(n);
+        }
+        // 直接写入 store，不走 selectOne('range') 那条基于原始 entries 的错位逻辑
+        useFileStore.setState({
+          selectedNames: next,
+          selectedEntry: entries.find((en) => en.name === entry.name) ?? null,
+        });
       } else if (e.ctrlKey || e.metaKey) {
         selectOne(entry.name, 'toggle');
       } else {
+        // replace：保存新 anchor
+        setShiftAnchorName(entry.name);
         selectOne(entry.name, 'replace');
       }
     },
-    [selectOne],
+    [selectOne, sortedEntries, shiftAnchorName, entries],
   );
+
+  // 清空选中时同步清掉锚点
+  const clearSelectionAndAnchor = useCallback(() => {
+    setShiftAnchorName(null);
+    clearSelection();
+  }, [clearSelection]);
 
   // ---- 重命名提交/取消 ----
   const startRename = useCallback((entry: FileEntry) => {
@@ -712,11 +779,29 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     }
   }, [inlineCreate, inlineCreateValue, mkdir, mkfile, hostId, cancelInlineCreate]);
 
+  // ---- 自定义确认对话框（替代 @tauri-apps/plugin-dialog 的 ask 原生样式） ----
+  interface MiniDialogState {
+    title: string;
+    message: string;
+    okLabel?: string;
+    cancelLabel?: string;
+    danger?: boolean;
+    onOk: () => void;
+  }
+  const [miniDialog, setMiniDialog] = useState<MiniDialogState | null>(null);
+
+  function openMiniDialog(opts: MiniDialogState) {
+    setMiniDialog(opts);
+  }
+  function closeMiniDialog() {
+    setMiniDialog(null);
+  }
+
   // ---- 右键菜单动作 ----
   function openBlankMenu(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    clearSelection();
+    clearSelectionAndAnchor();
     setCtxMenu({ kind: 'blank', x: e.clientX, y: e.clientY });
   }
 
@@ -734,7 +819,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     setCtxMenu(null);
   }
 
-  async function handleCtxDelete(entry: FileEntry) {
+  function handleCtxDelete(entry: FileEntry) {
     const selectedSet = useFileStore.getState().selectedNames;
     const multiSelected = selectedSet.size > 1 && selectedSet.has(entry.name);
     const toDelete: FileEntry[] = multiSelected
@@ -744,22 +829,25 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     const label = multiSelected
       ? `已选 ${toDelete.length} 项`
       : `${entry.is_dir ? '文件夹' : '文件'}「${entry.name}」`;
-    const ok = await ask(`确认删除${label}？此操作不可撤销。`, {
+
+    openMiniDialog({
       title: '确认删除',
-      kind: 'warning',
+      message: `确认删除${label}？此操作不可撤销。`,
       okLabel: '确认删除',
       cancelLabel: '取消',
+      danger: true,
+      onOk: async () => {
+        closeMiniDialog();
+        closeCtxMenu();
+        // remove 内部已处理错误提示与刷新；逐个删除，失败不中断后续
+        for (const e of toDelete) {
+          await remove(hostId, e.name, e.is_dir);
+        }
+        if (multiSelected) {
+          clearSelectionAndAnchor();
+        }
+      },
     });
-    if (!ok) return;
-    closeCtxMenu();
-
-    // remove 内部已处理错误提示与刷新；逐个删除，失败不中断后续
-    for (const e of toDelete) {
-      await remove(hostId, e.name, e.is_dir);
-    }
-    if (multiSelected) {
-      clearSelection();
-    }
   }
 
   function handleCtxRename(entry: FileEntry) {
@@ -885,54 +973,30 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     [currentPath, hostId],
   );
 
-  // ---- 排序后的条目（文件夹置顶）----
-  const sortedEntries = useMemo(() => {
-    const sorted = [...entries];
-    sorted.sort((a, b) => {
-      // 文件夹始终置顶
-      if (a.is_dir && !b.is_dir) return -1;
-      if (!a.is_dir && b.is_dir) return 1;
-      let cmp = 0;
-      switch (sortKey) {
-        case 'name':
-          cmp = a.name.localeCompare(b.name);
-          break;
-        case 'size':
-          cmp = a.size - b.size;
-          break;
-        case 'type':
-          cmp = (a.file_type || '').localeCompare(b.file_type || '');
-          break;
-        case 'modified':
-          cmp = a.modified - b.modified;
-          break;
-        case 'permissions':
-          cmp = (a.permissions || '').localeCompare(b.permissions || '');
-          break;
-        case 'owner':
-          cmp = (a.owner || '').localeCompare(b.owner || '');
-          break;
-      }
-      if (cmp === 0) cmp = a.name.localeCompare(b.name);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return sorted;
-  }, [entries, sortKey, sortDir]);
-
   // ---- 统计信息 ----
   const stats = useMemo(() => {
     let folders = 0;
     let files = 0;
     let totalSize = 0;
+    let selectedSize = 0;
+    let selectedFolders = 0;
+    let selectedFiles = 0;
     for (const e of entries) {
       if (e.is_dir) folders++;
       else {
         files++;
         totalSize += e.size;
       }
+      if (selectedNames.has(e.name)) {
+        if (e.is_dir) selectedFolders++;
+        else {
+          selectedFiles++;
+          selectedSize += e.size;
+        }
+      }
     }
-    return { folders, files, totalSize };
-  }, [entries]);
+    return { folders, files, totalSize, selectedSize, selectedFolders, selectedFiles };
+  }, [entries, selectedNames]);
 
   // ---- 面包屑分段 ----
   const pathSegments = useMemo(() => {
@@ -1188,7 +1252,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             const tgt = e.target as HTMLElement;
             if (tgt.closest('.remote-pane-row')) return;
             if (tgt.closest('.remote-pane-inline-create')) return;
-            clearSelection();
+            clearSelectionAndAnchor();
           }}
           onContextMenu={(e) => {
             if (!currentPath) {
@@ -1292,7 +1356,12 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
           {selectedNames.size > 0 && (
             <>
               <span className="remote-pane-stats-sep">|</span>
-              <span style={{ color: 'var(--accent)' }}>已选 {selectedNames.size} 项</span>
+              <span style={{ color: 'var(--accent)' }}>
+                已选 {selectedNames.size} 项
+                {stats.selectedSize > 0 && (
+                  <span> · {formatSize(stats.selectedSize)}</span>
+                )}
+              </span>
             </>
           )}
         </span>
@@ -1410,6 +1479,61 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
           onClose={() => setEditorTarget(null)}
         />
       )}
+
+      {/* ==================== 自定义 mini 确认对话框（紧凑版）：替代 @tauri-apps/plugin-dialog ask 原生样式 ==================== */}
+      {miniDialog &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            className="dialog-overlay sidebar-mini-overlay"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => closeMiniDialog()}
+          >
+            <div
+              className="dialog dialog-mini"
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 420 }}
+            >
+              <div className="dialog-header">
+                <div className="sidebar-mini-title-wrap">
+                  {miniDialog.danger ? (
+                    <AlertTriangle
+                      size={16}
+                      className="sidebar-mini-icon sidebar-mini-icon-danger"
+                    />
+                  ) : (
+                    <AlertTriangle
+                      size={16}
+                      className="sidebar-mini-icon sidebar-mini-icon-info"
+                    />
+                  )}
+                  <h3 className="dialog-title">{miniDialog.title}</h3>
+                </div>
+              </div>
+              <div className="dialog-body sidebar-mini-body">
+                <p className="sidebar-mini-message">{miniDialog.message}</p>
+              </div>
+              <div className="dialog-footer sidebar-mini-footer">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => closeMiniDialog()}
+                >
+                  {miniDialog.cancelLabel ?? '取消'}
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${miniDialog.danger ? 'btn-danger' : 'btn-primary'}`}
+                  onClick={() => miniDialog.onOk()}
+                >
+                  {miniDialog.okLabel ?? '确定'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
