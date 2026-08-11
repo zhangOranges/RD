@@ -34,6 +34,7 @@ pub fn set_setting(base_dir: &Path, key: &str, value: &str) -> anyhow::Result<()
 fn default_value(key: &str) -> String {
     match key {
         "remember_dir_global" => "true".to_string(),
+        "debug_logging" => "false".to_string(),
         _ => String::new(),
     }
 }

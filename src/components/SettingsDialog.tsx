@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
 import {
+  useAppUpdater,
   getMirrorOptions,
   getUpdateMirror,
   setUpdateMirror,
@@ -17,7 +18,7 @@ import {
   type MirrorOption,
 } from '../hooks/useAppUpdater';
 
-type SettingsTab = 'general' | 'theme' | 'update';
+type SettingsTab = 'general' | 'theme' | 'update' | 'debug';
 
 interface TabItem {
   id: SettingsTab;
@@ -29,6 +30,7 @@ const TABS: TabItem[] = [
   { id: 'general', label: '通用', icon: Sliders },
   { id: 'theme', label: '主题', icon: Palette },
   { id: 'update', label: '更新', icon: DownloadCloud },
+  { id: 'debug', label: '调试', icon: Bug },
 ];
 
 /**
@@ -49,6 +51,7 @@ export function SettingsDialog() {
   const pushToast = useToastStore((s) => s.push);
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
+  const updater = useAppUpdater();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [rememberDirGlobal, setRememberDirGlobal] = useState(true);
@@ -59,6 +62,7 @@ export function SettingsDialog() {
   const [customUrlInput, setCustomUrlInput] = useState('');
   const [delays, setDelays] = useState<MirrorDelayResult>({});
   const [probing, setProbing] = useState(false);
+  const [debugLogging, setDebugLogging] = useState(false);
 
   // 弹窗打开时加载设置
   useEffect(() => {
@@ -75,6 +79,10 @@ export function SettingsDialog() {
         setUpdateMirrorState(getUpdateMirror());
         // 加载镜像选项列表（内置 + 自定义）
         setMirrorOptions(getMirrorOptions());
+        // 加载调试日志开关
+        const debugVal = await invoke<boolean>('get_debug_logging');
+        if (cancelled) return;
+        setDebugLogging(debugVal);
       } catch (err) {
         if (!cancelled) {
           pushToast('error', `读取设置失败：${formatErr(err)}`);
@@ -88,6 +96,13 @@ export function SettingsDialog() {
       cancelled = true;
     };
   }, [settingsVisible, pushToast]);
+
+  // 检查更新产生的延迟结果同步到本地
+  useEffect(() => {
+    if (updater.mirrorDelays && Object.keys(updater.mirrorDelays).length > 0) {
+      setDelays(updater.mirrorDelays);
+    }
+  }, [updater.mirrorDelays]);
 
   // Escape 关闭
   useEffect(() => {
@@ -121,6 +136,19 @@ export function SettingsDialog() {
 
   function handleClose() {
     setSettingsVisible(false);
+  }
+
+  async function handleToggleDebugLog(checked: boolean) {
+    setDebugLogging(checked);
+    setSaving(true);
+    try {
+      await invoke('set_debug_logging', { enabled: checked });
+    } catch (err) {
+      setDebugLogging(!checked);
+      pushToast('error', `保存设置失败：${formatErr(err)}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleProbeLatency() {
@@ -389,30 +417,51 @@ export function SettingsDialog() {
                     输入镜像站点地址（如 https://v4.gh-proxy.org），会作为 GitHub URL 的前缀拼接。
                   </div>
                 </div>
+              </div>
+            )}
 
-                {/* 更新日志 */}
+            {/* 调试 */}
+            {activeTab === 'debug' && (
+              <div className="settings-pane">
+                <div className="settings-pane-title">调试日志</div>
+
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <div className="settings-row-label">详细日志</div>
+                    <div className="settings-row-desc">
+                      开启后记录所有级别的日志（含 Info），用于排查问题。关闭后仅记录警告和错误。
+                    </div>
+                  </div>
+                  <label className="form-switch">
+                    <input
+                      type="checkbox"
+                      checked={debugLogging}
+                      onChange={(e) => void handleToggleDebugLog(e.target.checked)}
+                      disabled={loading || saving}
+                    />
+                    <span className="form-switch-track" aria-hidden="true" />
+                    <span className="form-switch-label">
+                      {loading ? '加载中…' : saving ? '保存中…' : debugLogging ? '开启' : '关闭'}
+                    </span>
+                  </label>
+                </div>
+
                 <div className="settings-update-log-section">
                   <div className="settings-pane-row">
                     <div>
-                      <div className="settings-pane-title">更新日志</div>
+                      <div className="settings-pane-title">日志文件</div>
                       <div className="settings-update-mirror-desc">
-                        记录检查更新、下载、安装过程中的关键事件和错误，用于排查更新问题。点击按钮在文件管理器中打开日志文件所在目录。
+                        点击按钮在文件管理器中打开日志文件所在目录，或清空已有日志内容。
                       </div>
                     </div>
                     <div className="settings-log-actions">
                       <button
                         type="button"
                         className="btn btn-ghost btn-compact"
-                        onClick={async () => {
-                          try {
-                            // 打开日志文件所在文件夹（通过 open_folder 命令，传入日志文件路径）
-                            // 需要先获取日志文件路径，这里直接调用 open_folder 传入一个占位路径
-                            // 实际上我们需要一个新的命令来打开日志文件夹
-                            await invoke('open_update_log_folder');
-                            pushToast('success', '已打开日志文件夹');
-                          } catch (err) {
+                        onClick={() => {
+                          invoke('open_update_log_folder').catch((err) => {
                             pushToast('error', `打开日志文件夹失败：${formatErr(err)}`);
-                          }
+                          });
                         }}
                       >
                         <FolderOpen size={13} />

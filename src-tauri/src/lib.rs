@@ -5,6 +5,7 @@ pub mod sftp;
 pub mod ssh;
 mod storage;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tauri::{Emitter, Manager};
 
@@ -26,6 +27,23 @@ impl LogLevel {
     }
 }
 
+/// 调试日志开关状态（全局原子读取，无锁）
+struct DebugLogState(AtomicBool);
+
+impl DebugLogState {
+    fn new(enabled: bool) -> Self {
+        DebugLogState(AtomicBool::new(enabled))
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    fn set(&self, enabled: bool) {
+        self.0.store(enabled, Ordering::Relaxed);
+    }
+}
+
 /// 获取更新日志文件路径（app_data_dir/updates/update.log）
 fn get_update_log_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     let dir = get_updates_dir(app)?;
@@ -33,7 +51,17 @@ fn get_update_log_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 }
 
 /// 写入一行日志到 update.log（自动追加时间戳和级别标签）
+/// 调试关闭时仅记录 Warn/Error，开启后记录所有级别
 fn write_update_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
+    // 调试未开启时，跳过 Info 级别日志
+    let debug_enabled = app
+        .try_state::<DebugLogState>()
+        .map(|s| s.is_enabled())
+        .unwrap_or(false);
+    if !debug_enabled && matches!(level, LogLevel::Info) {
+        return;
+    }
+
     let log_path = match get_update_log_path(app) {
         Some(p) => p,
         None => return,
@@ -68,6 +96,40 @@ fn update_log(app: tauri::AppHandle, level: String, msg: String) {
     write_update_log(&app, lv, &msg);
 }
 
+/// 前端调用：获取调试日志开关状态
+#[tauri::command]
+fn get_debug_logging(app: tauri::AppHandle) -> Result<bool, String> {
+    let enabled = app
+        .try_state::<DebugLogState>()
+        .map(|s| s.is_enabled())
+        .unwrap_or(false);
+    Ok(enabled)
+}
+
+/// 前端调用：设置调试日志开关（同时持久化到 settings.json）
+#[tauri::command]
+async fn set_debug_logging(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DebugLogState>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.set(enabled);
+    // 持久化到 settings.json
+    let base_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取数据目录: {}", e))?;
+    storage::settings::set_setting(&base_dir, "debug_logging", if enabled { "true" } else { "false" })
+        .map_err(|e| format!("保存设置失败: {}", e))?;
+    // 写一条日志标记开关变化
+    write_update_log(
+        &app,
+        if enabled { LogLevel::Info } else { LogLevel::Warn },
+        &format!("调试日志已{}", if enabled { "开启" } else { "关闭" }),
+    );
+    Ok(())
+}
+
 /// 前端调用：读取更新日志文件内容（用于查看日志）
 #[tauri::command]
 fn read_update_log(app: tauri::AppHandle) -> Result<String, String> {
@@ -90,40 +152,34 @@ fn clear_update_log(app: tauri::AppHandle) -> Result<(), String> {
 
 /// 前端调用：在文件管理器中打开更新日志所在文件夹
 #[tauri::command]
-fn open_update_log_folder(app: tauri::AppHandle) -> Result<(), String> {
-    let log_path = get_update_log_path(&app).ok_or("无法获取日志文件路径")?;
-    // 确保文件存在（不存在则创建一个空文件，方便用户看到）
-    if !log_path.exists() {
-        if let Some(parent) = log_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+async fn open_update_log_folder(app: tauri::AppHandle) -> Result<(), String> {
+    // 所有 I/O 移到后台线程，命令立即返回
+    std::thread::spawn(move || {
+        let log_path = match get_update_log_path(&app) {
+            Some(p) => p,
+            None => return,
+        };
+        if !log_path.exists() {
+            if let Some(parent) = log_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&log_path, "");
         }
-        let _ = std::fs::write(&log_path, "");
-    }
-    let dir = log_path.parent().unwrap_or(std::path::Path::new("."));
+        let dir = log_path.parent().unwrap_or(std::path::Path::new("."));
 
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(dir)
-            .spawn()
-            .map_err(|e| format!("打开文件夹失败: {}", e))?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        // macOS 使用 select 选中文件
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(&log_path)
-            .spawn()
-            .map_err(|e| format!("打开文件夹失败: {}", e))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(dir)
-            .spawn()
-            .map_err(|e| format!("打开文件夹失败: {}", e))?;
-    }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("explorer").arg(dir).spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg("-R").arg(&log_path).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+        }
+    });
     Ok(())
 }
 
@@ -455,6 +511,18 @@ pub fn run() {
         .manage(sftp::new_state())
         .manage(pty::new_state())
         .manage(storage::new_state())
+        .manage(DebugLogState::new(false))
+        .setup(|app| {
+            // 从 settings.json 读取调试日志开关初始值
+            if let Some(debug_state) = app.try_state::<DebugLogState>() {
+                if let Ok(base_dir) = app.path().app_data_dir() {
+                    if let Ok(val) = storage::settings::get_setting(&base_dir, "debug_logging") {
+                        debug_state.set(val == "true");
+                    }
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             probe_url,
@@ -469,6 +537,8 @@ pub fn run() {
             read_update_log,
             clear_update_log,
             open_update_log_folder,
+            get_debug_logging,
+            set_debug_logging,
             local_fs::list_local_dir,
             local_fs::local_home_dir,
             local_fs::read_local_file_bytes,
