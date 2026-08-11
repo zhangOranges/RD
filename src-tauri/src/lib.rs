@@ -127,12 +127,20 @@ async fn set_debug_logging(
         .path()
         .app_data_dir()
         .map_err(|e| format!("无法获取数据目录: {}", e))?;
-    storage::settings::set_setting(&base_dir, "debug_logging", if enabled { "true" } else { "false" })
-        .map_err(|e| format!("保存设置失败: {}", e))?;
+    storage::settings::set_setting(
+        &base_dir,
+        "debug_logging",
+        if enabled { "true" } else { "false" },
+    )
+    .map_err(|e| format!("保存设置失败: {}", e))?;
     // 写一条日志标记开关变化
     write_update_log(
         &app,
-        if enabled { LogLevel::Info } else { LogLevel::Warn },
+        if enabled {
+            LogLevel::Info
+        } else {
+            LogLevel::Warn
+        },
         &format!("调试日志已{}", if enabled { "开启" } else { "关闭" }),
     );
     Ok(())
@@ -181,7 +189,10 @@ async fn open_update_log_folder(app: tauri::AppHandle) -> Result<(), String> {
         }
         #[cfg(target_os = "macos")]
         {
-            let _ = std::process::Command::new("open").arg("-R").arg(&log_path).spawn();
+            let _ = std::process::Command::new("open")
+                .arg("-R")
+                .arg(&log_path)
+                .spawn();
         }
         #[cfg(target_os = "linux")]
         {
@@ -256,7 +267,11 @@ async fn probe_url(app: tauri::AppHandle, url: String) -> i64 {
 /// 超时 15 秒。成功返回文本，失败返回错误字符串。
 #[tauri::command]
 async fn fetch_url_text(app: tauri::AppHandle, url: String) -> Result<String, String> {
-    write_update_log(&app, LogLevel::Info, &format!("fetch_url_text 开始: {}", url));
+    write_update_log(
+        &app,
+        LogLevel::Info,
+        &format!("fetch_url_text 开始: {}", url),
+    );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -264,38 +279,55 @@ async fn fetch_url_text(app: tauri::AppHandle, url: String) -> Result<String, St
         .build()
         .map_err(|e| {
             let msg = format!("创建 HTTP 客户端失败: {}", e);
-            write_update_log(&app, LogLevel::Error, &format!("fetch_url_text {}: {}", url, msg));
+            write_update_log(
+                &app,
+                LogLevel::Error,
+                &format!("fetch_url_text {}: {}", url, msg),
+            );
             msg
         })?;
 
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| {
-            let msg = format!("请求失败: {}", e);
-            write_update_log(&app, LogLevel::Error, &format!("fetch_url_text {}: {}", url, msg));
-            msg
-        })?;
+    let resp = client.get(&url).send().await.map_err(|e| {
+        let msg = format!("请求失败: {}", e);
+        write_update_log(
+            &app,
+            LogLevel::Error,
+            &format!("fetch_url_text {}: {}", url, msg),
+        );
+        msg
+    })?;
 
     let status = resp.status();
     if !status.is_success() {
         let msg = format!("HTTP {}", status);
-        write_update_log(&app, LogLevel::Error, &format!("fetch_url_text {}: {}", url, msg));
+        write_update_log(
+            &app,
+            LogLevel::Error,
+            &format!("fetch_url_text {}: {}", url, msg),
+        );
         return Err(msg);
     }
 
     let content_length = resp.content_length().unwrap_or(0);
     let text = resp.text().await.map_err(|e| {
         let msg = format!("读取响应失败: {}", e);
-        write_update_log(&app, LogLevel::Error, &format!("fetch_url_text {}: {}", url, msg));
+        write_update_log(
+            &app,
+            LogLevel::Error,
+            &format!("fetch_url_text {}: {}", url, msg),
+        );
         msg
     })?;
 
     write_update_log(
         &app,
         LogLevel::Info,
-        &format!("fetch_url_text 成功: {} (status={}, {} 字节)", url, status, text.len()),
+        &format!(
+            "fetch_url_text 成功: {} (status={}, {} 字节)",
+            url,
+            status,
+            text.len()
+        ),
     );
     let _ = content_length; // 避免 unused 警告
     Ok(text)
@@ -317,11 +349,22 @@ async fn download_installer(
     url: String,
     filename: String,
 ) -> Result<String, String> {
-    write_update_log(&app, LogLevel::Info, &format!("download_installer 开始: url={}, filename={}", url, filename));
+    write_update_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "download_installer 开始: url={}, filename={}",
+            url, filename
+        ),
+    );
 
     let updates_dir = get_updates_dir(&app).ok_or("无法获取更新目录")?;
     let file_path = updates_dir.join(&filename);
-    write_update_log(&app, LogLevel::Info, &format!("download_installer 保存路径: {}", file_path.display()));
+    write_update_log(
+        &app,
+        LogLevel::Info,
+        &format!("download_installer 保存路径: {}", file_path.display()),
+    );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(300)) // 5 分钟超时
@@ -329,36 +372,54 @@ async fn download_installer(
         .build()
         .map_err(|e| {
             let msg = format!("创建 HTTP 客户端失败: {}", e);
-            write_update_log(&app, LogLevel::Error, &format!("download_installer: {}", msg));
+            write_update_log(
+                &app,
+                LogLevel::Error,
+                &format!("download_installer: {}", msg),
+            );
             msg
         })?;
 
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| {
-            let msg = format!("请求失败: {}", e);
-            write_update_log(&app, LogLevel::Error, &format!("download_installer: {}", msg));
-            msg
-        })?;
+    let resp = client.get(&url).send().await.map_err(|e| {
+        let msg = format!("请求失败: {}", e);
+        write_update_log(
+            &app,
+            LogLevel::Error,
+            &format!("download_installer: {}", msg),
+        );
+        msg
+    })?;
 
     let status = resp.status();
     if !status.is_success() {
         let msg = format!("HTTP {}", status);
-        write_update_log(&app, LogLevel::Error, &format!("download_installer: {}", msg));
+        write_update_log(
+            &app,
+            LogLevel::Error,
+            &format!("download_installer: {}", msg),
+        );
         return Err(msg);
     }
 
     let total = resp.content_length().unwrap_or(0);
-    write_update_log(&app, LogLevel::Info, &format!("download_installer 响应: status={}, content_length={}", status, total));
+    write_update_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "download_installer 响应: status={}, content_length={}",
+            status, total
+        ),
+    );
 
-    let mut file = std::fs::File::create(&file_path)
-        .map_err(|e| {
-            let msg = format!("创建文件失败: {}", e);
-            write_update_log(&app, LogLevel::Error, &format!("download_installer: {}", msg));
-            msg
-        })?;
+    let mut file = std::fs::File::create(&file_path).map_err(|e| {
+        let msg = format!("创建文件失败: {}", e);
+        write_update_log(
+            &app,
+            LogLevel::Error,
+            &format!("download_installer: {}", msg),
+        );
+        msg
+    })?;
 
     use futures_util::StreamExt;
     let mut stream = resp.bytes_stream();
@@ -371,13 +432,24 @@ async fn download_installer(
             Ok(c) => c,
             Err(e) => {
                 let msg = format!("读取数据失败: {}", e);
-                write_update_log(&app, LogLevel::Error, &format!("download_installer: {} (已下载 {} 字节, {} 块)", msg, downloaded, chunk_count));
+                write_update_log(
+                    &app,
+                    LogLevel::Error,
+                    &format!(
+                        "download_installer: {} (已下载 {} 字节, {} 块)",
+                        msg, downloaded, chunk_count
+                    ),
+                );
                 return Err(msg);
             }
         };
         if let Err(e) = std::io::Write::write_all(&mut file, &chunk) {
             let msg = format!("写入文件失败: {}", e);
-            write_update_log(&app, LogLevel::Error, &format!("download_installer: {} (已下载 {} 字节)", msg, downloaded));
+            write_update_log(
+                &app,
+                LogLevel::Error,
+                &format!("download_installer: {} (已下载 {} 字节)", msg, downloaded),
+            );
             return Err(msg);
         }
         downloaded += chunk.len() as u64;
@@ -414,13 +486,22 @@ async fn download_installer(
 
     // 同步文件到磁盘
     if let Err(e) = file.sync_all() {
-        write_update_log(&app, LogLevel::Warn, &format!("download_installer sync_all 警告: {}", e));
+        write_update_log(
+            &app,
+            LogLevel::Warn,
+            &format!("download_installer sync_all 警告: {}", e),
+        );
     }
 
     write_update_log(
         &app,
         LogLevel::Info,
-        &format!("download_installer 完成: {} ({} 字节, {} 块)", file_path.display(), downloaded, chunk_count),
+        &format!(
+            "download_installer 完成: {} ({} 字节, {} 块)",
+            file_path.display(),
+            downloaded,
+            chunk_count
+        ),
     );
 
     Ok(file_path.to_string_lossy().to_string())
@@ -463,7 +544,11 @@ fn open_folder(path: String) -> Result<(), String> {
 /// 运行安装包（Windows NSIS exe 等），运行后调用方应退出当前程序
 #[tauri::command]
 fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    write_update_log(&app, LogLevel::Info, &format!("run_installer 开始: {}", path));
+    write_update_log(
+        &app,
+        LogLevel::Info,
+        &format!("run_installer 开始: {}", path),
+    );
 
     let p = std::path::Path::new(&path);
     if !p.exists() {
@@ -502,10 +587,7 @@ fn run_installer(app: tauri::AppHandle, path: String) -> Result<(), String> {
 
 /// 检查本地是否有指定文件名的安装包，返回路径和大小（不存在返回 null）
 #[tauri::command]
-fn check_local_installer(
-    app: tauri::AppHandle,
-    filename: String,
-) -> Option<serde_json::Value> {
+fn check_local_installer(app: tauri::AppHandle, filename: String) -> Option<serde_json::Value> {
     let dir = get_updates_dir(&app)?;
     let path = dir.join(&filename);
     if !path.exists() {

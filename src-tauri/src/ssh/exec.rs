@@ -18,35 +18,36 @@ pub async fn ssh_exec_raw(
 
     let mut channel = {
         let h = handle.lock().await;
-        h.channel_open_session()
-            .await
-            .map_err(|e| {
-                let err = SshError::ChannelError(format!("open exec channel: {e}"));
-                if let Some(app) = app_handle {
-                    debug_log(
-                        app,
-                        LogLevel::Error,
-                        &format!("ssh_exec_raw 打开 channel 失败: host_id={} - {}", host_id, err),
-                    );
-                }
-                err
-            })?
-    };
-
-    channel
-        .exec(true, command)
-        .await
-        .map_err(|e| {
-            let err = SshError::ChannelError(format!("exec: {e}"));
+        h.channel_open_session().await.map_err(|e| {
+            let err = SshError::ChannelError(format!("open exec channel: {e}"));
             if let Some(app) = app_handle {
                 debug_log(
                     app,
                     LogLevel::Error,
-                    &format!("ssh_exec_raw exec 失败: host_id={} cmd={} - {}", host_id, command, err),
+                    &format!(
+                        "ssh_exec_raw 打开 channel 失败: host_id={} - {}",
+                        host_id, err
+                    ),
                 );
             }
             err
-        })?;
+        })?
+    };
+
+    channel.exec(true, command).await.map_err(|e| {
+        let err = SshError::ChannelError(format!("exec: {e}"));
+        if let Some(app) = app_handle {
+            debug_log(
+                app,
+                LogLevel::Error,
+                &format!(
+                    "ssh_exec_raw exec 失败: host_id={} cmd={} - {}",
+                    host_id, command, err
+                ),
+            );
+        }
+        err
+    })?;
 
     let mut output = Vec::new();
     let mut exit_code: i32 = 0;
@@ -76,7 +77,10 @@ pub async fn ssh_exec_raw(
             debug_log(
                 app,
                 LogLevel::Warn,
-                &format!("ssh_exec_raw 非零退出: host_id={} cmd={} - code {}", host_id, command, exit_code),
+                &format!(
+                    "ssh_exec_raw 非零退出: host_id={} cmd={} - code {}",
+                    host_id, command, exit_code
+                ),
             );
         }
         return Err(err);

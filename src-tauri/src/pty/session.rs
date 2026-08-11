@@ -63,18 +63,18 @@ impl PtySession {
         // --- Open channel + request PTY + shell -------------------------------
         let channel = {
             let handle = shared_handle.lock().await;
-            handle
-                .channel_open_session()
-                .await
-                .map_err(|e| {
-                    let msg = format!("open session channel: {e}");
-                    debug_log(
-                        &app,
-                        LogLevel::Error,
-                        &format!("[PTY] 打开 channel 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
-                    );
-                    msg
-                })?
+            handle.channel_open_session().await.map_err(|e| {
+                let msg = format!("open session channel: {e}");
+                debug_log(
+                    &app,
+                    LogLevel::Error,
+                    &format!(
+                        "[PTY] 打开 channel 失败: host_id={} tab_id={} - {}",
+                        host_id, tab_id, msg
+                    ),
+                );
+                msg
+            })?
         };
 
         // Use want_reply=false — some SSH servers don't send SSH_MSG_CHANNEL_SUCCESS
@@ -87,23 +87,26 @@ impl PtySession {
                 debug_log(
                     &app,
                     LogLevel::Error,
-                    &format!("[PTY] 请求 PTY 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
+                    &format!(
+                        "[PTY] 请求 PTY 失败: host_id={} tab_id={} - {}",
+                        host_id, tab_id, msg
+                    ),
                 );
                 msg
             })?;
 
-        channel
-            .request_shell(false)
-            .await
-            .map_err(|e| {
-                let msg = format!("request shell: {e}");
-                debug_log(
-                    &app,
-                    LogLevel::Error,
-                    &format!("[PTY] 请求 shell 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
-                );
-                msg
-            })?;
+        channel.request_shell(false).await.map_err(|e| {
+            let msg = format!("request shell: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!(
+                    "[PTY] 请求 shell 失败: host_id={} tab_id={} - {}",
+                    host_id, tab_id, msg
+                ),
+            );
+            msg
+        })?;
 
         // --- Inject PROMPT_COMMAND -------------------------------------------
         // Wait longer for the shell to fully start before sending PROMPT_COMMAND.
@@ -120,18 +123,18 @@ impl PtySession {
  history -c
  clear
 "#;
-        channel
-            .data(init.as_bytes())
-            .await
-            .map_err(|e| {
-                let msg = format!("send prompt_command: {e}");
-                debug_log(
-                    &app,
-                    LogLevel::Error,
-                    &format!("[PTY] 注入 PROMPT_COMMAND 失败: host_id={} tab_id={} - {}", host_id, tab_id, msg),
-                );
-                msg
-            })?;
+        channel.data(init.as_bytes()).await.map_err(|e| {
+            let msg = format!("send prompt_command: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!(
+                    "[PTY] 注入 PROMPT_COMMAND 失败: host_id={} tab_id={} - {}",
+                    host_id, tab_id, msg
+                ),
+            );
+            msg
+        })?;
 
         // --- Spawn read loop --------------------------------------------------
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -289,7 +292,10 @@ async fn read_loop(
     debug_log(
         &app,
         LogLevel::Info,
-        &format!("[PTY] read_loop 已退出: host_id={} tab_id={}", host_id, tab_id),
+        &format!(
+            "[PTY] read_loop 已退出: host_id={} tab_id={}",
+            host_id, tab_id
+        ),
     );
     closed.store(true, Ordering::Release);
     let _ = app.emit(

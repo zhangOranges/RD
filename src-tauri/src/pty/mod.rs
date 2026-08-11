@@ -145,18 +145,18 @@ pub async fn pty_open(
 
     // Obtain the shared SSH handle (locks SshState internally). SSH sessions
     // are still keyed by host_id only — multiple PTY tabs share one SSH pipe.
-    let shared_handle = ssh_state
-        .get_connection(&host_id)
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            debug_log(
-                &app,
-                LogLevel::Error,
-                &format!("[PTY] pty_open 获取 SSH 连接失败: host_id={} - {}", host_id, msg),
-            );
-            msg
-        })?;
+    let shared_handle = ssh_state.get_connection(&host_id).await.map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "[PTY] pty_open 获取 SSH 连接失败: host_id={} - {}",
+                host_id, msg
+            ),
+        );
+        msg
+    })?;
 
     let tab_id_resolved = tab_id.unwrap_or_else(|| "default".to_string());
 
@@ -173,7 +173,10 @@ pub async fn pty_open(
         debug_log(
             &app,
             LogLevel::Error,
-            &format!("[PTY] pty_open 创建会话失败: host_id={} tab_id={} - {}", host_id, tab_id_resolved, e),
+            &format!(
+                "[PTY] pty_open 创建会话失败: host_id={} tab_id={} - {}",
+                host_id, tab_id_resolved, e
+            ),
         );
         e
     })?;
@@ -206,7 +209,11 @@ pub async fn pty_close(
         debug_log(
             &app,
             LogLevel::Info,
-            &format!("[PTY] pty_close: host_id={} tab_id={}", host_id, tab_id.unwrap_or_else(|| "default".to_string())),
+            &format!(
+                "[PTY] pty_close: host_id={} tab_id={}",
+                host_id,
+                tab_id.unwrap_or_else(|| "default".to_string())
+            ),
         );
         session.shutdown().await;
     }

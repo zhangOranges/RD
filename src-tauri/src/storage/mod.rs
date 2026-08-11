@@ -81,7 +81,10 @@ pub async fn save_host(
         debug_log(
             &app,
             LogLevel::Error,
-            &format!("save_host 失败: host_id={} name={} - {}", host_id, host_name, msg),
+            &format!(
+                "save_host 失败: host_id={} name={} - {}",
+                host_id, host_name, msg
+            ),
         );
         msg
     })
@@ -98,7 +101,11 @@ pub async fn delete_host(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
-    debug_log(&app, LogLevel::Info, &format!("delete_host 开始: id={}", id));
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!("delete_host 开始: id={}", id),
+    );
     // 先取出可能存在的 path_cache_id，删完主机配置后就拿不到了
     let cache_key = hosts::get_host(&base_dir, &id)
         .ok()
@@ -112,13 +119,21 @@ pub async fn delete_host(
         });
     hosts::delete_host(&base_dir, &id).map_err(|e| {
         let msg = e.to_string();
-        debug_log(&app, LogLevel::Error, &format!("delete_host 删除主机配置失败: id={} - {}", id, msg));
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("delete_host 删除主机配置失败: id={} - {}", id, msg),
+        );
         msg
     })?;
     // 删除 host.id 前缀的路径缓存（旧格式或未分配 path_cache_id 的主机）
     path_cache::delete_host_paths(&base_dir, &id).map_err(|e| {
         let msg = e.to_string();
-        debug_log(&app, LogLevel::Error, &format!("delete_host 删除路径缓存失败: id={} - {}", id, msg));
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("delete_host 删除路径缓存失败: id={} - {}", id, msg),
+        );
         msg
     })?;
     // 删除 path_cache_id 前缀的路径缓存（新格式），若与 id 相同则为幂等重复
@@ -137,12 +152,23 @@ pub async fn delete_host(
     }
     for cred_type in ["password", "private_key"] {
         if let Err(e) = credentials::delete_credential(&id, cred_type) {
-            let msg = format!("删除凭据失败 ({}): {}；主机配置与路径缓存已删除。", cred_type, e);
-            debug_log(&app, LogLevel::Error, &format!("delete_host {}: id={} - {}", cred_type, id, e));
+            let msg = format!(
+                "删除凭据失败 ({}): {}；主机配置与路径缓存已删除。",
+                cred_type, e
+            );
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("delete_host {}: id={} - {}", cred_type, id, e),
+            );
             return Err(msg);
         }
     }
-    debug_log(&app, LogLevel::Info, &format!("delete_host 完成: id={}", id));
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!("delete_host 完成: id={}", id),
+    );
     Ok(())
 }
 
@@ -158,7 +184,10 @@ pub async fn save_credential(
         debug_log(
             &app,
             LogLevel::Error,
-            &format!("save_credential 失败: host_id={} type={} - {}", host_id, cred_type, msg),
+            &format!(
+                "save_credential 失败: host_id={} type={} - {}",
+                host_id, cred_type, msg
+            ),
         );
         msg
     })
@@ -175,7 +204,10 @@ pub async fn get_credential(
         debug_log(
             &app,
             LogLevel::Error,
-            &format!("get_credential 失败: host_id={} type={} - {}", host_id, cred_type, msg),
+            &format!(
+                "get_credential 失败: host_id={} type={} - {}",
+                host_id, cred_type, msg
+            ),
         );
         msg
     })

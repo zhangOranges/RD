@@ -113,60 +113,60 @@ impl SftpState {
 
         // Slow path: open a fresh SFTP channel on the existing SSH session.
         if let Some(app) = app_handle {
-            debug_log(app, LogLevel::Info, &format!("SFTP 创建会话: host_id={}", host_id));
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!("SFTP 创建会话: host_id={}", host_id),
+            );
         }
         let shared_handle = ssh_state.get_connection(host_id).await?;
         let handle = shared_handle.lock().await;
 
-        let channel = handle
-            .channel_open_session()
-            .await
-            .map_err(|e| {
-                let err = SftpError::Sftp(format!("open session: {e}"));
-                if let Some(app) = app_handle {
-                    debug_log(
-                        app,
-                        LogLevel::Error,
-                        &format!("SFTP open session 失败: host_id={} - {}", host_id, err),
-                    );
-                }
-                err
-            })?;
+        let channel = handle.channel_open_session().await.map_err(|e| {
+            let err = SftpError::Sftp(format!("open session: {e}"));
+            if let Some(app) = app_handle {
+                debug_log(
+                    app,
+                    LogLevel::Error,
+                    &format!("SFTP open session 失败: host_id={} - {}", host_id, err),
+                );
+            }
+            err
+        })?;
 
-        channel
-            .request_subsystem(true, "sftp")
-            .await
-            .map_err(|e| {
-                let err = SftpError::Sftp(format!("request sftp subsystem: {e}"));
-                if let Some(app) = app_handle {
-                    debug_log(
-                        app,
-                        LogLevel::Error,
-                        &format!("SFTP request subsystem 失败: host_id={} - {}", host_id, err),
-                    );
-                }
-                err
-            })?;
+        channel.request_subsystem(true, "sftp").await.map_err(|e| {
+            let err = SftpError::Sftp(format!("request sftp subsystem: {e}"));
+            if let Some(app) = app_handle {
+                debug_log(
+                    app,
+                    LogLevel::Error,
+                    &format!("SFTP request subsystem 失败: host_id={} - {}", host_id, err),
+                );
+            }
+            err
+        })?;
 
-        let sftp = SftpSession::new(channel.into_stream())
-            .await
-            .map_err(|e| {
-                let err = SftpError::Sftp(format!("init sftp: {e}"));
-                if let Some(app) = app_handle {
-                    debug_log(
-                        app,
-                        LogLevel::Error,
-                        &format!("SFTP init session 失败: host_id={} - {}", host_id, err),
-                    );
-                }
-                err
-            })?;
+        let sftp = SftpSession::new(channel.into_stream()).await.map_err(|e| {
+            let err = SftpError::Sftp(format!("init sftp: {e}"));
+            if let Some(app) = app_handle {
+                debug_log(
+                    app,
+                    LogLevel::Error,
+                    &format!("SFTP init session 失败: host_id={} - {}", host_id, err),
+                );
+            }
+            err
+        })?;
 
         let sftp = Arc::new(sftp);
         let mut map = self.sessions.lock().await;
         map.insert(host_id.to_string(), sftp.clone());
         if let Some(app) = app_handle {
-            debug_log(app, LogLevel::Info, &format!("SFTP 会话就绪: host_id={}", host_id));
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!("SFTP 会话就绪: host_id={}", host_id),
+            );
         }
         Ok(sftp)
     }
@@ -281,7 +281,10 @@ pub async fn sftp_list_dir(
                     debug_log(
                         &app_handle,
                         LogLevel::Warn,
-                        &format!("sftp_list_dir 会话失效，重试: host_id={} path={}", host_id, path),
+                        &format!(
+                            "sftp_list_dir 会话失效，重试: host_id={} path={}",
+                            host_id, path
+                        ),
                     );
                     sftp_state.invalidate(&host_id).await;
                     attempt += 1;
@@ -290,7 +293,10 @@ pub async fn sftp_list_dir(
                 debug_log(
                     &app_handle,
                     LogLevel::Warn,
-                    &format!("sftp_list_dir 失败: host_id={} path={} - {}", host_id, path, mapped),
+                    &format!(
+                        "sftp_list_dir 失败: host_id={} path={} - {}",
+                        host_id, path, mapped
+                    ),
                 );
                 return Err(mapped.into());
             }
@@ -324,7 +330,10 @@ pub async fn sftp_mkdir(
                 debug_log(
                     &app_handle,
                     LogLevel::Warn,
-                    &format!("sftp_mkdir 失败: host_id={} path={} - {}", host_id, path, mapped),
+                    &format!(
+                        "sftp_mkdir 失败: host_id={} path={} - {}",
+                        host_id, path, mapped
+                    ),
                 );
                 return Err(mapped.into());
             }
@@ -396,7 +405,10 @@ pub async fn sftp_remove_file(
                 debug_log(
                     &app_handle,
                     LogLevel::Warn,
-                    &format!("sftp_remove_file 失败: host_id={} path={} - {}", host_id, path, mapped),
+                    &format!(
+                        "sftp_remove_file 失败: host_id={} path={} - {}",
+                        host_id, path, mapped
+                    ),
                 );
                 return Err(mapped.into());
             }
@@ -476,7 +488,10 @@ pub async fn sftp_remove_dir(
                 debug_log(
                     &app_handle,
                     LogLevel::Warn,
-                    &format!("sftp_remove_dir 失败: host_id={} path={} - {}", host_id, path, e),
+                    &format!(
+                        "sftp_remove_dir 失败: host_id={} path={} - {}",
+                        host_id, path, e
+                    ),
                 );
                 return Err(e.into());
             }
@@ -511,7 +526,10 @@ pub async fn sftp_resolve_path(
                 debug_log(
                     &app_handle,
                     LogLevel::Warn,
-                    &format!("sftp_resolve_path 失败: host_id={} path={} - {}", host_id, path, mapped),
+                    &format!(
+                        "sftp_resolve_path 失败: host_id={} path={} - {}",
+                        host_id, path, mapped
+                    ),
                 );
                 return Err(mapped.into());
             }
@@ -582,7 +600,10 @@ pub async fn sftp_mkdir_all(
                     debug_log(
                         &app_handle,
                         LogLevel::Warn,
-                        &format!("sftp_mkdir_all 失败: host_id={} dir={} - {}", host_id, dir, mapped),
+                        &format!(
+                            "sftp_mkdir_all 失败: host_id={} dir={} - {}",
+                            host_id, dir, mapped
+                        ),
                     );
                     return Err(mapped.into());
                 }
@@ -625,7 +646,10 @@ pub async fn sftp_write_file(
                     debug_log(
                         &app_handle,
                         LogLevel::Warn,
-                        &format!("sftp_write_file 写入失败: host_id={} path={} - {}", host_id, path, mapped),
+                        &format!(
+                            "sftp_write_file 写入失败: host_id={} path={} - {}",
+                            host_id, path, mapped
+                        ),
                     );
                     return Err(mapped.into());
                 }
@@ -640,7 +664,10 @@ pub async fn sftp_write_file(
                 debug_log(
                     &app_handle,
                     LogLevel::Warn,
-                    &format!("sftp_write_file 打开失败: host_id={} path={} - {}", host_id, path, mapped),
+                    &format!(
+                        "sftp_write_file 打开失败: host_id={} path={} - {}",
+                        host_id, path, mapped
+                    ),
                 );
                 return Err(mapped.into());
             }
@@ -674,7 +701,10 @@ pub async fn sftp_read_file(
                 debug_log(
                     &app_handle,
                     LogLevel::Warn,
-                    &format!("sftp_read_file 失败: host_id={} path={} - {}", host_id, path, mapped),
+                    &format!(
+                        "sftp_read_file 失败: host_id={} path={} - {}",
+                        host_id, path, mapped
+                    ),
                 );
                 return Err(mapped.into());
             }
@@ -838,7 +868,10 @@ pub async fn sftp_download_file(
                 LogLevel::Info,
                 &format!(
                     "sftp_download_file 开始: host_id={} {} -> {} ({} 字节)",
-                    host_id, remote_path, target_local.display(), total
+                    host_id,
+                    remote_path,
+                    target_local.display(),
+                    total
                 ),
             );
         }
@@ -882,7 +915,10 @@ pub async fn sftp_download_file(
                     debug_log(
                         &app_handle,
                         LogLevel::Info,
-                        &format!("sftp_download_file 取消: host_id={} {}", host_id, remote_path),
+                        &format!(
+                            "sftp_download_file 取消: host_id={} {}",
+                            host_id, remote_path
+                        ),
                     );
                     let evt = TransferProgressEvent {
                         task_id: task_id.clone(),
@@ -995,7 +1031,11 @@ pub async fn sftp_download_dir(
                 LogLevel::Info,
                 &format!(
                     "sftp_download_dir 开始: host_id={} {} -> {} ({} 个文件, {} 字节)",
-                    host_id, remote_path, local_path, files.len(), total_bytes
+                    host_id,
+                    remote_path,
+                    local_path,
+                    files.len(),
+                    total_bytes
                 ),
             );
         }
@@ -1007,7 +1047,11 @@ pub async fn sftp_download_dir(
             debug_log(
                 &app_handle,
                 LogLevel::Error,
-                &format!("sftp_download_dir 创建本地目录失败: {} - {}", local_root.display(), err_msg),
+                &format!(
+                    "sftp_download_dir 创建本地目录失败: {} - {}",
+                    local_root.display(),
+                    err_msg
+                ),
             );
             let evt = TransferProgressEvent {
                 task_id: task_id.clone(),
@@ -1094,7 +1138,10 @@ pub async fn sftp_download_dir(
                     debug_log(
                         &app_handle,
                         LogLevel::Info,
-                        &format!("sftp_download_dir 取消: host_id={} {}", host_id, remote_path),
+                        &format!(
+                            "sftp_download_dir 取消: host_id={} {}",
+                            host_id, remote_path
+                        ),
                     );
                     let evt = TransferProgressEvent {
                         task_id: task_id.clone(),

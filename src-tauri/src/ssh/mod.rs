@@ -134,7 +134,10 @@ pub async fn connect_host(
             debug_log(
                 &app,
                 LogLevel::Error,
-                &format!("connect_host 注册失败: host_id={} {} - {}", host_id, host_port, err_str),
+                &format!(
+                    "connect_host 注册失败: host_id={} {} - {}",
+                    host_id, host_port, err_str
+                ),
             );
             Err(err_str)
         }
@@ -148,7 +151,11 @@ pub async fn disconnect_host(
     state: tauri::State<'_, SshState>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    debug_log(&app, LogLevel::Info, &format!("disconnect_host: host_id={}", host_id));
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!("disconnect_host: host_id={}", host_id),
+    );
     let removed = {
         let mut map = state.connections.lock().await;
         map.remove(&host_id)
@@ -206,9 +213,7 @@ pub async fn connection_state(
 /// Connects, authenticates, resolves the home dir, then immediately
 /// disconnects. Used by the "Test Connection" button in the host dialog.
 #[tauri::command]
-pub async fn test_connection(
-    params: ConnectParams,
-) -> Result<ConnectResult, String> {
+pub async fn test_connection(params: ConnectParams) -> Result<ConnectResult, String> {
     let result = ConnectionHandle::connect(&params, None).await;
     match result {
         Ok(conn) => {

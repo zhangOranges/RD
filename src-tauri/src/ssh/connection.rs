@@ -103,7 +103,11 @@ impl ConnectionHandle {
             ..Default::default()
         };
 
-        let handler = ClientHandler::new(params.host_id.clone(), host_port.clone(), app_handle.clone());
+        let handler = ClientHandler::new(
+            params.host_id.clone(),
+            host_port.clone(),
+            app_handle.clone(),
+        );
         let shared = handler.shared_state();
 
         // --- TCP + SSH handshake -------------------------------------------------
@@ -164,11 +168,7 @@ impl ConnectionHandle {
         }
 
         if let Some(app) = &app_handle {
-            debug_log(
-                app,
-                LogLevel::Info,
-                &format!("SSH 握手成功: {}", host_port),
-            );
+            debug_log(app, LogLevel::Info, &format!("SSH 握手成功: {}", host_port));
         }
 
         // --- Authenticate --------------------------------------------------------
@@ -199,17 +199,18 @@ impl ConnectionHandle {
                 // Passphrase (if the key is encrypted) comes from the password
                 // field; otherwise None.
                 let passphrase = params.password.as_deref();
-                let key_pair = russh::keys::decode_secret_key(&key_str, passphrase).map_err(|e| {
-                    let err = SshError::Internal(format!("failed to decode private key: {e}"));
-                    if let Some(app) = &app_handle {
-                        debug_log(
-                            app,
-                            LogLevel::Error,
-                            &format!("私钥解析失败: {} - {}", host_port, err),
-                        );
-                    }
-                    err
-                })?;
+                let key_pair =
+                    russh::keys::decode_secret_key(&key_str, passphrase).map_err(|e| {
+                        let err = SshError::Internal(format!("failed to decode private key: {e}"));
+                        if let Some(app) = &app_handle {
+                            debug_log(
+                                app,
+                                LogLevel::Error,
+                                &format!("私钥解析失败: {} - {}", host_port, err),
+                            );
+                        }
+                        err
+                    })?;
                 handle
                     .authenticate_publickey(&params.username, Arc::new(key_pair))
                     .await
