@@ -87,16 +87,30 @@ jobs:
       # ========== 4. 缓存 Tauri CLI 二进制，避免每次重新编译 ==========
       # tauri-cli 是独立安装的二进制，与 rd-app 版本号无关
       # 先记录 rustc 版本哈希（不同 rustc 版本编译的 tauri-cli 二进制不通用）
-      - name: Record rustc hash for tauri-cli cache key
+      # 同时确定 cargo home 的绝对路径（cache 路径必须是绝对路径，~ 展开不可靠）
+      - name: Record rustc hash and cargo home for tauri-cli cache
         id: rustc-hash
-        run: echo "RUSTC_HASH=$(rustc --version | sha256sum | cut -c1-8)" >> $GITHUB_ENV
         shell: bash
+        run: |
+          echo "RUSTC_HASH=$(rustc --version | sha256sum | cut -c1-8)" >> "$GITHUB_ENV"
+          # Windows: %USERPROFILE%\.cargo\bin\tauri.exe
+          # Linux/macOS: $HOME/.cargo/bin/tauri
+          if [[ "${{ matrix.platform }}" == "windows-latest" ]]; then
+            # actions/cache 在 Windows runner 上支持正斜杠，转换为统一格式
+            WIN_HOME=$(cygpath -w "$HOME" 2>/dev/null || echo "$USERPROFILE")
+            echo "TAURI_CLI_PATH=$(cygpath -u "$WIN_HOME")/.cargo/bin/tauri.exe" >> "$GITHUB_ENV"
+          else
+            echo "TAURI_CLI_PATH=$HOME/.cargo/bin/tauri" >> "$GITHUB_ENV"
+          fi
+          echo "TAURI_CLI_PATH resolved: ${TAURI_CLI_PATH}"
       - name: Cache cargo-tauri binary
         id: cache-tauri-cli
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/bin/tauri
+          path: ${{ env.TAURI_CLI_PATH }}
           key: ${{ matrix.platform }}-tauri-cli-v2-${{ env.RUSTC_HASH }}
+          restore-keys: |
+            ${{ matrix.platform }}-tauri-cli-v2-
       - name: Install cargo-tauri
         if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2"
@@ -114,20 +128,42 @@ jobs:
         run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
 
       # ========== 6. rust-cache 智能增量缓存（改造重点） ==========
-      # - cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
-      # - cache-extension-objects: true 缓存 .rlib 扩展对象，链接阶段也能复用
-      # 这两项是增量编译生效的关键
+      # Swatinem/rust-cache@v2 支持的参数：
+      #   workspaces, cache-all-crates, cache-targets, cache-directories,
+      #   shared-key, key, prefix-key, env-vars, cache-on-failure, save-if
+      # 不支持：target-names, cache-extension-objects（会导致参数警告，缓存行为降级）
+      # cache-targets: true 缓存 target 下所有 target 的编译产物（= 原 target-names 的效果）
+      # cache-all-crates: true 缓存所有第三方依赖编译产物（占编译时间 90%+）
+      # shared-key: CI 和 Release workflow 共用第三方依赖缓存
+      #   （两个 workflow 跑同一平台同一 Cargo.lock 时，共享一份 rlib，
+      #    省掉重复缓存，给 Actions 10 GB 配额腾空间）
       - name: Rust incremental compile cache
         id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
           cache-all-crates: true
-          target-names: ${{ matrix.target }}
-          cache-extension-objects: true
+          cache-targets: true
+          shared-key: rust-${{ matrix.target }}
       - name: Print cache hit status
+        shell: bash
         run: |
-          echo "Rust cache hit: ${{ steps.rust-cache.outputs.cache-hit }}"
+          echo "Rust cache-hit (primary key exact): ${{ steps.rust-cache.outputs.cache-hit }}"
+          echo "Primary cache key:        ${{ steps.rust-cache.outputs.cache-primary-key }}"
+          # 注意：cache-hit=false ≠ 没恢复！Swatinem/rust-cache 命中 restore-key 时也会恢复 target
+          # 只看 cache-hit 不可靠，直接检查 target 目录的大小和内容
+          TARGET_DIR="src-tauri/target"
+          if [ -d "$TARGET_DIR" ]; then
+            echo ""
+            echo "=== target 目录已恢复（来自 restore-key 命中） ==="
+            du -sh "$TARGET_DIR" 2>/dev/null || true
+            # 数一下已编译的 .rlib 数量（第三方依赖的编译产物）
+            RLIB_COUNT=$(find "$TARGET_DIR" -name "*.rlib" 2>/dev/null | wc -l)
+            echo "已缓存的 .rlib 文件数: $RLIB_COUNT"
+          else
+            echo ""
+            echo "=== target 目录不存在（首次构建，无缓存） ==="
+          fi
 
       # ========== 原有签名校验步骤不变 ==========
       - name: Verify signing key secret (debug)

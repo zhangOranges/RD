@@ -60,12 +60,14 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev
 
+      # 与 Release workflow 共用第三方依赖缓存 shared-key，减少 10 GB 配额占用
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
-          cache-all-crates: false
-          cache-extension-objects: false
+          cache-all-crates: true
+          cache-targets: true
+          shared-key: rust-x86_64-unknown-linux-gnu
 
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
@@ -89,13 +91,14 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      # 与 Release workflow 共用第三方依赖缓存 shared-key
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: 'src-tauri -> target'
-          cache-all-crates: false
-          cache-extension-objects: false
-          target-names: x86_64-pc-windows-msvc
+          cache-all-crates: true
+          cache-targets: true
+          shared-key: rust-x86_64-pc-windows-msvc
 
       - name: cargo check --target x86_64-pc-windows-msvc
         run: cargo check --locked --target x86_64-pc-windows-msvc
