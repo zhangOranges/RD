@@ -67,6 +67,7 @@ jobs:
       - name: Install sccache
         run: cargo install sccache
       - name: 启用 sccache 包装 rustc
+        run: echo "Enabled sccache wrapper"
         env:
           RUSTC_WRAPPER: sccache
           SCCACHE_CACHE_SIZE: 5G
