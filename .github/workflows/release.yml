@@ -85,12 +85,18 @@ jobs:
             file
 
       # ========== 4. 缓存 Tauri CLI 二进制，避免每次重新编译 ==========
+      # tauri-cli 是独立安装的二进制，与 rd-app 版本号无关
+      # 先记录 rustc 版本哈希（不同 rustc 版本编译的 tauri-cli 二进制不通用）
+      - name: Record rustc hash for tauri-cli cache key
+        id: rustc-hash
+        run: echo "RUSTC_HASH=$(rustc --version | sha256sum | cut -c1-8)" >> $GITHUB_ENV
+        shell: bash
       - name: Cache cargo-tauri binary
         id: cache-tauri-cli
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/tauri
-          key: ${{ matrix.platform }}-tauri-cli-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: ${{ matrix.platform }}-tauri-cli-v2-${{ env.RUSTC_HASH }}
       - name: Install cargo-tauri
         if: steps.cache-tauri-cli.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version "^2"
