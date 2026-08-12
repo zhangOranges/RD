@@ -841,6 +841,7 @@ async fn download_single_file(
 /// - 若 `local_path` 是目录，则在该目录下用远程文件名保存。
 /// - 通过 `task_id` 用 `transfer-progress` 事件向前端上报进度。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn sftp_download_file(
     host_id: String,
     remote_path: String,
