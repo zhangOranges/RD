@@ -9,7 +9,10 @@ import {
   Settings,
   TerminalSquare,
   Power,
+  Palette,
+  Check,
 } from 'lucide-react';
+import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { useHostStore } from '../store/hostStore';
@@ -38,6 +41,13 @@ export function TabBar() {
   const terminalVisibleMap = useUIStore((s) => s.terminalVisible);
 
   const pushToast = useToastStore((s) => s.push);
+
+  // 主题切换
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const themeMenuRef = useRef<HTMLDivElement | null>(null);
+  const themeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // 标签 = 所有 connectionState 为 connected 或 connecting 的主机
   const tabs = useMemo<HostConfig[]>(
@@ -102,6 +112,37 @@ export function TabBar() {
       el.style.top = `${ctxMenu.y - shiftY}px`;
     }
   }, [ctxMenu]);
+
+  // 主题菜单：点击外部或按 Esc 关闭
+  useEffect(() => {
+    if (!themeMenuOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (themeMenuRef.current && themeMenuRef.current.contains(e.target as Node)) return;
+      if (themeBtnRef.current && themeBtnRef.current.contains(e.target as Node)) return;
+      setThemeMenuOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setThemeMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [themeMenuOpen]);
+
+  // 主题菜单：底部溢出时改为向上弹出
+  useEffect(() => {
+    if (!themeMenuOpen || !themeMenuRef.current || !themeBtnRef.current) return;
+    const menuEl = themeMenuRef.current;
+    const rect = menuEl.getBoundingClientRect();
+    const margin = 8;
+    if (rect.bottom > window.innerHeight - margin) {
+      const btnRect = themeBtnRef.current.getBoundingClientRect();
+      menuEl.style.top = `${btnRect.top - rect.height - 4}px`;
+    }
+  }, [themeMenuOpen]);
 
   // 「+」按钮 → 打开主机对话框（新建主机）
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -292,6 +333,20 @@ export function TabBar() {
         </button>
         <button
           type="button"
+          ref={themeBtnRef}
+          className={`tabbar-action-btn ${
+            themeMenuOpen ? 'tabbar-action-btn-active' : ''
+          }`}
+          aria-label="切换主题"
+          title="切换主题"
+          aria-haspopup="menu"
+          aria-expanded={themeMenuOpen}
+          onClick={() => setThemeMenuOpen((v) => !v)}
+        >
+          <Palette size={15} />
+        </button>
+        <button
+          type="button"
           className="tabbar-action-btn"
           aria-label="设置"
           title="设置"
@@ -300,6 +355,54 @@ export function TabBar() {
           <Settings size={15} />
         </button>
       </div>
+
+      {/* 主题切换下拉菜单 */}
+      {themeMenuOpen && createPortal(
+        <div
+          ref={themeMenuRef}
+          className="theme-menu tabbar-context-menu host-menu sidebar-context-menu"
+          role="menu"
+          aria-label="选择主题"
+          style={{
+            position: 'fixed',
+            top: themeBtnRef.current
+              ? themeBtnRef.current.getBoundingClientRect().bottom + 4
+              : 0,
+            left: themeBtnRef.current
+              ? themeBtnRef.current.getBoundingClientRect().right - 160
+              : 0,
+            width: 160,
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {THEME_OPTIONS.map((opt) => {
+            const active = theme === opt.id;
+            return (
+              <button
+                key={opt.id}
+                className="host-menu-item theme-menu-item"
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                title={opt.desc}
+                onClick={() => {
+                  setTheme(opt.id);
+                  setThemeMenuOpen(false);
+                }}
+              >
+                <span
+                  className="theme-menu-swatch"
+                  style={{ background: opt.swatch }}
+                  aria-hidden="true"
+                />
+                <span className="theme-menu-text">{opt.name}</span>
+                {active && <Check size={12} className="theme-menu-check" />}
+              </button>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
 
       {/* 右键菜单（通过 Portal 挂载到 body，避免 tabbar 的 backdrop-filter
            导致 position:fixed 失效及 transform 引起的左上角闪烁） */}

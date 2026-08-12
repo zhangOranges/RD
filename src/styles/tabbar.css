@@ -349,3 +349,44 @@
   flex-direction: column;
   gap: 0;
 }
+
+/* ---------- 主题切换菜单 ---------- */
+.theme-menu {
+  width: 160px;
+  max-width: 220px;
+}
+
+.theme-menu-item {
+  gap: 8px;
+  padding: 6px 8px;
+  min-height: 26px;
+}
+
+/* 色块（圆形预览） */
+.theme-menu-swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.2),
+    0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+/* 名称占据剩余空间 */
+.theme-menu-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 勾选标记 */
+.theme-menu-check {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+/* hover 时勾选标记跟随反白 */
+.theme-menu-item:hover .theme-menu-check {
+  color: var(--text-on-accent);
+}
