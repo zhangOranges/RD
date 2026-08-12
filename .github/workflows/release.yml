@@ -42,13 +42,6 @@ jobs:
             updater-format: app
             artifact-dir: artifacts-macos-arm64
             bundles: dmg,app
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            label: macos-x64
-            updater-key: darwin-x86_64
-            updater-format: app
-            artifact-dir: artifacts-macos-x64
-            bundles: dmg,app
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
     outputs:
