@@ -40,7 +40,14 @@ jobs:
             label: macos-arm64
             updater-key: darwin-aarch64
             updater-format: app
-            artifact-dir: artifacts-macos
+            artifact-dir: artifacts-macos-arm64
+            bundles: dmg,app
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            label: macos-x64
+            updater-key: darwin-x86_64
+            updater-format: app
+            artifact-dir: artifacts-macos-x64
             bundles: dmg,app
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
@@ -242,10 +249,10 @@ jobs:
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
 
-      # ========== 收集产物（macOS） ==========
+      # ========== 收集产物（macOS ARM64 + Intel） ==========
       - name: Collect artifacts (macOS)
         id: collect-macos
-        if: matrix.platform == 'macos-latest'
+        if: startsWith(matrix.platform, 'macos-')
         run: |
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
