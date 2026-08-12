@@ -83,12 +83,17 @@
 - **上传**：从本地面板拖拽文件 / 文件夹到远程，或右键多选上传
 - **下载**：右键任意文件或文件夹，默认下载到**左侧本地面板当前打开的目录**，无需弹框选择
 - **256KB 分块流式上传**：Rust 后端逐片读取本地文件 + 逐片上报进度，第一个分片起进度条 / 速率即开始动（避免大文件 10s 延迟）
+- **文件夹压缩传输**（针对文件夹，自动走压缩通道，无需用户干预）：
+  - **上传文件夹**：本地先调用 `tar` 压缩为 `.tar.gz`，压缩包直接生成在远程目标目录（`.tmp` 后缀，传输过程中可见），上传完成后自动重命名为正式压缩包名，远程解压，清理远程压缩包
+  - **下载文件夹**：远程先调用 `tar` 压缩为 `.tar.gz`，下载到本地目标目录（`.tmp` 后缀，传输过程中可见且文件大小实时增长），下载完成后自动重命名为正式压缩包名，本地解压，清理本地压缩包
+  - 临时文件全程位于目标目录中，用户能直观看到传输进度
 - **传输队列**（右侧面板内嵌）：
   - 实时进度条、百分比、已传大小、传输速度（EMA 平滑）、耗时
   - 可取消进行中的传输（Rust 端取消令牌机制）
   - 下载完成后提供「打开所在文件夹」按钮
   - 一键清空全部任务（含进行中）
   - 自定义垂直滚动条，与远程目录列表样式一致
+  - 发起上传/下载时自动切换到对应 Tab
 
 ### 主题系统
 - 4 套主题：**tech-dark（黑夜科技，默认）/ dark / light / system**
@@ -127,6 +132,26 @@
 | `Ctrl+S` / `Cmd+S` | 保存文件（文本编辑器中） |
 | `Esc` | 关闭弹窗 / 取消编辑 |
 | `Enter` | 确认重命名 / 新建文件夹名 |
+
+---
+
+## 自动更新
+
+- 内置更新器（Tauri updater），支持 Windows / Linux / macOS 三平台
+- 启动时自动检查，可在「设置 → 更新」手动触发
+- **多下载源镜像**：内置 GitHub Release 直连 + `cdn.gh-proxy.org` + `axisnow.gh-proxy.org`，启动时并发测速，默认选择延迟最低的镜像
+- 发现新版本弹框中实时展示各镜像源的延迟（绿色 < 300ms / 黄色 300–1000ms / 灰色超时），用户可手动切换
+- 支持预发布版本（`beta`）
+
+---
+
+## 调试日志
+
+- 在「设置 → 调试」中可切换**详细日志**开关
+- 开启后，应用会将 SSH 连接、SFTP 操作、PTY 会话、存储读写等关键路径的 debug 级别日志写入本地日志文件
+- 关闭详细日志时仅记录错误级别
+- 「打开日志文件夹」一键跳转到日志目录（Fire-and-forget，无弹窗打扰）
+- 日志文件用于排查问题，建议出现异常时再开启
 
 ---
 
@@ -246,8 +271,10 @@ npm run tauri -- build --target aarch64-apple-darwin
 |---|---|---|---|
 | Windows x64 | `windows-latest` | `x86_64-pc-windows-msvc` | `.msi`、`.exe`（NSIS 安装器）、portable `.exe` |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | `.deb`、`.rpm`、`.AppImage` |
-| macOS ARM | `macos-latest` | `aarch64-apple-darwin` | `.dmg`、`.app.tar.gz` |
+| macOS ARM64 | `macos-latest` | `aarch64-apple-darwin` | `.dmg`、`.app.tar.gz` |
 
+- 预编译 tauri-cli：各平台直接下载官方预编译二进制，跳过源码编译
+- 两级缓存策略：Rust 增量编译缓存 + npm 依赖缓存，合并 cargo bin 目录，显著提升二次构建速度
 - 自动创建 GitHub Release 并生成变更日志
 - 标签名包含 `-`（如 `v0.1.0-beta`）自动标记为预发布
 - 可选的 Tauri 更新签名（通过 `TAURI_SIGNING_PRIVATE_KEY` 密钥配置）
@@ -275,7 +302,7 @@ rd/
 │   │   ├── QuickActions.tsx      # 右上角快捷操作面板
 │   │   ├── RightPanel.tsx        # 右侧功能面板容器
 │   │   ├── ServerInfo.tsx        # 服务器硬件信息（CPU/内存/磁盘/负载）
-│   │   ├── SettingsDialog.tsx    # 应用设置 + 主题选择
+│   │   ├── SettingsDialog.tsx    # 应用设置 + 主题选择 + 更新 + 调试
 │   │   ├── Sidebar.tsx           # 主机列表 + 分类管理
 │   │   ├── StatusBar.tsx         # 底部状态栏
 │   │   ├── TabBar.tsx            # 顶部全局标签栏 + 窗口控制
@@ -292,7 +319,7 @@ rd/
 │   │   ├── transferStore.ts      # 传输任务跟踪 + 进度事件
 │   │   └── uiStore.ts            # UI 状态（面板尺寸、终端可见性按 hostId）
 │   ├── utils/
-│   │   └── uploadFromLocal.ts    # 本地→远程上传（分块读取、覆盖策略）
+│   │   └── uploadFromLocal.ts    # 本地→远程上传（分块读取、压缩上传、覆盖策略）
 │   ├── styles/
 │   │   ├── finder.css            # 全局 + 主题变量 + 工具栏 + 状态栏 + 弹窗
 │   │   ├── filebrowser.css       # 远程文件浏览器 + 地址栏样式
