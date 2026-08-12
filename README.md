@@ -18,6 +18,16 @@
   <a href="#许可证">许可证</a>
 </p>
 
+## 界面预览
+
+<p align="center">
+  <img src="图1.png" alt="主界面预览 - 双面板文件管理 + 服务器监控" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0;" />
+</p>
+
+<p align="center">
+  <img src="图2.png" alt="功能界面预览 - 终端集成 + 传输队列" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0;" />
+</p>
+
 ---
 
 ## 功能特性
