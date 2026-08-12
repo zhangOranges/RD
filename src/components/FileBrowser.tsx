@@ -918,6 +918,81 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     }
 
     const taskId = genTaskId();
+
+    // 文件夹：远程压缩 → 下载 tar.gz 到本地目标目录（用户可见）→ 重命名 → 本地解压 → 删除压缩包
+    if (entry.is_dir) {
+      const { joinLocalPath } = await import('../store/localFileStore');
+      // 远程临时压缩文件（/tmp 下即可，远程用户不需要看到）
+      const remoteTmpPath = `/tmp/rd_transfer_${Date.now()}.tar.gz`;
+      // 下载到本地目标目录的临时文件（用户可见，带 .tmp 后缀）
+      const localTarballTmpPath = joinLocalPath(localDir, `${entry.name}.tar.gz.tmp`);
+      // 下载完成后的正式压缩包名
+      const localTarballFinalPath = joinLocalPath(localDir, `${entry.name}.tar.gz`);
+
+      createTransferTask({
+        id: taskId,
+        kind: 'download',
+        hostId,
+        name: entry.name,
+        remotePath,
+        localPath: localDir,
+        totalBytes: 0,
+      });
+
+      try {
+        // 1. 远程压缩
+        useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${entry.name} (压缩中...)` });
+        await invoke('ssh_exec', {
+          hostId,
+          command: `tar -czf "${remoteTmpPath}" -C "${currentPath}" "${entry.name}"`,
+        });
+
+        // 2. 下载 tar.gz 到本地目标目录的临时文件（用户可见）
+        useTransferStore.getState().setTaskStatus(taskId, 'running', { name: entry.name });
+        await invoke('sftp_download_file', {
+          hostId,
+          remotePath: remoteTmpPath,
+          localPath: localTarballTmpPath,
+          taskId,
+          displayName: entry.name,
+        });
+
+        // 3. 下载完成：将 .tmp 重命名为正式的 .tar.gz
+        await invoke('rename_local_path', {
+          oldPath: localTarballTmpPath,
+          newPath: localTarballFinalPath,
+        });
+
+        // 4. 本地解压
+        useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${entry.name} (解压中...)` });
+        await invoke('extract_local_archive', {
+          archivePath: localTarballFinalPath,
+          destDir: localDir,
+        });
+
+        // 5. 解压完成后删除本地压缩包
+        invoke('delete_local_path', { path: localTarballFinalPath }).catch(() => {});
+
+        // 6. 标记完成
+        useTransferStore.getState().setTaskStatus(taskId, 'completed', { name: entry.name });
+        await useLocalFileStore.getState().refresh();
+      } catch (err) {
+        const msg = String(err);
+        if (msg.startsWith('Cancelled:')) {
+          pushToast('info', `已取消下载：${entry.name}`);
+        } else {
+          pushToast('error', `下载失败：${msg}`);
+        }
+      } finally {
+        // 7. 清理临时文件（本地 + 远程）
+        invoke('delete_local_path', { path: localTarballTmpPath }).catch(() => {});
+        invoke('delete_local_path', { path: localTarballFinalPath }).catch(() => {});
+        invoke('sftp_remove_file', { hostId, path: remoteTmpPath }).catch(() => {});
+      }
+      return;
+    }
+
+    // 单文件下载（原有逻辑）
     createTransferTask({
       id: taskId,
       kind: 'download',
@@ -925,19 +1000,16 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
       name: entry.name,
       remotePath,
       localPath: localDir,
-      totalBytes: entry.is_dir ? 0 : entry.size,
+      totalBytes: entry.size,
     });
 
-    const cmd = entry.is_dir ? 'sftp_download_dir' : 'sftp_download_file';
     try {
-      await invoke(cmd, {
+      await invoke('sftp_download_file', {
         hostId,
         remotePath,
         localPath: localDir,
         taskId,
       });
-      pushToast('success', `已下载：${entry.name}`);
-      // 下载完成后刷新本地栏以显示新文件
       await useLocalFileStore.getState().refresh();
     } catch (err) {
       const msg = String(err);

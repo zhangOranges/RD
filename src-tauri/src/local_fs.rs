@@ -69,6 +69,12 @@ pub async fn local_home_dir() -> Result<String, String> {
         .ok_or_else(|| "cannot determine home directory".to_string())
 }
 
+/// 返回系统临时目录路径。
+#[tauri::command]
+pub async fn local_temp_dir() -> Result<String, String> {
+    Ok(std::env::temp_dir().to_string_lossy().to_string())
+}
+
 /// 读取本地文件的完整字节（Vec<u8>），返回给前端做 256KB 分片上传。
 ///
 /// 安全约束：
@@ -136,4 +142,80 @@ pub async fn read_local_file_chunk(
     }
     buf.truncate(read as usize);
     Ok(tauri::ipc::Response::new(buf))
+}
+
+/// 压缩结果
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CompressResult {
+    pub path: String,
+    pub size: u64,
+}
+
+/// 将本地目录压缩为 tar.gz，返回临时文件路径和大小。
+/// 调用系统 tar 命令（Windows 10+、macOS、Linux 均自带）。
+#[tauri::command]
+pub async fn compress_local_dir(dir_path: String, dir_name: String) -> Result<CompressResult, String> {
+    let temp_dir = std::env::temp_dir();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let safe_name = dir_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+    let output_path = temp_dir.join(format!("rd_transfer_{}_{}.tar.gz", timestamp, safe_name));
+    let output_str = output_path.to_string_lossy().to_string();
+
+    let output = std::process::Command::new("tar")
+        .args(["-czf", &output_str, "-C", &dir_path, &dir_name])
+        .output()
+        .map_err(|e| format!("Failed to run tar: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("tar compress failed: {stderr}"));
+    }
+
+    let size = std::fs::metadata(&output_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    Ok(CompressResult {
+        path: output_str,
+        size,
+    })
+}
+
+/// 解压本地 tar.gz 文件到指定目录。
+#[tauri::command]
+pub async fn extract_local_archive(archive_path: String, dest_dir: String) -> Result<(), String> {
+    // 确保目标目录存在
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create dest dir: {e}"))?;
+
+    let output = std::process::Command::new("tar")
+        .args(["-xzf", &archive_path, "-C", &dest_dir])
+        .output()
+        .map_err(|e| format!("Failed to run tar: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("tar extract failed: {stderr}"));
+    }
+    Ok(())
+}
+
+/// 删除本地文件或目录（用于清理临时压缩包）。
+#[tauri::command]
+pub async fn delete_local_path(path: String) -> Result<(), String> {
+    let meta = std::fs::metadata(&path).map_err(|e| format!("stat: {e}"))?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(&path).map_err(|e| format!("remove dir: {e}"))?;
+    } else {
+        std::fs::remove_file(&path).map_err(|e| format!("remove file: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 重命名/移动本地文件或目录。
+#[tauri::command]
+pub async fn rename_local_path(old_path: String, new_path: String) -> Result<(), String> {
+    std::fs::rename(&old_path, &new_path).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
 }

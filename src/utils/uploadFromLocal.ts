@@ -119,6 +119,122 @@ export function joinRemotePath(base: string, rel: string): string {
 export type OverrideChoice = 'skip' | 'overwrite' | 'ask';
 
 /**
+ * 通过压缩传输上传文件夹：本地压缩 → 上传 tar.gz → 远程解压 → 清理临时文件。
+ * 比逐文件上传快得多，尤其适合包含大量小文件的目录。
+ */
+async function uploadFolderCompressed(
+  hostId: string,
+  remoteCurrentPath: string,
+  localBaseDir: string,
+  folderName: string,
+  opts: {
+    pushToast: (kind: 'success' | 'warning' | 'error' | 'info', msg: string) => void;
+    createTransferTask: ReturnType<typeof useTransferStore.getState>['createTask'];
+    cancelTransferTask: ReturnType<typeof useTransferStore.getState>['cancelTask'];
+    refreshRemote: () => Promise<void>;
+  },
+): Promise<boolean> {
+  const { pushToast, createTransferTask, cancelTransferTask, refreshRemote } = opts;
+  const taskId = genTaskId();
+  // 临时文件放在远程目标目录中，用户可见
+  const remoteTmpPath = joinRemotePath(remoteCurrentPath, `${folderName}.tar.gz.tmp`);
+  // 上传完成后重命名为正式的压缩包名
+  const remoteFinalPath = joinRemotePath(remoteCurrentPath, `${folderName}.tar.gz`);
+
+  createTransferTask({
+    id: taskId,
+    kind: 'upload',
+    hostId,
+    name: folderName,
+    remotePath: joinRemotePath(remoteCurrentPath, folderName),
+    localPath: localBaseDir,
+    totalBytes: 0,
+  });
+
+  useTransferStore.getState().setTaskStatus(taskId, 'running');
+
+  let localTarball: string | null = null;
+  let remoteCleaned = false;
+  try {
+    // 1. 本地压缩
+    useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${folderName} (压缩中...)` });
+    const result = await invoke<{ path: string; size: number }>('compress_local_dir', {
+      dirPath: localBaseDir,
+      dirName: folderName,
+    });
+    localTarball = result.path;
+
+    // 更新 totalBytes 以显示上传进度
+    useTransferStore.getState().setTaskStatus(taskId, 'running', {
+      totalBytes: result.size,
+      name: folderName,
+    });
+
+    // 2. 上传 tar.gz 到远程目标目录中的临时文件（用户可见）
+    await readLocalFileChunked(hostId, localTarball, async (chunk, offset, total, isFirst) => {
+      const t = useTransferStore.getState().tasks.find((x) => x.id === taskId);
+      if (t && (t.status === 'canceled' || t.status === 'error')) {
+        throw new Error('__canceled__');
+      }
+      const chunkBytesArr = Array.from(new Uint8Array(chunk));
+      await invoke('sftp_upload_chunk', {
+        hostId,
+        path: remoteTmpPath,
+        data: chunkBytesArr,
+        isFirst,
+        taskId,
+        name: `${folderName}.tar.gz`,
+        totalBytes: total,
+        bytesOffset: offset,
+      });
+    }, result.size);
+
+    // 3. 上传完成：将 .tmp 重命名为正式的 .tar.gz
+    await invoke('sftp_rename', {
+      hostId,
+      oldPath: remoteTmpPath,
+      newPath: remoteFinalPath,
+    });
+
+    // 4. 远程解压
+    useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${folderName} (解压中...)` });
+    await invoke('ssh_exec', {
+      hostId,
+      command: `tar -xzf "${remoteFinalPath}" -C "${remoteCurrentPath}"`,
+    });
+
+    // 5. 解压完成后删除远程压缩包
+    await invoke('sftp_remove_file', { hostId, path: remoteFinalPath }).catch(() => {});
+    remoteCleaned = true;
+
+    // 6. 标记完成（恢复任务名）
+    useTransferStore.getState().setTaskStatus(taskId, 'completed', { name: folderName });
+    return true;
+  } catch (err) {
+    const msg = String(err);
+    if (msg === '__canceled__' || msg.startsWith('canceled')) {
+      cancelTransferTask(taskId);
+      pushToast('info', `已取消上传：${folderName}`);
+    } else {
+      pushToast('error', `文件夹上传失败：${folderName} - ${msg}`);
+      cancelTransferTask(taskId);
+    }
+    return false;
+  } finally {
+    // 7. 清理本地临时压缩包
+    if (localTarball) {
+      invoke('delete_local_path', { path: localTarball }).catch(() => {});
+    }
+    // 仅在失败时清理远程残留（成功时步骤 5 已删除）
+    if (!remoteCleaned) {
+      invoke('sftp_remove_file', { hostId, path: remoteTmpPath }).catch(() => {});
+      invoke('sftp_remove_file', { hostId, path: remoteFinalPath }).catch(() => {});
+    }
+    await refreshRemote().catch(() => {});
+  }
+}
+
+/**
  * 执行本地条目到远程的上传（通用实现）。
  *
  * @param hostId 目标主机 id
@@ -157,15 +273,35 @@ export async function uploadLocalItemsToRemote(
   let skipped = 0;
   let errors = 0;
 
+  // 分离文件夹和文件：文件夹走压缩传输，文件走逐文件上传
+  const topLevelFolders = entries.filter((e) => e.isDir);
+  const topLevelFiles = entries.filter((e) => !e.isDir);
+
+  // 1. 先处理文件夹（压缩 → 上传 → 远程解压）
+  for (const folder of topLevelFolders) {
+    const ok = await uploadFolderCompressed(hostId, remoteCurrentPath, localBaseDir, folder.name, {
+      pushToast,
+      createTransferTask,
+      cancelTransferTask,
+      refreshRemote,
+    });
+    if (ok) {
+      successes++;
+    } else {
+      errors++;
+    }
+  }
+
+  // 2. 处理文件（保留原有逐文件上传逻辑）
   let flat: LocalFlatItem[] = [];
   try {
-    flat = await collectLocalForUpload(localBaseDir, entries);
+    flat = await collectLocalForUpload(localBaseDir, topLevelFiles);
   } catch (err) {
     pushToast('error', `读取本地文件失败：${String(err)}`);
-    return { successes: 0, skipped: 0, errors: entries.length };
+    return { successes, skipped, errors: errors + topLevelFiles.length };
   }
   if (flat.length === 0) {
-    return { successes: 0, skipped: 0, errors: 0 };
+    return { successes, skipped, errors };
   }
   flat.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.relPath.localeCompare(b.relPath));
 

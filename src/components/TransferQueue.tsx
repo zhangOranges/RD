@@ -1,10 +1,9 @@
-import { useState } from 'react';
 import { X, CheckCircle, AlertCircle, Ban, FolderOpen, Trash2 } from 'lucide-react';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useTransferStore, formatBytes, formatSpeed } from '../store/transferStore';
 import { useToastStore } from './Toast';
-import type { TransferTask, TransferKind } from '../types';
+import type { TransferTask } from '../types';
 
 /**
  * 右侧面板 - 传输队列区（常驻面板版）
@@ -15,8 +14,8 @@ export function TransferQueue() {
   const cancelTask = useTransferStore((s) => s.cancelTask);
   const clearFinished = useTransferStore((s) => s.clearFinished);
   const clearAll = useTransferStore((s) => s.clearAll);
-
-  const [activeTab, setActiveTab] = useState<TransferKind>('upload');
+  const activeTab = useTransferStore((s) => s.activeTab);
+  const setActiveTab = useTransferStore((s) => s.setActiveTab);
 
   const uploadCount = tasks.filter((t) => t.kind === 'upload').length;
   const downloadCount = tasks.filter((t) => t.kind === 'download').length;

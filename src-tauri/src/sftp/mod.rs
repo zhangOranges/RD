@@ -779,10 +779,13 @@ async fn download_single_file(
     let flags = OpenFlags::READ;
     let mut remote_file = sftp.open_with_flags(remote_path.to_string(), flags).await?;
 
-    // 打开本地文件
-    let mut local_file = tokio::fs::File::create(local_path)
-        .await
+    // 打开本地文件（使用标准库 File + BufWriter 禁用 tokio 的内部缓冲，
+    // 并用 sync_data 每写完一块就 flush 到磁盘，让用户在文件管理器中
+    // 能实时看到 .tmp 文件大小随下载进度增长）
+    use std::io::Write;
+    let std_file = std::fs::File::create(local_path)
         .map_err(|e| SftpError::Sftp(format!("create local file: {e}")))?;
+    let mut local_file = std::io::BufWriter::with_capacity(256 * 1024, std_file);
 
     const CHUNK: usize = 256 * 1024; // 256KB
     let mut buf = vec![0u8; CHUNK];
@@ -799,8 +802,15 @@ async fn download_single_file(
         }
         local_file
             .write_all(&buf[..n])
-            .await
             .map_err(|e| SftpError::Sftp(format!("write local: {e}")))?;
+        // 写完一块立刻 flush + sync 到磁盘，保证目录中看到的文件大小实时更新
+        local_file
+            .flush()
+            .map_err(|e| SftpError::Sftp(format!("flush local: {e}")))?;
+        local_file
+            .get_ref()
+            .sync_data()
+            .map_err(|e| SftpError::Sftp(format!("sync local: {e}")))?;
         *bytes_transferred += n as u64;
 
         // 进度上报
@@ -815,6 +825,14 @@ async fn download_single_file(
         };
         let _ = app_handle.emit("transfer-progress", &evt);
     }
+    // 最终再 flush 一次
+    local_file
+        .flush()
+        .map_err(|e| SftpError::Sftp(format!("flush local final: {e}")))?;
+    local_file
+        .get_ref()
+        .sync_all()
+        .map_err(|e| SftpError::Sftp(format!("sync all final: {e}")))?;
     Ok(())
 }
 
@@ -828,14 +846,17 @@ pub async fn sftp_download_file(
     remote_path: String,
     local_path: String,
     task_id: String,
+    display_name: Option<String>,
     app_handle: tauri::AppHandle,
     ssh_state: tauri::State<'_, SshState>,
     sftp_state: tauri::State<'_, SftpState>,
 ) -> Result<(), String> {
-    let display_name = Path::new(&remote_path)
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| remote_path.clone());
+    let display_name = display_name.unwrap_or_else(|| {
+        Path::new(&remote_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| remote_path.clone())
+    });
 
     let mut attempt = 0u32;
     loop {

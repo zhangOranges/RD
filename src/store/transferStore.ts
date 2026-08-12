@@ -4,6 +4,7 @@ import type {
   TransferProgressPayload,
   TransferStatus,
   TransferTask,
+  TransferKind,
 } from '../types';
 
 // ---- 持久化：将已完成的传输任务保存到 localStorage，重启后可查看 ----
@@ -48,6 +49,10 @@ interface TransferState {
   panelVisible: boolean;
   /** 是否有未读通知（有新的进行中/完成/错误消息且用户尚未打开面板）。 */
   hasUnread: boolean;
+  /** 传输队列当前激活的 tab（upload / download）。 */
+  activeTab: TransferKind;
+  /** 切换传输队列 tab。 */
+  setActiveTab: (tab: TransferKind) => void;
 
   /** 注册一个新任务（前端创建任务即调用此函数）。 */
   createTask: (t: Omit<TransferTask, 'status' | 'bytesTransferred' | 'speedBytesPerSec' | 'startedAt' | 'finishedAt'> & { status?: TransferStatus }) => void;
@@ -144,10 +149,13 @@ export const useTransferStore = create<TransferState>((set, get) => ({
   tasks: loadPersistedTasks(),
   panelVisible: false,
   hasUnread: false,
+  activeTab: 'upload',
 
   get activeCount() {
     return get().tasks.filter((t) => t.status === 'running' || t.status === 'queued').length;
   },
+
+  setActiveTab: (tab) => set({ activeTab: tab }),
 
   createTask: (t) => {
     const now = Date.now();
@@ -174,7 +182,8 @@ export const useTransferStore = create<TransferState>((set, get) => ({
         !s.panelVisible && (task.status === 'running' || task.status === 'queued')
           ? true
           : s.hasUnread;
-      return { tasks, hasUnread };
+      // 创建新任务时自动切换到对应的 tab
+      return { tasks, hasUnread, activeTab: task.kind };
     });
   },
 

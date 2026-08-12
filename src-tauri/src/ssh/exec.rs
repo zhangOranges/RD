@@ -89,6 +89,20 @@ pub async fn ssh_exec_raw(
     Ok(String::from_utf8_lossy(&output).to_string())
 }
 
+/// Tauri command: execute a command on the remote server and return stdout.
+/// Used for folder compression/decompression during transfer.
+#[tauri::command]
+pub async fn ssh_exec(
+    host_id: String,
+    command: String,
+    state: tauri::State<'_, SshState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    ssh_exec_raw(&state, &host_id, &command, Some(&app))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Server hardware stats returned to the frontend.
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
