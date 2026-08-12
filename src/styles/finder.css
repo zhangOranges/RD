@@ -1902,7 +1902,8 @@ html[data-theme="dark"] body {
 .update-notes-content::-webkit-scrollbar,
 .update-banner-error-msg::-webkit-scrollbar,
 .terminal-tabs-scroll::-webkit-scrollbar,
-.remote-pane-list::-webkit-scrollbar {
+.remote-pane-list::-webkit-scrollbar,
+.history-menu-list::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
@@ -1916,7 +1917,8 @@ html[data-theme="dark"] body {
 .update-notes-content::-webkit-scrollbar-thumb,
 .update-banner-error-msg::-webkit-scrollbar-thumb,
 .terminal-tabs-scroll::-webkit-scrollbar-thumb,
-.remote-pane-list::-webkit-scrollbar-thumb {
+.remote-pane-list::-webkit-scrollbar-thumb,
+.history-menu-list::-webkit-scrollbar-thumb {
   background: rgba(120, 120, 128, 0.32);
   border-radius: 5px;
   border: 2px solid transparent;
@@ -1933,7 +1935,8 @@ html[data-theme="dark"] body {
 .update-notes-content::-webkit-scrollbar-thumb:hover,
 .update-banner-error-msg::-webkit-scrollbar-thumb:hover,
 .terminal-tabs-scroll::-webkit-scrollbar-thumb:hover,
-.remote-pane-list::-webkit-scrollbar-thumb:hover {
+.remote-pane-list::-webkit-scrollbar-thumb:hover,
+.history-menu-list::-webkit-scrollbar-thumb:hover {
   background: rgba(120, 120, 128, 0.48);
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -1948,7 +1951,8 @@ html[data-theme="dark"] body {
 .update-notes-content::-webkit-scrollbar-track,
 .update-banner-error-msg::-webkit-scrollbar-track,
 .terminal-tabs-scroll::-webkit-scrollbar-track,
-.remote-pane-list::-webkit-scrollbar-track {
+.remote-pane-list::-webkit-scrollbar-track,
+.history-menu-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -1962,7 +1966,8 @@ html[data-theme="dark"] body {
   .update-notes-content::-webkit-scrollbar-thumb,
   .update-banner-error-msg::-webkit-scrollbar-thumb,
   .terminal-tabs-scroll::-webkit-scrollbar-thumb,
-  .remote-pane-list::-webkit-scrollbar-thumb {
+  .remote-pane-list::-webkit-scrollbar-thumb,
+  .history-menu-list::-webkit-scrollbar-thumb {
     background: rgba(142, 142, 147, 0.30);
     border: 2px solid transparent;
     background-clip: padding-box;
@@ -1976,7 +1981,8 @@ html[data-theme="dark"] body {
   .update-notes-content::-webkit-scrollbar-thumb:hover,
   .update-banner-error-msg::-webkit-scrollbar-thumb:hover,
   .terminal-tabs-scroll::-webkit-scrollbar-thumb:hover,
-  .remote-pane-list::-webkit-scrollbar-thumb:hover {
+  .remote-pane-list::-webkit-scrollbar-thumb:hover,
+  .history-menu-list::-webkit-scrollbar-thumb:hover {
     background: rgba(142, 142, 147, 0.48);
   }
 }
@@ -1991,7 +1997,8 @@ html[data-theme="dark"] body {
 .update-notes-content,
 .update-banner-error-msg,
 .terminal-tabs-scroll,
-.remote-pane-list {
+.remote-pane-list,
+.history-menu-list {
   scrollbar-width: thin;
   scrollbar-color: rgba(120, 120, 128, 0.32) transparent;
 }
@@ -2576,6 +2583,218 @@ html[data-theme="dark"] body {
   background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
   color: var(--text-secondary);
 }
+
+/* ---------- 状态栏：历史命令按钮 ---------- */
+.statusbar-history-btn {
+  padding: 1px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  font-size: 10px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.statusbar-history-btn:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+.statusbar-history-btn.is-active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.statusbar-history-btn svg {
+  color: inherit;
+}
+
+/* 计数小徽章 */
+.statusbar-history-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  font-family: var(--finder-font-mono);
+}
+
+/* ---------- 历史命令下拉菜单 ---------- */
+/* 复用 .tabbar-context-menu / .host-menu 的玻璃拟态外观，此处只追加专属调整 */
+.history-menu {
+  width: 380px;
+  max-width: 90vw;
+  max-height: min(60vh, 460px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 头部 */
+.history-menu-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--divider);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.history-menu-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.history-menu-meta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--finder-font-mono);
+}
+
+/* 列表（可滚动，超过 6 条出现滚动条） */
+/* 单项约 30px（含 4px padding + 26px min-height + 2px gap），6 条 ≈ 180px
+   列表区 padding:4px 上下各 4px → max-height = 188px，取整 190px */
+.history-menu-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  max-height: 190px;
+}
+
+/* 空状态 */
+.history-menu-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+/* 单条命令项（横向：发送按钮 + 复制 + 删除） */
+.history-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-xs);
+  transition: background 0.12s ease;
+}
+.history-menu-item:hover {
+  background: var(--hover);
+}
+
+/* 发送按钮（占据剩余空间） */
+.history-menu-cmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: var(--finder-font-mono);
+  text-align: left;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.history-menu-cmd:hover:not(:disabled) {
+  background: var(--selected-gradient);
+  color: var(--text-on-accent);
+}
+.history-menu-cmd:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.history-menu-cmd:disabled:hover {
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+/* 发送图标 */
+.history-menu-send-icon {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+}
+.history-menu-cmd:hover:not(:disabled) .history-menu-send-icon {
+  color: var(--text-on-accent);
+}
+
+/* 命令文本（省略号） */
+.history-menu-cmd-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 使用次数徽章 */
+.history-menu-count {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  font-family: var(--finder-font-mono);
+  line-height: 1;
+}
+.history-menu-cmd:hover:not(:disabled) .history-menu-count {
+  background: color-mix(in srgb, var(--text-on-accent) 22%, transparent);
+  color: var(--text-on-accent);
+}
+
+/* 复制 / 删除小按钮 */
+.history-menu-action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+.history-menu-action:hover {
+  background: var(--hover-strong);
+  color: var(--text-primary);
+}
+.history-menu-action-danger:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+/* 底部清空按钮 */
+.history-menu-clear {
+  justify-content: center;
+  margin: 2px 4px 4px;
+}
+
 /* ---------- 更新对话框 ---------- */
 .dialog-update {
   width: 580px;

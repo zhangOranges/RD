@@ -10,6 +10,8 @@ import type {
   CredentialType,
 } from '../types';
 import { useToastStore } from '../components/Toast';
+// 用动态 getState 避免 zustand 循环依赖
+import { useUIStore } from './uiStore';
 
 interface HostState {
   hosts: HostConfig[];
@@ -245,7 +247,12 @@ export const useHostStore = create<HostState>((set, get) => ({
         fingerprints: { ...s.fingerprints, [id]: result.fingerprint },
         connectionStates: { ...s.connectionStates, [id]: CONNECTED },
       }));
-      // 连接成功：静默不弹，仅通过连接状态圆点/右上角信息区反馈
+      // 连接成功：自动打开终端面板，首个会话自动创建一个默认标签
+      const ui = useUIStore.getState();
+      if (!ui.terminalTabs[id] || ui.terminalTabs[id].length === 0) {
+        ui.addTerminalTab(id);
+      }
+      ui.setTerminalVisible(id, true);
     } catch (err) {
       get().setConnectionState(id, DISCONNECTED);
       useToastStore.getState().push('error', `连接失败：${formatErr(err)}`);

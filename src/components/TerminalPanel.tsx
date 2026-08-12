@@ -17,6 +17,7 @@ import {
 import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
 import { useFileStore, lastPtyCdPath } from '../store/fileStore';
+import { useHistoryStore } from '../store/historyStore';
 import { useToastStore } from './Toast';
 import '@xterm/xterm/css/xterm.css';
 import '../styles/terminal.css';
@@ -57,6 +58,70 @@ function formatErr(err: unknown): string {
 /** 每标签快照 / 同步状态的复合 key */
 function makeTabKey(hostId: string, tabId: string): string {
   return `${hostId}__${tabId}`;
+}
+
+/**
+ * 从 xterm 当前光标行读取完整命令并去掉 shell prompt 前缀。
+ * 用于在用户按回车时捕获"含 Tab 补全后的完整命令"。
+ *
+ * 启发式去 prompt（按匹配优先级从严格到宽松）：
+ * 1. `user@host:path$` / `user@host:path#` / `user@host [path]$`
+ * 2. shell 特殊字符结尾的 prompt：`~/dir$`、`[hostname dir]#`、`(env) path%`、`path ❯`、`➜ ~/dir`
+ * 3. 行首独立的 `$ / # / % / ❯ / ➜ / >` + 空格
+ * 4. 以 `:` + 空格结尾的常见 Git/Zsh 主题段（如 `main: 分支状态` 不捕获）
+ *    —— 匹配不到时退回整行，再交给 isLikelyShellCommand 过滤
+ * 匹配失败返回空字符串（让 caller 回退到输入缓冲或丢弃）。
+ */
+function readCommandFromTerminal(term: Terminal): string {
+  try {
+    const buffer = term.buffer.active;
+    const line = buffer.getLine(buffer.cursorY);
+    if (!line) return '';
+    const full = line.translateToString(true).trimEnd();
+    if (!full.trim()) return '';
+
+    const m1 = full.match(/^[\w.-]+@[\w.-]+[:\s][^\s$#%❯➜>]*\s*[$#%❯➜>]\s+(.+)$/);
+    if (m1 && m1[1]) return m1[1].trim();
+
+    const m2 = full.match(/^(?:\([^)]*\)\s*)?(?:~|\.{1,2}|\/|[\w.-]+\/)[^\s$#%❯➜>]*\s*[$#%❯➜>]\s+(.+)$/);
+    if (m2 && m2[1]) return m2[1].trim();
+
+    const m3 = full.match(/^\[[^\]]+\]\s*[$#%❯➜>]\s+(.+)$/);
+    if (m3 && m3[1]) return m3[1].trim();
+
+    const m4 = full.match(/^[$#%❯➜>]\s+(.+)$/);
+    if (m4 && m4[1]) return m4[1].trim();
+
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 在 readCommandFromTerminal 未匹配到 prompt（或 fallback 到输入缓冲）时，
+ * 过滤"看起来肯定不是 shell 命令"的字符串，避免 TUI 边界时序漏网。
+ *
+ * 明确拒绝：
+ * - 空 / 纯空白
+ * - 单字符（`j` / `k` / `q` / `d` 这类 TUI 按键，即便漏网也不会变成命令）
+ * - TUI ex 命令：以 `:` 开头，后接非空白（`:wq` / `:q!` / `:set nu` 等）
+ * - less/search: `/pattern`、`?pattern`
+ * - 仅由非命令字符组成：纯数字、纯标点、纯路径（不以可执行名开头）
+ *
+ * 接受：至少 2 个可见字符，首 token 形如可执行名（字母/数字/-/. 构成），
+ *       且不是上面的 TUI 前缀。
+ */
+function isLikelyShellCommand(raw: string): boolean {
+  const s = raw.trim();
+  if (!s) return false;
+  if (s.length < 2) return false;
+  if (/^[:/?][\s\S]*$/.test(s)) return false;
+  // 首字符必须是 shell 标识符允许的起始字母/数字/下划线/_/./- 之一
+  if (!/^[A-Za-z0-9_~.\/-]/.test(s)) return false;
+  // 纯数字开头 + 没有空格的"数字串"也不是命令（比如日期/计数回显）
+  if (/^\d+$/.test(s)) return false;
+  return true;
 }
 
 /** 保存 xterm 当前可见缓冲区的所有行，去除尾部空行 */
@@ -142,6 +207,12 @@ export function TerminalPanel() {
   const justOpenedRef = useRef<Set<string>>(new Set());
   // 已断开的标签 tabId 集合
   const disconnectedTabsRef = useRef<Set<string>>(new Set());
+  // 每个标签的当前输入缓冲（用于捕获完整命令记录到历史）
+  // key = makeTabKey(hostId, tabId)，value = 当前未提交的输入字符串
+  const inputBufferRef = useRef<Map<string, string>>(new Map());
+  // 每个标签是否处于 alternate screen（vim/less/htop/nano 等全屏 TUI 进入时置为 true，退出时 false）
+  // 处于该模式下时不记录任何命令历史，避免捕获 TUI 内部击键
+  const altScreenActiveRef = useRef<Map<string, boolean>>(new Map());
 
   const [activeDisconnected, setActiveDisconnected] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -238,12 +309,81 @@ export function TerminalPanel() {
 
     tabsRef.current.set(tabId, { term, fitAddon, container });
 
+    // 监听 PTY 输出中的 alternate screen 切换 CSI 序列：
+    // ESC [ ? 1049 h → 进入全屏 TUI（vim/less/htop/nano/tmux 等）
+    // ESC [ ? 1049 l → 退出全屏 TUI，回到 shell 正常缓冲
+    // 覆盖 1047/47 等兼容序列（备用缓冲切换不含"保存光标"语义，但同样是 TUI 模式）
+    const tabKey = makeTabKey(hostId, tabId);
+    const parser = (term as unknown as { parser: {
+      registerCsiHandler: (
+        spec: { prefix?: string; intermediates?: string; params?: number[]; final: string },
+        cb: (params: number[]) => boolean | void,
+      ) => void;
+    } }).parser;
+    const registerAltScreen = (final: 'h' | 'l', mark: boolean) => {
+      try {
+        parser.registerCsiHandler(
+          { final, prefix: '?', intermediates: '' as unknown as undefined },
+          (params) => {
+            for (const p of params) {
+              if (p === 1049 || p === 1047 || p === 47) {
+                altScreenActiveRef.current.set(tabKey, mark);
+                // 进入 TUI 时清空缓冲，里面残留的按键不是 shell 命令
+                if (mark) inputBufferRef.current.delete(tabKey);
+              }
+            }
+            return false;
+          },
+        );
+      } catch {
+        /* 某些 xterm 版本 parser API 不同，忽略即可 */
+      }
+    };
+    registerAltScreen('h', true);
+    registerAltScreen('l', false);
+
     // xterm → PTY：用户输入
     term.onData((data) => {
       const bytes = Array.from(new TextEncoder().encode(data));
       void invoke('pty_write', { hostId, tabId, data: bytes }).catch(() => {
         /* PTY 可能已关闭 */
       });
+
+      // 命令历史捕获：
+      // - 处于 alternate screen（vim/less 等 TUI）时不记录任何历史，
+      //   避免把 TUI 内部的 :wq / j / k / 搜索等当成命令。
+      // - 非 TUI 回车时优先从 xterm 当前行读取（含 Tab 补全后的文本），
+      //   启发式去掉 shell prompt 前缀；fallback 用本地输入缓冲。
+      // - 粘贴多行时 xterm 当前行可能还是旧行，fallback 到缓冲。
+      const key = tabKey;
+      const altActive = !!altScreenActiveRef.current.get(key);
+      let buf = inputBufferRef.current.get(key) ?? '';
+      for (const ch of data) {
+        const code = ch.charCodeAt(0);
+        if (ch === '\r' || ch === '\n') {
+          if (!altActive) {
+            const fromTerm = readCommandFromTerminal(term);
+            const cmd = (fromTerm || buf.trim()).replace(/\s+/g, ' ').trim();
+            if (isLikelyShellCommand(cmd)) {
+              useHistoryStore.getState().recordCommand(cmd);
+            }
+          }
+          buf = '';
+        } else if (altActive) {
+          // TUI 内的按键完全不入缓冲（即便后面有 \r 也会被 altActive 挡住）
+        } else if (code === 0x7f || code === 0x08) {
+          // Backspace / Delete
+          buf = buf.slice(0, -1);
+        } else if (code === 0x03 || code === 0x04) {
+          // Ctrl+C / Ctrl+D：中断当前输入
+          buf = '';
+        } else if (code >= 0x20 && code !== 0x09) {
+          // 可打印字符（含空格）；Tab (0x09) 忽略，补全内容由 xterm 读取
+          buf += ch;
+        }
+        // 其他控制字符（ESC 序列等）忽略
+      }
+      inputBufferRef.current.set(key, buf);
     });
 
     // 右键复制 / 粘贴
@@ -427,8 +567,11 @@ export function TerminalPanel() {
     });
 
     // ResizeObserver：容器尺寸变化 → fit + pty_resize（活动标签）
+    // double rAF 延后一帧再 fit，避免和 React class/Tauri 窗口动画在同一帧竞争布局
     const ro = new ResizeObserver(() => {
-      requestFit();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => requestFit());
+      });
     });
     ro.observe(bodyRef.current);
     roRef.current = ro;
@@ -501,6 +644,8 @@ export function TerminalPanel() {
           initCwdSyncedRef.current.delete(key);
           ignoreFirstCwdRef.current.delete(key);
           justOpenedRef.current.delete(key);
+          inputBufferRef.current.delete(key);
+          altScreenActiveRef.current.delete(key);
           disconnectedTabsRef.current.delete(tabId);
           void invoke('pty_close', { hostId, tabId }).catch(() => {});
         }
@@ -537,11 +682,16 @@ export function TerminalPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  /* ---------- Effect 4：terminalHeight / 可见性变化时重新 fit ---------- */
+  /* ---------- Effect 4：尺寸/可见性/全屏变化时重新 fit ---------- */
+  // 全屏切换会把容器从 flex 子项变成 position:fixed inset:0，
+  // 需要等待 React 把 class 写到 DOM、浏览器完成 layout 后再 fit；
+  // 用 rAF 嵌套保证在下一帧的 layout 之后再读取尺寸。
   useEffect(() => {
-    requestAnimationFrame(() => requestFit());
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => requestFit());
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [terminalHeight, terminalVisible]);
+  }, [terminalHeight, terminalVisible, terminalFullscreen]);
 
   /* ---------- 新增标签 ---------- */
   const handleAddTab = () => {
@@ -573,6 +723,8 @@ export function TerminalPanel() {
     ignoreFirstCwdRef.current.delete(key);
     justOpenedRef.current.delete(key);
     lastPtyCdPath.delete(key);
+    inputBufferRef.current.delete(key);
+    altScreenActiveRef.current.delete(key);
     disconnectedTabsRef.current.delete(tabId);
     // 从 store 移除（会切换活动标签到相邻标签）
     removeTerminalTab(hostId, tabId);
