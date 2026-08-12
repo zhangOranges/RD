@@ -352,7 +352,7 @@ rd/
 │   │   │   ├── categories.rs     # 主机分类管理
 │   │   │   ├── path_cache.rs     # 目录记忆（按主机）
 │   │   │   └── settings.rs       # 应用设置持久化
-│   │   ├── local_fs.rs           # 本地文件系统操作（分块读取等）
+│   │   └── local_fs.rs           # 本地文件系统操作（分块读取、压缩、解压、重命名、删除等）
 │   │   ├── lib.rs                # Tauri 命令注册 + 插件初始化
 │   │   └── main.rs               # 入口
 │   ├── capabilities/
