@@ -155,7 +155,10 @@ pub struct CompressResult {
 /// 将本地目录压缩为 tar.gz，返回临时文件路径和大小。
 /// 调用系统 tar 命令（Windows 10+、macOS、Linux 均自带）。
 #[tauri::command]
-pub async fn compress_local_dir(dir_path: String, dir_name: String) -> Result<CompressResult, String> {
+pub async fn compress_local_dir(
+    dir_path: String,
+    dir_name: String,
+) -> Result<CompressResult, String> {
     let temp_dir = std::env::temp_dir();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
