@@ -21,6 +21,7 @@
 //! |--------------------|------------------------------------------|------------------------------|
 //! | `pty://data`       | `{ host_id, tab_id, data: number[] }`    | PTY output (OSC stripped)    |
 //! | `pty://cwd-changed`| `{ host_id, tab_id, path }`              | PROMPT_COMMAND cwd sequence  |
+//! | `pty://cmd-executed`| `{ host_id, tab_id, command }`          | PROMPT_COMMAND cmd sequence  |
 //! | `pty://closed`     | `{ host_id, tab_id }`                     | Channel closed / dropped     |
 
 pub mod parser;
@@ -39,6 +40,7 @@ use session::PtySession;
 // --- Event names -----------------------------------------------------------
 pub const DATA_EVENT: &str = "pty://data";
 pub const CWD_CHANGED_EVENT: &str = "pty://cwd-changed";
+pub const CMD_EXECUTED_EVENT: &str = "pty://cmd-executed";
 pub const CLOSED_EVENT: &str = "pty://closed";
 
 // --- Event payloads --------------------------------------------------------
@@ -58,6 +60,14 @@ pub struct PtyCwdPayload {
     pub host_id: String,
     pub tab_id: String,
     pub path: String,
+}
+
+/// Payload for `pty://cmd-executed`.
+#[derive(Serialize, Clone)]
+pub struct PtyCmdPayload {
+    pub host_id: String,
+    pub tab_id: String,
+    pub command: String,
 }
 
 /// Payload for `pty://closed`.

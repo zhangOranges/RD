@@ -94,6 +94,18 @@ function App() {
         if (hid) useUIStore.getState().toggleTerminal(hid);
         return;
       }
+      // Ctrl+Shift+Enter / Cmd+Shift+Enter → 切换终端全屏（仅终端可见时生效）
+      if (mod && e.shiftKey && e.key === 'Enter') {
+        const hid = useHostStore.getState().selectedHostId;
+        const visible = hid ? !!useUIStore.getState().terminalVisible[hid] : false;
+        if (visible) {
+          e.preventDefault();
+          useUIStore
+            .getState()
+            .setTerminalFullscreen(!useUIStore.getState().terminalFullscreen);
+        }
+        return;
+      }
       // F5 或 Ctrl+R / Cmd+R → 刷新当前目录
       if (e.key === 'F5' || (mod && (e.key === 'r' || e.key === 'R'))) {
         const hostId = useHostStore.getState().selectedHostId;

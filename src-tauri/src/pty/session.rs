@@ -23,7 +23,8 @@ use tokio::task::JoinHandle;
 
 use super::parser::OscParser;
 use super::{
-    PtyClosedPayload, PtyCwdPayload, PtyDataPayload, CLOSED_EVENT, CWD_CHANGED_EVENT, DATA_EVENT,
+    CMD_EXECUTED_EVENT, CLOSED_EVENT, CWD_CHANGED_EVENT, DATA_EVENT, PtyClosedPayload, PtyCmdPayload,
+    PtyCwdPayload, PtyDataPayload,
 };
 use crate::{debug_log, LogLevel};
 
@@ -114,13 +115,32 @@ impl PtySession {
         // 使用 raw 字符串（r#...#）保留字面量反斜杠，让 shell printf 自行解析
         // \033（八进制 ESC）和 \007（八进制 BEL）是 shell printf 的转义格式。
         //
-        // history 隔离方案：先设置 HISTCONTROL=ignorespace，之后所有以空格开头的
-        // 命令都不会被记录到 history 中。set +o history 的问题是它对自己无效
-        // （执行前就已经被记录了）。最后 history -c 清掉第一行（设置 HISTCONTROL
-        // 本身），clear 清空屏幕，只留下干净的提示符。
-        let init = r#"export HISTCONTROL="${HISTCONTROL:+$HISTCONTROL:}ignorespace"
- export PROMPT_COMMAND='printf "\033]7777;cwd;%s\007" "$PWD"'
- history -c
+        // 初始化流程（严格顺序，关键：PROMPT_COMMAND 放到最后才设置）：
+        //   1. set +o history         — 关 history 写入（本行会被写，但马上被清）
+        //   2. 环境变量 / 函数定义    — 在 history 关闭状态下执行，不进 history
+        //   3. history -c             — 清空内存 history（含步骤 1 的 set +o history）
+        //   4. set -o history         — 恢复写入（自己不被记，因为此刻还关着）
+        //   5. export PROMPT_COMMAND=__rd_report  — 最后才挂 HOOK，此时 history 已空，
+        //      接下来的 clear 执行完触发的第一次 __rd_report 读 history 1 返回空。
+        //   6. clear                  — 清屏
+        // 所有注入命令都不会被第一次 HOOK 读到。__rd_report 只在用户输入的第 1 条
+        // 命令执行完后才第一次真正上报命令。
+        let init = r#"set +o history
+export HISTCONTROL="${HISTCONTROL:+$HISTCONTROL:}ignorespace"
+__rd_report() {
+  local _raw _cmd _n
+  _raw=$(HISTTIMEFORMAT= history 1)
+  _n=$(printf '%s\n' "$_raw" | sed -n 's/^[ ]*\([0-9][0-9]*\).*/\1/p')
+  _cmd=$(printf '%s\n' "$_raw" | sed 's/^[ ]*[0-9][0-9]*[ ]*//')
+  printf "\033]7777;cwd;%s\007" "$PWD"
+  if [ -n "$_n" ] && [ -n "$_cmd" ] && [ "$_n" != "${__rd_last_n:-}" ]; then
+    printf "\033]7777;cmd;%s\007" "$_cmd"
+    __rd_last_n="$_n"
+  fi
+}
+history -c
+set -o history
+ export PROMPT_COMMAND=__rd_report
  clear
 "#;
         channel.data(init.as_bytes()).await.map_err(|e| {
@@ -320,7 +340,7 @@ fn handle_output(
     if data.is_empty() {
         return;
     }
-    let (clean, paths) = parser.feed(data);
+    let (clean, paths, commands) = parser.feed(data);
     if !clean.is_empty() {
         let _ = app.emit(
             DATA_EVENT,
@@ -338,6 +358,16 @@ fn handle_output(
                 host_id: host_id.to_string(),
                 tab_id: tab_id.to_string(),
                 path,
+            },
+        );
+    }
+    for command in commands {
+        let _ = app.emit(
+            CMD_EXECUTED_EVENT,
+            &PtyCmdPayload {
+                host_id: host_id.to_string(),
+                tab_id: tab_id.to_string(),
+                command,
             },
         );
     }

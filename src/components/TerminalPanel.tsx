@@ -33,6 +33,11 @@ interface PtyCwdPayload {
   tab_id: string;
   path: string;
 }
+interface PtyCmdPayload {
+  host_id: string;
+  tab_id: string;
+  command: string;
+}
 interface PtyClosedPayload {
   host_id: string;
   tab_id: string;
@@ -43,6 +48,61 @@ interface TabInstance {
   term: Terminal;
   fitAddon: FitAddon;
   container: HTMLDivElement;
+  /** 切换全屏快捷键监听器的 cleanup，关闭标签时调用 */
+  fullscreenKeyCleanup: () => void;
+  /** xterm attachCustomKeyEventHandler 的 dispose 函数 */
+  customKeyHandlerDispose?: { dispose: () => void };
+}
+
+/** 判断是否为全屏切换快捷键：Ctrl+Shift+Enter 或 Cmd+Shift+Enter */
+function isFullscreenShortcut(e: KeyboardEvent): boolean {
+  return (
+    (e.ctrlKey || e.metaKey) &&
+    e.shiftKey &&
+    (e.key === 'Enter' || e.code === 'Enter')
+  );
+}
+
+/**
+ * 全局防抖时间戳（模块级，不依赖 event 对象）。
+ * 用于拦截 xterm API 回调与 DOM 原生监听器因 event 对象不同导致的"双触发"。
+ * 正常人类不可能在 300ms 内连续按两次 Ctrl+Shift+Enter，所以 300ms 窗口足够安全。
+ */
+let _lastFsToggleAt = 0;
+const FS_DEBOUNCE_MS = 300;
+
+/**
+ * 防抖式切换终端全屏：
+ * - 若距离上次成功切换 < FS_DEBOUNCE_MS 则直接跳过
+ * - 同时尝试 preventDefault / stopPropagation / stopImmediatePropagation
+ * 返回 true 表示实际执行了切换
+ */
+function debouncedToggleFullscreen(e?: KeyboardEvent): boolean {
+  const now = Date.now();
+  if (now - _lastFsToggleAt < FS_DEBOUNCE_MS) return false;
+  _lastFsToggleAt = now;
+  if (e) {
+    try {
+      e.preventDefault();
+    } catch {
+      /* ignore */
+    }
+    try {
+      e.stopPropagation();
+    } catch {
+      /* ignore */
+    }
+    try {
+      (e as unknown as { stopImmediatePropagation?: () => void })
+        .stopImmediatePropagation?.();
+    } catch {
+      /* ignore */
+    }
+  }
+  useUIStore
+    .getState()
+    .setTerminalFullscreen(!useUIStore.getState().terminalFullscreen);
+  return true;
 }
 
 function formatErr(err: unknown): string {
@@ -61,46 +121,7 @@ function makeTabKey(hostId: string, tabId: string): string {
 }
 
 /**
- * 从 xterm 当前光标行读取完整命令并去掉 shell prompt 前缀。
- * 用于在用户按回车时捕获"含 Tab 补全后的完整命令"。
- *
- * 启发式去 prompt（按匹配优先级从严格到宽松）：
- * 1. `user@host:path$` / `user@host:path#` / `user@host [path]$`
- * 2. shell 特殊字符结尾的 prompt：`~/dir$`、`[hostname dir]#`、`(env) path%`、`path ❯`、`➜ ~/dir`
- * 3. 行首独立的 `$ / # / % / ❯ / ➜ / >` + 空格
- * 4. 以 `:` + 空格结尾的常见 Git/Zsh 主题段（如 `main: 分支状态` 不捕获）
- *    —— 匹配不到时退回整行，再交给 isLikelyShellCommand 过滤
- * 匹配失败返回空字符串（让 caller 回退到输入缓冲或丢弃）。
- */
-function readCommandFromTerminal(term: Terminal): string {
-  try {
-    const buffer = term.buffer.active;
-    const line = buffer.getLine(buffer.cursorY);
-    if (!line) return '';
-    const full = line.translateToString(true).trimEnd();
-    if (!full.trim()) return '';
-
-    const m1 = full.match(/^[\w.-]+@[\w.-]+[:\s][^\s$#%❯➜>]*\s*[$#%❯➜>]\s+(.+)$/);
-    if (m1 && m1[1]) return m1[1].trim();
-
-    const m2 = full.match(/^(?:\([^)]*\)\s*)?(?:~|\.{1,2}|\/|[\w.-]+\/)[^\s$#%❯➜>]*\s*[$#%❯➜>]\s+(.+)$/);
-    if (m2 && m2[1]) return m2[1].trim();
-
-    const m3 = full.match(/^\[[^\]]+\]\s*[$#%❯➜>]\s+(.+)$/);
-    if (m3 && m3[1]) return m3[1].trim();
-
-    const m4 = full.match(/^[$#%❯➜>]\s+(.+)$/);
-    if (m4 && m4[1]) return m4[1].trim();
-
-    return '';
-  } catch {
-    return '';
-  }
-}
-
-/**
- * 在 readCommandFromTerminal 未匹配到 prompt（或 fallback 到输入缓冲）时，
- * 过滤"看起来肯定不是 shell 命令"的字符串，避免 TUI 边界时序漏网。
+ * 过滤"看起来肯定不是 shell 命令"的字符串。
  *
  * 明确拒绝：
  * - 空 / 纯空白
@@ -207,12 +228,14 @@ export function TerminalPanel() {
   const justOpenedRef = useRef<Set<string>>(new Set());
   // 已断开的标签 tabId 集合
   const disconnectedTabsRef = useRef<Set<string>>(new Set());
-  // 每个标签的当前输入缓冲（用于捕获完整命令记录到历史）
-  // key = makeTabKey(hostId, tabId)，value = 当前未提交的输入字符串
-  const inputBufferRef = useRef<Map<string, string>>(new Map());
   // 每个标签是否处于 alternate screen（vim/less/htop/nano 等全屏 TUI 进入时置为 true，退出时 false）
   // 处于该模式下时不记录任何命令历史，避免捕获 TUI 内部击键
   const altScreenActiveRef = useRef<Map<string, boolean>>(new Map());
+  // 每个标签是否已进入"接受命令上报"阶段。初始化脚本会触发几次 PROMPT_COMMAND
+  // 并上报注入命令的假象。只有在用户通过 xterm.onData 发出第一个"真实输入字节"
+  // （可打印字符 / 回车 / 退格 / Ctrl+U/W/C 等）后，才把对应标签置为 true，
+  // pty://cmd-executed 之后才会记录。方向键、Home/End 等控制序列不解锁。
+  const acceptingCmdRef = useRef<Map<string, boolean>>(new Map());
 
   const [activeDisconnected, setActiveDisconnected] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -307,7 +330,50 @@ export function TerminalPanel() {
     bodyRef.current.appendChild(container);
     term.open(container);
 
-    tabsRef.current.set(tabId, { term, fitAddon, container });
+    // ====== 终端内全屏快捷键拦截（仅 1 层：xterm 官方 API，最可靠） ======
+    const cleanupFns: Array<() => void> = [];
+
+    // 仅用 xterm 官方 attachCustomKeyEventHandler 处理终端内按键。
+    // 这是终端内部最可靠的拦截点：在 xterm 处理任何键盘事件之前回调，返回 false 让 xterm 忽略此键。
+    // 外层 document 还有 1 层兜底（带分流），两侧通过全局时间戳防抖避免双触发。
+    let customKeyHandlerDispose: { dispose: () => void } | undefined;
+    try {
+      const termAny = term as unknown as {
+        attachCustomKeyEventHandler?: (
+          handler: (e: KeyboardEvent) => boolean,
+        ) => { dispose: () => void };
+      };
+      if (typeof termAny.attachCustomKeyEventHandler === 'function') {
+        customKeyHandlerDispose = termAny.attachCustomKeyEventHandler((e) => {
+          if (isFullscreenShortcut(e)) {
+            debouncedToggleFullscreen(e);
+            return false; // 阻止 xterm 继续处理
+          }
+          return true; // 其他键交给 xterm 正常处理
+        });
+      }
+    } catch {
+      /* attachCustomKeyEventHandler 不可用时忽略，交给外层 document 兜底 */
+    }
+
+    const fullscreenKeyCleanup = () => {
+      for (const fn of cleanupFns) {
+        try {
+          fn();
+        } catch {
+          /* ignore */
+        }
+      }
+      customKeyHandlerDispose?.dispose?.();
+    };
+
+    tabsRef.current.set(tabId, {
+      term,
+      fitAddon,
+      container,
+      fullscreenKeyCleanup,
+      customKeyHandlerDispose,
+    });
 
     // 监听 PTY 输出中的 alternate screen 切换 CSI 序列：
     // ESC [ ? 1049 h → 进入全屏 TUI（vim/less/htop/nano/tmux 等）
@@ -328,8 +394,6 @@ export function TerminalPanel() {
             for (const p of params) {
               if (p === 1049 || p === 1047 || p === 47) {
                 altScreenActiveRef.current.set(tabKey, mark);
-                // 进入 TUI 时清空缓冲，里面残留的按键不是 shell 命令
-                if (mark) inputBufferRef.current.delete(tabKey);
               }
             }
             return false;
@@ -349,41 +413,30 @@ export function TerminalPanel() {
         /* PTY 可能已关闭 */
       });
 
-      // 命令历史捕获：
-      // - 处于 alternate screen（vim/less 等 TUI）时不记录任何历史，
-      //   避免把 TUI 内部的 :wq / j / k / 搜索等当成命令。
-      // - 非 TUI 回车时优先从 xterm 当前行读取（含 Tab 补全后的文本），
-      //   启发式去掉 shell prompt 前缀；fallback 用本地输入缓冲。
-      // - 粘贴多行时 xterm 当前行可能还是旧行，fallback 到缓冲。
-      const key = tabKey;
-      const altActive = !!altScreenActiveRef.current.get(key);
-      let buf = inputBufferRef.current.get(key) ?? '';
-      for (const ch of data) {
-        const code = ch.charCodeAt(0);
-        if (ch === '\r' || ch === '\n') {
-          if (!altActive) {
-            const fromTerm = readCommandFromTerminal(term);
-            const cmd = (fromTerm || buf.trim()).replace(/\s+/g, ' ').trim();
-            if (isLikelyShellCommand(cmd)) {
-              useHistoryStore.getState().recordCommand(cmd);
-            }
-          }
-          buf = '';
-        } else if (altActive) {
-          // TUI 内的按键完全不入缓冲（即便后面有 \r 也会被 altActive 挡住）
-        } else if (code === 0x7f || code === 0x08) {
-          // Backspace / Delete
-          buf = buf.slice(0, -1);
-        } else if (code === 0x03 || code === 0x04) {
-          // Ctrl+C / Ctrl+D：中断当前输入
-          buf = '';
-        } else if (code >= 0x20 && code !== 0x09) {
-          // 可打印字符（含空格）；Tab (0x09) 忽略，补全内容由 xterm 读取
-          buf += ch;
-        }
-        // 其他控制字符（ESC 序列等）忽略
+      // 第一个"真实输入字节"到达时解锁该标签的 cmd 上报。
+      // 方向键 / Home / End / 功能键等控制序列（ESC 开头）不解锁，
+      // 避免仅通过上下键查看 history 就解锁（初始化 HOOK 仍在触发）。
+      const key = makeTabKey(hostId, tabId);
+      if (!acceptingCmdRef.current.get(key)) {
+        const first = bytes[0];
+        const isControlSeq = first === 0x1b; // ESC
+        const isRealInput =
+          !isControlSeq &&
+          bytes.some(
+            (b) =>
+              // 可打印字符 / 回车 / LF / TAB / BS / DEL / Ctrl+C / Ctrl+U / Ctrl+W
+              (b >= 0x20 && b <= 0x7e) ||
+              b === 0x09 ||
+              b === 0x0a ||
+              b === 0x0d ||
+              b === 0x03 ||
+              b === 0x08 ||
+              b === 0x15 ||
+              b === 0x17 ||
+              b === 0x7f,
+          );
+        if (isRealInput) acceptingCmdRef.current.set(key, true);
       }
-      inputBufferRef.current.set(key, buf);
     });
 
     // 右键复制 / 粘贴
@@ -526,6 +579,23 @@ export function TerminalPanel() {
       },
     );
 
+    // 命令执行完毕：shell PROMPT_COMMAND 通过 OSC 7777;cmd;<command> 报告
+    const cmdListenerPromise = listen<PtyCmdPayload>(
+      'pty://cmd-executed',
+      (event) => {
+        const { host_id, tab_id, command } = event.payload;
+        if (currentHostRef.current !== host_id) return;
+        const key = makeTabKey(host_id, tab_id);
+        // 初始化阶段未解锁：注入命令的上报全部丢弃
+        if (!acceptingCmdRef.current.get(key)) return;
+        if (altScreenActiveRef.current.get(key)) return;
+        const cmd = command.replace(/\s+/g, ' ').trim();
+        if (isLikelyShellCommand(cmd)) {
+          useHistoryStore.getState().recordCommand(cmd);
+        }
+      },
+    );
+
     // PTY 关闭 / 异常断开
     const closedListenerPromise = listen<PtyClosedPayload>(
       'pty://closed',
@@ -557,6 +627,7 @@ export function TerminalPanel() {
     void Promise.all([
       dataListenerPromise,
       cwdListenerPromise,
+      cmdListenerPromise,
       closedListenerPromise,
     ]).then((fns) => {
       if (disposed) {
@@ -576,6 +647,30 @@ export function TerminalPanel() {
     ro.observe(bodyRef.current);
     roRef.current = ro;
 
+    // Ctrl+Shift+Enter → 切换终端全屏（全局兜底层，仅一层）。
+    // 采用"分流 + 防抖"双保险：
+    //   1. 分流：焦点在终端内部时，交给 xterm attachCustomKeyEventHandler 处理（更及时）
+    //           焦点在终端外部时（文件树/工具栏等），由 document 层直接兜底
+    //   2. 防抖：全局 _lastFsToggleAt 时间戳（300ms 窗口），无论哪一侧先触发，
+    //           另一侧在 300ms 内的重复调用都会被丢弃，从根本上杜绝"最大化后立刻还原"
+    const onFullscreenDocKey = (e: KeyboardEvent) => {
+      if (!isFullscreenShortcut(e)) return;
+      const active = document.activeElement as HTMLElement | null;
+      const insideTerminal =
+        !!active &&
+        (active.classList?.contains('xterm-helper-textarea') ||
+          (active.closest && !!active.closest('.terminal-tab-container')));
+      if (insideTerminal) {
+        // 焦点在终端内：xterm 内部那层应该已经处理了（或即将处理）。
+        // 这里也调一次，但 300ms 防抖会自动丢弃掉第二次调用，双保险。
+        debouncedToggleFullscreen(e);
+      } else {
+        // 焦点不在终端内：直接执行
+        debouncedToggleFullscreen(e);
+      }
+    };
+    document.addEventListener('keydown', onFullscreenDocKey, true);
+
     return () => {
       disposed = true;
       if (fitRafRef.current !== null) {
@@ -584,6 +679,7 @@ export function TerminalPanel() {
       }
       ro.disconnect();
       roRef.current = null;
+      document.removeEventListener('keydown', onFullscreenDocKey, true);
       unlistens.forEach((fn) => fn());
       unlistens.length = 0;
     };
@@ -628,6 +724,12 @@ export function TerminalPanel() {
           makeTabKey(hostId, tabId),
           saveTerminalSnapshot(inst.term),
         );
+        try {
+          inst.fullscreenKeyCleanup();
+        } catch {
+          /* ignore */
+        }
+        inst.customKeyHandlerDispose?.dispose?.();
         inst.term.dispose();
         inst.container.remove();
       }
@@ -644,7 +746,6 @@ export function TerminalPanel() {
           initCwdSyncedRef.current.delete(key);
           ignoreFirstCwdRef.current.delete(key);
           justOpenedRef.current.delete(key);
-          inputBufferRef.current.delete(key);
           altScreenActiveRef.current.delete(key);
           disconnectedTabsRef.current.delete(tabId);
           void invoke('pty_close', { hostId, tabId }).catch(() => {});
@@ -711,6 +812,12 @@ export function TerminalPanel() {
     // 销毁 xterm 实例
     const inst = tabsRef.current.get(tabId);
     if (inst) {
+      try {
+        inst.fullscreenKeyCleanup();
+      } catch {
+        /* ignore */
+      }
+      inst.customKeyHandlerDispose?.dispose?.();
       inst.term.dispose();
       inst.container.remove();
       tabsRef.current.delete(tabId);
@@ -723,7 +830,6 @@ export function TerminalPanel() {
     ignoreFirstCwdRef.current.delete(key);
     justOpenedRef.current.delete(key);
     lastPtyCdPath.delete(key);
-    inputBufferRef.current.delete(key);
     altScreenActiveRef.current.delete(key);
     disconnectedTabsRef.current.delete(tabId);
     // 从 store 移除（会切换活动标签到相邻标签）
@@ -838,7 +944,7 @@ export function TerminalPanel() {
             className="terminal-titlebar-btn"
             type="button"
             aria-label={terminalFullscreen ? '退出全屏' : '全屏'}
-            title={terminalFullscreen ? '退出全屏' : '全屏'}
+            title={terminalFullscreen ? '退出全屏 (Ctrl+Shift+Enter)' : '全屏 (Ctrl+Shift+Enter)'}
             onClick={handleToggleFullscreen}
           >
             {terminalFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
