@@ -300,10 +300,7 @@ impl ConnectionHandle {
             debug_log(
                 app,
                 LogLevel::Info,
-                &format!(
-                    "本地目录: {} (用于初始化本地文件浏览器根路径)",
-                    local_home
-                ),
+                &format!("本地目录: {} (用于初始化本地文件浏览器根路径)", local_home),
             );
         }
 
