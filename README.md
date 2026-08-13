@@ -24,13 +24,11 @@
   <img src="图1.png" alt="主界面预览 - 双面板文件管理 + 服务器监控" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
-<p align="center"><em>图1 · 主界面全貌：顶部 TabBar + 左侧主机列表 + 中部双面板（本地/远程）+ 右上角服务器硬件监控 + 底部状态栏</em></p>
 
 <p align="center">
   <img src="图2.png" alt="集成终端 + 传输队列" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
-<p align="center"><em>图2 · 集成终端：基于 xterm.js 的完整 PTY 终端，多 Tab 切换，自动同步工作目录</em></p>
 
 <p align="center">
   <img src="图3.png" alt="SSH 主机配置" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
@@ -48,19 +46,16 @@
   <img src="图5.png" alt="自定义主题编辑器" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
-<p align="center"><em>图5 · 自定义主题编辑器：可视化调色板 + 背景图设置 + 拖拽定位 + 玻璃透明度调节</em></p>
 
 <p align="center">
   <img src="图6.png" alt="设置面板" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
-<p align="center"><em>图6 · 设置面板：主题切换、终端外观、调试日志、打码敏感信息开关</em></p>
 
 <p align="center">
   <img src="图7.png" alt="自动更新" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
-<p align="center"><em>图7 · 自动更新：多镜像测速、版本对比、后台下载、安装时机选择</em></p>
 
 ---
 
