@@ -98,7 +98,7 @@
 }
 
 .local-breadcrumb-item.is-current {
-  background: var(--selected-gradient, rgba(10, 132, 255, 0.12));
+  background: var(--selected-gradient);
   color: var(--text-on-accent, var(--accent));
   font-weight: 600;
 }
@@ -256,12 +256,12 @@
 }
 
 .local-pane-row.selected {
-  background: color-mix(in srgb, var(--accent, #7aa2f7) 20%, transparent);
-  color: var(--accent, #7aa2f7);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
 }
 
 .local-pane-row.selected:hover {
-  background: color-mix(in srgb, var(--accent, #7aa2f7) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .local-pane-row-icon {
@@ -272,8 +272,8 @@
 }
 
 .local-icon-dir {
-  color: #5ba8ff;
-  filter: drop-shadow(0 0 3px rgba(91, 168, 255, 0.25));
+  color: var(--accent);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 25%, transparent));
 }
 
 .local-icon-file {
@@ -323,7 +323,7 @@
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: local-spin 0.7s linear infinite;
-  box-shadow: 0 0 10px rgba(10, 132, 255, 0.3);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* ---------- 底部统计 ---------- */
@@ -353,7 +353,7 @@
 }
 
 .local-pane-list::-webkit-scrollbar-thumb {
-  background: rgba(120, 120, 128, 0.32);
+  background: color-mix(in srgb, var(--text-tertiary) 32%, transparent);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -361,22 +361,11 @@
 }
 
 .local-pane-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(120, 120, 128, 0.48);
+  background: color-mix(in srgb, var(--text-tertiary) 48%, transparent);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 .local-pane-list::-webkit-scrollbar-track {
   background: transparent;
-}
-
-@media (prefers-color-scheme: dark) {
-  .local-pane-list::-webkit-scrollbar-thumb {
-    background: rgba(142, 142, 147, 0.30);
-    border: 2px solid transparent;
-    background-clip: padding-box;
-  }
-  .local-pane-list::-webkit-scrollbar-thumb:hover {
-    background: rgba(142, 142, 147, 0.48);
-  }
 }

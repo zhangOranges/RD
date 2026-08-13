@@ -9,8 +9,8 @@
 }
 
 .tn-trigger-active {
-  color: var(--accent-blue) !important;
-  background: rgba(10, 132, 255, 0.08) !important;
+  color: var(--accent) !important;
+  background: var(--accent-soft) !important;
 }
 
 .tn-badge {
@@ -21,14 +21,14 @@
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #ff3b30, #ff6a5e);
-  color: #fff;
+  background: var(--danger);
+  color: var(--text-on-accent);
   font-size: 10px;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 1.5px var(--window-bg), 0 2px 6px rgba(255, 59, 48, 0.4);
+  box-shadow: 0 0 0 1.5px var(--bg-app), 0 2px 6px color-mix(in srgb, var(--danger) 40%, transparent);
   pointer-events: none;
   z-index: 2;
 }
@@ -58,7 +58,7 @@
   margin-top: -14px;
   margin-left: -14px;
   border-radius: 50%;
-  border: 1.5px solid rgba(10, 132, 255, 0.45);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent);
   animation: tn-pulse-ring 1.6s ease-out infinite;
   pointer-events: none;
   z-index: 1;
@@ -69,7 +69,7 @@
   100% { transform: scale(1.35); opacity: 0; }
 }
 
-/* ---- 面板容器：悬浮在 toolbar 下方靠右（改为不透明，避免内容看不清） ---- */
+/* ---- 面板容器：悬浮在 toolbar 下方靠右 ---- */
 .tn-panel {
   position: fixed;
   top: 52px;
@@ -79,26 +79,13 @@
   z-index: 999;
   border-radius: 14px;
   overflow: hidden;
-  background: rgba(30, 30, 32, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.45),
-    0 0 0 0.5px rgba(255, 255, 255, 0.08) inset,
-    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  background: var(--bg-toolbar-solid);
+  border: 1px solid var(--divider);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   animation: tn-panel-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.1);
   transform-origin: top right;
-}
-
-@media (prefers-color-scheme: light) {
-  .tn-panel {
-    background: rgba(250, 250, 252, 0.99);
-    border-color: rgba(0, 0, 0, 0.08);
-    box-shadow:
-      0 16px 48px rgba(0, 0, 0, 0.18),
-      0 0 0 0.5px rgba(0, 0, 0, 0.05) inset;
-  }
 }
 
 @keyframes tn-panel-in {
@@ -112,8 +99,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--divider-color);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
+  border-bottom: 1px solid var(--divider);
+  background: linear-gradient(180deg, var(--hover), transparent);
 }
 
 .tn-panel-title {
@@ -122,20 +109,19 @@
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--label-color);
+  color: var(--text-primary);
 }
 
 .tn-panel-title svg {
-  color: var(--accent-blue);
+  color: var(--accent);
 }
 
 .tn-panel-subtitle {
   margin-left: 4px;
   font-size: 11px;
   font-weight: 500;
-  color: var(--secondary-label-color);
-  background: rgba(10, 132, 255, 0.12);
-  color: var(--accent-blue);
+  color: var(--accent);
+  background: var(--accent-soft);
   padding: 2px 7px;
   border-radius: 999px;
 }
@@ -152,7 +138,7 @@
   gap: 4px;
   border: none;
   background: transparent;
-  color: var(--secondary-label-color);
+  color: var(--text-secondary);
   padding: 4px 8px;
   border-radius: 8px;
   font-size: 11px;
@@ -161,8 +147,8 @@
 }
 
 .tn-action-btn:hover {
-  background: rgba(10, 132, 255, 0.08);
-  color: var(--accent-blue);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ---- 面板内容（滚动区） ---- */
@@ -182,13 +168,13 @@
   background: transparent;
 }
 .tn-panel-body::-webkit-scrollbar-thumb {
-  background: rgba(10, 132, 255, 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 .tn-panel-body::-webkit-scrollbar-thumb:hover {
-  background: rgba(10, 132, 255, 0.5);
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
   background-clip: content-box;
 }
 
@@ -200,24 +186,24 @@
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: var(--tertiary-label-color);
+  color: var(--text-tertiary);
 }
 
 .tn-empty-icon {
   opacity: 0.55;
   margin-bottom: 10px;
-  color: var(--accent-blue);
+  color: var(--accent);
 }
 
 .tn-empty-text {
   font-size: 13px;
   font-weight: 500;
-  color: var(--label-color);
+  color: var(--text-primary);
 }
 
 .tn-empty-sub {
   font-size: 11px;
-  color: var(--tertiary-label-color);
+  color: var(--text-tertiary);
   margin-top: 4px;
 }
 
@@ -225,41 +211,24 @@
 .tn-card {
   border-radius: 8px;
   padding: 5px 8px;
-  background: rgba(40, 40, 44, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  background: var(--bg-content);
+  border: 1px solid var(--divider);
+  box-shadow: var(--shadow-xs);
   transition: all 0.18s;
 }
 
-@media (prefers-color-scheme: light) {
-  .tn-card {
-    background: rgba(255, 255, 255, 0.99);
-    border-color: rgba(0, 0, 0, 0.07);
-  }
-}
-
 .tn-card-running {
-  border-color: rgba(10, 132, 255, 0.4);
-  box-shadow: 0 0 0 0.5px rgba(10, 132, 255, 0.15) inset;
-}
-
-@media (prefers-color-scheme: light) {
-  .tn-card-running {
-    background: rgba(245, 250, 255, 0.99);
-  }
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--accent) 15%, transparent) inset;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-content));
 }
 
 .tn-card-completed {
-  border-color: rgba(30, 195, 90, 0.3);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
 }
 .tn-card-error {
-  border-color: rgba(255, 59, 48, 0.35);
-  background: rgba(50, 36, 38, 0.98);
-}
-@media (prefers-color-scheme: light) {
-  .tn-card-error {
-    background: rgba(255, 245, 245, 0.99);
-  }
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 6%, var(--bg-content));
 }
 
 /* 第一行：类型标签 + 文件名 + 右侧操作 */
@@ -284,13 +253,13 @@
 }
 
 .tn-kind-download {
-  background: rgba(10, 132, 255, 0.12);
-  color: var(--accent-blue);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .tn-kind-upload {
-  background: rgba(191, 90, 242, 0.12);
-  color: #bf5af2;
+  background: color-mix(in srgb, var(--accent-3) 12%, transparent);
+  color: var(--accent-3);
 }
 
 .tn-card-name {
@@ -298,7 +267,7 @@
   min-width: 0;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--label-color);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -323,28 +292,28 @@
 }
 
 .tn-status-running {
-  background: rgba(10, 132, 255, 0.1);
-  color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
 }
 .tn-status-running svg {
   animation: spin 0.9s linear infinite;
 }
 
 .tn-status-completed {
-  background: rgba(30, 195, 90, 0.1);
-  color: #34c759;
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
 }
 .tn-status-error {
-  background: rgba(255, 59, 48, 0.1);
-  color: #ff3b30;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
 }
 .tn-status-canceled {
-  background: rgba(142, 142, 147, 0.1);
-  color: var(--secondary-label-color);
+  background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
+  color: var(--text-secondary);
 }
 .tn-status-queued {
-  background: rgba(255, 159, 10, 0.1);
-  color: #ff9f0a;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
 }
 
 @keyframes spin {
@@ -355,7 +324,7 @@
 .tn-card-error-inline {
   display: inline-flex;
   align-items: center;
-  color: #ff453a;
+  color: var(--danger);
   cursor: help;
 }
 
@@ -369,30 +338,30 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--secondary-label-color);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s;
   padding: 0;
   flex-shrink: 0;
 }
 .tn-icon-btn:hover {
-  background: rgba(10, 132, 255, 0.12);
-  color: var(--accent-blue);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* 取消按钮：hover 变红 */
 .tn-icon-btn-cancel:hover {
-  background: rgba(255, 59, 48, 0.15);
-  color: #ff3b30;
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
 }
 
 .tn-card-canceled-inline {
-  color: var(--secondary-label-color);
+  color: var(--text-secondary);
 }
 
 /* 已取消卡片样式 */
 .tn-card-canceled {
-  border-color: rgba(142, 142, 147, 0.35);
+  border-color: color-mix(in srgb, var(--text-tertiary) 35%, transparent);
   opacity: 0.85;
 }
 
@@ -410,8 +379,8 @@
   height: 4px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(120, 120, 128, 0.35);
-  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08) inset;
+  background: color-mix(in srgb, var(--text-tertiary) 35%, transparent);
+  box-shadow: 0 0 0 0.5px var(--divider-soft) inset;
 }
 
 .tn-bar-fill {
@@ -421,7 +390,7 @@
   height: 100%;
   width: 0%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent-blue, #0a84ff), #64d2ff);
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
   transition: width 0.25s linear;
   overflow: hidden;
 }
@@ -433,7 +402,7 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.35) 50%,
+    color-mix(in srgb, var(--text-on-accent) 35%, transparent) 50%,
     transparent 100%
   );
   background-size: 200% 100%;
@@ -453,13 +422,13 @@
 }
 
 .tn-bar-fill-completed {
-  background: linear-gradient(90deg, #30d158, #34c759);
+  background: linear-gradient(90deg, var(--success), var(--success));
 }
 .tn-bar-fill-error {
-  background: linear-gradient(90deg, #ff453a, #ff6961);
+  background: linear-gradient(90deg, var(--danger), var(--danger));
 }
 .tn-bar-fill-canceled {
-  background: rgba(142, 142, 147, 0.5);
+  background: color-mix(in srgb, var(--text-tertiary) 50%, transparent);
 }
 
 @keyframes tn-bar-shimmer {
@@ -473,7 +442,7 @@
   font-weight: 600;
   min-width: 28px;
   text-align: right;
-  color: var(--secondary-label-color);
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -484,7 +453,7 @@
   align-items: center;
   gap: 8px;
   font-size: 9.5px;
-  color: var(--secondary-label-color);
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   white-space: nowrap;
@@ -497,5 +466,5 @@
 }
 
 .tn-meta-speed {
-  color: var(--accent-blue);
+  color: var(--accent);
 }

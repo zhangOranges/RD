@@ -377,7 +377,7 @@
   height: 16px;
   border: none;
   background: transparent;
-  color: #ff5f57;
+  color: var(--danger);
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
@@ -386,8 +386,8 @@
 }
 
 .terminal-tab-close:hover {
-  background: rgba(255, 95, 87, 0.2);
-  color: #ff5f57;
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  color: var(--danger);
   opacity: 1;
 }
 

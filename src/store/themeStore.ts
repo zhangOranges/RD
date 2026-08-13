@@ -5,9 +5,10 @@ import { create } from 'zustand';
  * - light：浅色（macOS Sonoma 风）
  * - dark：标准暗色
  * - tech-dark：黑夜科技（应用默认主题，青蓝荧光 + 紫色辅助 + 深近黑底）
+ * - eye-care-green：护眼绿（经典绿豆沙底色，降低长时间阅读疲劳）
  * - system：跟随系统 prefers-color-scheme
  */
-export type ThemeId = 'light' | 'dark' | 'tech-dark' | 'system';
+export type ThemeId = 'light' | 'dark' | 'tech-dark' | 'eye-care-green' | 'system';
 
 export interface ThemeOption {
   id: ThemeId;
@@ -20,6 +21,7 @@ export interface ThemeOption {
 export const THEME_OPTIONS: ThemeOption[] = [
   { id: 'tech-dark', name: '黑夜科技', desc: '青蓝荧光 + 紫色辅助 + 深近黑底（推荐）', swatch: '#00D4FF' },
   { id: 'dark', name: '标准暗色', desc: 'macOS 暗色模式风格', swatch: '#0A84FF' },
+  { id: 'eye-care-green', name: '护眼绿', desc: '经典绿豆沙底色，缓解长时间阅读疲劳', swatch: '#2E8B57' },
   { id: 'light', name: '浅色', desc: 'macOS Sonoma 浅色风格', swatch: '#5AC8FA' },
   { id: 'system', name: '跟随系统', desc: '根据系统偏好自动切换浅色/暗色', swatch: '#8E8E93' },
 ];
@@ -28,7 +30,7 @@ const STORAGE_KEY = 'app_theme';
 const DEFAULT_THEME: ThemeId = 'tech-dark';
 
 /** 实际生效的 data-theme 值：system 会被解析为 light/dark */
-function resolveDataTheme(theme: ThemeId): 'light' | 'dark' | 'tech-dark' {
+function resolveDataTheme(theme: ThemeId): 'light' | 'dark' | 'tech-dark' | 'eye-care-green' {
   if (theme === 'system') {
     if (typeof window !== 'undefined' && window.matchMedia) {
       return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -51,7 +53,7 @@ function initTheme(): ThemeId {
   let saved: ThemeId = DEFAULT_THEME;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === 'light' || raw === 'dark' || raw === 'tech-dark' || raw === 'system') {
+    if (raw === 'light' || raw === 'dark' || raw === 'tech-dark' || raw === 'eye-care-green' || raw === 'system') {
       saved = raw;
     }
   } catch {
