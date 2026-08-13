@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, PlugZap, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useHostStore } from '../store/hostStore';
+import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import type {
   HostConfig,
@@ -67,6 +68,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
   const isEdit = !!host;
   const addHost = useHostStore((s) => s.addHost);
   const updateHost = useHostStore((s) => s.updateHost);
+  const maskMode = useUIStore((s) => s.maskMode);
   const pushToast = useToastStore((s) => s.push);
 
   const [form, setForm] = useState<HostFormValues>(() => {
@@ -258,7 +260,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               </label>
               <input
                 id="f-host"
-                className="form-input"
+                className={`form-input ${maskMode ? 'mask-sensitive' : ''}`}
                 type="text"
                 value={form.host}
                 onChange={(e) => update('host', e.target.value)}
@@ -271,7 +273,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               </label>
               <input
                 id="f-port"
-                className="form-input"
+                className={`form-input ${maskMode ? 'mask-sensitive' : ''}`}
                 type="number"
                 min={1}
                 max={65535}
@@ -287,7 +289,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
             </label>
             <input
               id="f-username"
-              className="form-input"
+              className={`form-input ${maskMode ? 'mask-sensitive' : ''}`}
               type="text"
               value={form.username}
               onChange={(e) => update('username', e.target.value)}
@@ -347,7 +349,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               </label>
               <input
                 id="f-password"
-                className="form-input"
+                className={`form-input ${maskMode ? 'mask-sensitive' : ''}`}
                 type="password"
                 value={form.password}
                 onChange={(e) => update('password', e.target.value)}
@@ -363,7 +365,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               </label>
               <textarea
                 id="f-key"
-                className="form-textarea"
+                className={`form-textarea ${maskMode ? 'mask-sensitive' : ''}`}
                 rows={6}
                 value={form.private_key}
                 onChange={(e) => update('private_key', e.target.value)}

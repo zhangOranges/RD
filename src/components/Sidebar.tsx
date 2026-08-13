@@ -54,11 +54,12 @@ export function Sidebar() {
   const toggleCategory = useHostStore((s) => s.toggleCategory);
   const pushToast = useToastStore((s) => s.push);
 
-  // UI store：搜索框、工具菜单
+  // UI store：搜索框、工具菜单、打码模式
   const sidebarSearch = useUIStore((s) => s.sidebarSearch);
   const setSidebarSearch = useUIStore((s) => s.setSidebarSearch);
   const activeTool = useUIStore((s) => s.activeTool);
   const setActiveTool = useUIStore((s) => s.setActiveTool);
+  const maskMode = useUIStore((s) => s.maskMode);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<HostConfig | null>(null);
@@ -680,7 +681,7 @@ export function Sidebar() {
                                 {host.name}
                               </div>
                               <div
-                                className="host-addr"
+                                className={`host-addr ${maskMode ? 'mask-sensitive' : ''}`}
                                 title={`${host.host}:${host.port}`}
                               >
                                 {host.host}:{host.port}

@@ -21,12 +21,46 @@
 ## 界面预览
 
 <p align="center">
-  <img src="图1.png" alt="主界面预览 - 双面板文件管理 + 服务器监控" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0;" />
+  <img src="图1.png" alt="主界面预览 - 双面板文件管理 + 服务器监控" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
+<p align="center"><em>图1 · 主界面全貌：顶部 TabBar + 左侧主机列表 + 中部双面板（本地/远程）+ 右上角服务器硬件监控 + 底部状态栏</em></p>
+
 <p align="center">
-  <img src="图2.png" alt="功能界面预览 - 终端集成 + 传输队列" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0;" />
+  <img src="图2.png" alt="集成终端 + 传输队列" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
+
+<p align="center"><em>图2 · 集成终端：基于 xterm.js 的完整 PTY 终端，多 Tab 切换，自动同步工作目录</em></p>
+
+<p align="center">
+  <img src="图3.png" alt="SSH 主机配置" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
+</p>
+
+<p align="center"><em>图3 · SSH 主机配置：密码/私钥认证、分类管理、端口自定义</em></p>
+
+<p align="center">
+  <img src="图4.png" alt="文件传输" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
+</p>
+
+<p align="center"><em>图4 · 文件传输：256KB 分块流式上传，实时进度/速率，文件夹压缩传输</em></p>
+
+<p align="center">
+  <img src="图5.png" alt="自定义主题编辑器" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
+</p>
+
+<p align="center"><em>图5 · 自定义主题编辑器：可视化调色板 + 背景图设置 + 拖拽定位 + 玻璃透明度调节</em></p>
+
+<p align="center">
+  <img src="图6.png" alt="设置面板" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
+</p>
+
+<p align="center"><em>图6 · 设置面板：主题切换、终端外观、调试日志、打码敏感信息开关</em></p>
+
+<p align="center">
+  <img src="图7.png" alt="自动更新" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
+</p>
+
+<p align="center"><em>图7 · 自动更新：多镜像测速、版本对比、后台下载、安装时机选择</em></p>
 
 ---
 
@@ -106,10 +140,14 @@
   - 发起上传/下载时自动切换到对应 Tab
 
 ### 主题系统
-- 4 套主题：**tech-dark（黑夜科技，默认）/ dark / light / system**
-- 通过 `data-theme` 属性切换，立即生效
+- 5 套预设主题：**tech-dark（黑夜科技，默认）/ dark / light / eye-care-green（护眼绿）/ system（跟随系统）**
+- **自定义主题编辑器**：基于任意预设主题创建自定义主题，可视化调整全部调色板字段（背景/文字/终端配色/分割线/阴影/圆角等），改动即时注入预览，支持导入/导出/删除
+- **自定义背景图**：支持上传本地图片作为应用背景，提供「遮罩透明度」与「面板玻璃透明度」两组滑块独立调节，平衡背景图可见性与文字可读性
+- **背景图拖拽定位**：在主题编辑器中可直接拖拽预览图调整背景图在窗口中的显示位置，一键重置居中
+- 通过 `data-theme` 属性切换，立即生效；自定义主题通过 `adoptedStyleSheets` 运行时注入，优先级高于预设
 - 用户选择持久化到 `localStorage`，重启沿用
-- 启动时主题在 React 渲染前即生效（`main.tsx` 提前注入），无主题闪烁
+- 启动时主题在首次绘制前即生效（`index.html` 内联脚本提前注入），无主题闪烁
+- 背景图上传时自动压缩，保存前预检 `localStorage` 容量并在超限时提示
 
 ### 自定义窗口
 - 无边框窗口，自定义 macOS Sonoma 风格标题栏
@@ -155,13 +193,22 @@
 
 ---
 
-## 调试日志
+## 调试与隐私
 
+### 调试日志
 - 在「设置 → 调试」中可切换**详细日志**开关
 - 开启后，应用会将 SSH 连接、SFTP 操作、PTY 会话、存储读写等关键路径的 debug 级别日志写入本地日志文件
-- 关闭详细日志时仅记录错误级别
+- 关闭详细日志时仅记录警告和错误级别
 - 「打开日志文件夹」一键跳转到日志目录（Fire-and-forget，无弹窗打扰）
+- 「清空日志」一键清理历史日志内容
 - 日志文件用于排查问题，建议出现异常时再开启
+
+### 打码敏感信息
+- 在「设置 → 调试」中可切换**打码敏感信息**开关
+- 开启后对界面中的 IP 地址、端口、用户名、密码、私钥、文件路径等敏感信息进行模糊打码，便于截图分享
+- 打码覆盖范围：右上角服务器信息、左侧主机列表、顶部标签页地址、底部状态栏、地址栏路径、主机编辑对话框
+- 输入框打码时聚焦自动恢复可见以便编辑，失焦后恢复打码
+- 开关切换即时生效，无需重启
 
 ---
 
@@ -312,12 +359,13 @@ rd/
 │   │   ├── QuickActions.tsx      # 右上角快捷操作面板
 │   │   ├── RightPanel.tsx        # 右侧功能面板容器
 │   │   ├── ServerInfo.tsx        # 服务器硬件信息（CPU/内存/磁盘/负载）
-│   │   ├── SettingsDialog.tsx    # 应用设置 + 主题选择 + 更新 + 调试
+│   │   ├── SettingsDialog.tsx    # 应用设置 + 主题 + 更新 + 调试 + 打码开关
 │   │   ├── Sidebar.tsx           # 主机列表 + 分类管理
 │   │   ├── StatusBar.tsx         # 底部状态栏
 │   │   ├── TabBar.tsx            # 顶部全局标签栏 + 窗口控制
 │   │   ├── TerminalPanel.tsx     # xterm.js 终端 + PTY
 │   │   ├── TextEditorDialog.tsx  # 文件查看器/编辑器
+│   │   ├── ThemeEditor.tsx       # 自定义主题编辑器（调色板 + 背景图）
 │   │   ├── TransferQueue.tsx     # 传输队列（右侧内嵌）
 │   │   ├── TransferNotification.tsx  # 传输通知徽标
 │   │   └── Toast.tsx             # Toast 通知系统
@@ -327,7 +375,9 @@ rd/
 │   │   ├── localFileStore.ts     # 本地文件操作 + 按 hostId 路径记忆
 │   │   ├── themeStore.ts         # 主题状态 + localStorage 持久化
 │   │   ├── transferStore.ts      # 传输任务跟踪 + 进度事件
-│   │   └── uiStore.ts            # UI 状态（面板尺寸、终端可见性按 hostId）
+│   │   └── uiStore.ts            # UI 状态（面板尺寸、终端可见性按 hostId、打码模式）
+│   ├── theme/
+│   │   └── palette.ts            # 主题调色板数据模型 + 预设主题 + 自定义主题继承
 │   ├── utils/
 │   │   └── uploadFromLocal.ts    # 本地→远程上传（分块读取、压缩上传、覆盖策略）
 │   ├── styles/

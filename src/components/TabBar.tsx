@@ -39,6 +39,7 @@ export function TabBar() {
   const toggleTerminal = useUIStore((s) => s.toggleTerminal);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
   const terminalVisibleMap = useUIStore((s) => s.terminalVisible);
+  const maskMode = useUIStore((s) => s.maskMode);
 
   const pushToast = useToastStore((s) => s.push);
 
@@ -292,7 +293,7 @@ export function TabBar() {
                 aria-hidden="true"
               />
               <span className="tabbar-tab-name">{host.name}</span>
-              <span className="tabbar-tab-addr">
+              <span className={`tabbar-tab-addr ${maskMode ? 'mask-sensitive' : ''}`}>
                 {host.username}@{host.host}
               </span>
               <button

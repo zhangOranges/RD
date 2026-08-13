@@ -390,3 +390,28 @@
 .theme-menu-item:hover .theme-menu-check {
   color: var(--text-on-accent);
 }
+
+/* ---------- 打码模式遮罩：让敏感文本看起来像打了马赛克 ---------- */
+.mask-sensitive {
+  filter: blur(6px);
+  -webkit-filter: blur(6px);
+  transition: filter 0.15s ease;
+  user-select: none;
+  pointer-events: none;
+}
+/* 输入框/文本域需要保留点击/编辑，仅视觉模糊（点击后聚焦、blur 保持） */
+input.mask-sensitive,
+textarea.mask-sensitive {
+  pointer-events: auto;
+  filter: blur(5px);
+  -webkit-filter: blur(5px);
+  color: transparent;
+  caret-color: var(--text-primary);
+}
+/* 聚焦时短暂露出，便于编辑；失焦回到打码（打码目的是截图时不可见，编辑时可看） */
+input.mask-sensitive:focus,
+textarea.mask-sensitive:focus {
+  filter: blur(0);
+  -webkit-filter: blur(0);
+  color: var(--text-primary);
+}

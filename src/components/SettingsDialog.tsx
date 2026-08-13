@@ -518,6 +518,8 @@ function TerminalSettingsGroup() {
 export function SettingsDialog() {
   const settingsVisible = useUIStore((s) => s.settingsVisible);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
+  const maskMode = useUIStore((s) => s.maskMode);
+  const setMaskMode = useUIStore((s) => s.setMaskMode);
   const pushToast = useToastStore((s) => s.push);
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
@@ -1106,6 +1108,24 @@ export function SettingsDialog() {
                     <span className="form-switch-label">
                       {loading ? '加载中…' : saving ? '保存中…' : debugLogging ? '开启' : '关闭'}
                     </span>
+                  </label>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <div className="settings-row-label">打码敏感信息</div>
+                    <div className="settings-row-desc">
+                      开启后对界面中的 IP、端口、用户名、密码、路径等敏感信息进行模糊打码，便于截图分享。关闭后恢复显示真实信息。
+                    </div>
+                  </div>
+                  <label className="form-switch">
+                    <input
+                      type="checkbox"
+                      checked={maskMode}
+                      onChange={(e) => setMaskMode(e.target.checked)}
+                    />
+                    <span className="form-switch-track" aria-hidden="true" />
+                    <span className="form-switch-label">{maskMode ? '开启' : '关闭'}</span>
                   </label>
                 </div>
 

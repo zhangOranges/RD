@@ -20,6 +20,7 @@ export function AddressBar({ hostId, currentPath }: AddressBarProps) {
   const navigate = useFileStore((s) => s.navigate);
   const resolvePath = useFileStore((s) => s.resolvePath);
   const setTerminalVisible = useUIStore((s) => s.setTerminalVisible);
+  const maskMode = useUIStore((s) => s.maskMode);
   const pushToast = useToastStore((s) => s.push);
 
   const [editing, setEditing] = useState(false);
@@ -207,13 +208,16 @@ export function AddressBar({ hostId, currentPath }: AddressBarProps) {
       ) : hasError ? (
         <>
           <AlertCircle size={14} style={{ color: 'var(--danger)', flex: '0 0 auto' }} />
-          <span className="addressbar-input" style={{ color: 'var(--danger)' }}>
+          <span
+            className={`addressbar-input ${maskMode ? 'mask-sensitive' : ''}`}
+            style={{ color: 'var(--danger)' }}
+          >
             {draft}
           </span>
         </>
       ) : (
         <>
-          <div className="addressbar-crumbs">
+          <div className={`addressbar-crumbs ${maskMode ? 'mask-sensitive' : ''}`}>
             <button
               type="button"
               className="crumb crumb-root crumb-visited"

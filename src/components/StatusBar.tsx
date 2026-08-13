@@ -417,6 +417,7 @@ export function StatusBar() {
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const connectionStates = useHostStore((s) => s.connectionStates);
   const currentPath = useUIStore((s) => s.currentPath);
+  const maskMode = useUIStore((s) => s.maskMode);
   const tasks = useTransferStore((s) => s.tasks);
 
   const selectedHost = hosts.find((h) => h.id === selectedHostId);
@@ -490,13 +491,21 @@ export function StatusBar() {
         </span>
         {selectedHost && (
           <span className="statusbar-item">
-            · {selectedHost.name}（{selectedHost.host}:{selectedHost.port}）
+            · {selectedHost.name}（
+            <span className={maskMode ? 'mask-sensitive' : ''}>
+              {selectedHost.host}:{selectedHost.port}
+            </span>
+            ）
           </span>
         )}
       </div>
       <div className="statusbar-section">
         <HistoryButton />
-        {currentPath && <span className="statusbar-item">{currentPath}</span>}
+        {currentPath && (
+          <span className={`statusbar-item ${maskMode ? 'mask-sensitive' : ''}`}>
+            {currentPath}
+          </span>
+        )}
         <span className="statusbar-item">{stateText}</span>
         <span className="statusbar-item statusbar-speed">
           <ArrowUp size={10} /> 上传: {formatSpeed(uploadSpeed)}

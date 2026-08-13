@@ -90,6 +90,8 @@ interface UIState {
   terminalTabs: Record<string, string[]>;
   // 每主机当前活动的终端标签 id
   activeTerminalTab: Record<string, string>;
+  // 打码模式：开启后对敏感信息（IP、端口、用户名、密码等）进行模糊打码，便于截图
+  maskMode: boolean;
 
   setSidebarWidth: (w: number) => void;
   setSidebarResizing: (v: boolean) => void;
@@ -118,6 +120,10 @@ interface UIState {
   setActiveTerminalTab: (hostId: string, tabId: string) => void;
   // 清除某主机的终端标签持久化数据（删除主机时调用）
   clearTerminalTabsForHost: (hostId: string) => void;
+  // 切换打码模式
+  toggleMaskMode: () => void;
+  // 显式设置打码模式
+  setMaskMode: (v: boolean) => void;
 }
 
 const MIN_SIDEBAR = 160;
@@ -145,6 +151,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   sidebarSearch: '',
   terminalTabs: _persistedTabs.tabs,
   activeTerminalTab: _persistedTabs.active,
+  maskMode: false,
 
   setSidebarWidth: (w) =>
     set({
@@ -244,6 +251,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       return { terminalTabs: nextTabs, activeTerminalTab: nextActive };
     });
   },
+  toggleMaskMode: () => set((s) => ({ maskMode: !s.maskMode })),
+  setMaskMode: (v) => set({ maskMode: v }),
 }));
 
 export const SIDEBAR_LIMITS = { min: MIN_SIDEBAR, max: MAX_SIDEBAR };

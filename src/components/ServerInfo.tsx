@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useHostStore } from '../store/hostStore';
+import { useUIStore } from '../store/uiStore';
 import { formatDuration } from '../store/transferStore';
 
 /** Rust 端 ServerStats（camelCase） */
@@ -50,6 +51,7 @@ export function ServerInfo() {
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const hosts = useHostStore((s) => s.hosts);
   const connectionStates = useHostStore((s) => s.connectionStates);
+  const maskMode = useUIStore((s) => s.maskMode);
 
   const host = selectedHostId ? hosts.find((h) => h.id === selectedHostId) : undefined;
   const connState = selectedHostId ? connectionStates[selectedHostId] : undefined;
@@ -129,19 +131,27 @@ export function ServerInfo() {
       <div className="rp-info-grid">
         <div className="rp-info-item">
           <span className="rp-info-label">主机</span>
-          <span className="rp-info-value" title={`${host.host}:${host.port}`}>
+          <span
+            className={`rp-info-value ${maskMode ? 'mask-sensitive' : ''}`}
+            title={`${host.host}:${host.port}`}
+          >
             {host.host}:{host.port}
           </span>
         </div>
         <div className="rp-info-item">
           <span className="rp-info-label">用户</span>
-          <span className="rp-info-value" title={host.username}>
+          <span
+            className={`rp-info-value ${maskMode ? 'mask-sensitive' : ''}`}
+            title={host.username}
+          >
             {host.username}
           </span>
         </div>
         <div className="rp-info-item">
           <span className="rp-info-label">端口</span>
-          <span className="rp-info-value">{host.port}</span>
+          <span className={`rp-info-value ${maskMode ? 'mask-sensitive' : ''}`}>
+            {host.port}
+          </span>
         </div>
         <div className="rp-info-item">
           <span className="rp-info-label">协议</span>
