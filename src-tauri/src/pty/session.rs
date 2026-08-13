@@ -120,11 +120,12 @@ impl PtySession {
         //   2. 环境变量 / 函数定义    — 在 history 关闭状态下执行，不进 history
         //   3. history -c             — 清空内存 history（含步骤 1 的 set +o history）
         //   4. set -o history         — 恢复写入（自己不被记，因为此刻还关着）
-        //   5. export PROMPT_COMMAND=__rd_report  — 最后才挂 HOOK，此时 history 已空，
-        //      接下来的 clear 执行完触发的第一次 __rd_report 读 history 1 返回空。
-        //   6. clear                  — 清屏
-        // 所有注入命令都不会被第一次 HOOK 读到。__rd_report 只在用户输入的第 1 条
-        // 命令执行完后才第一次真正上报命令。
+        //   5. __rd_base_n=$(...)     — 记录当前 history 最大编号作为基准，
+        //      之后 __rd_report 只上报编号 > __rd_base_n 的新命令，
+        //      彻底避免 .bashrc/.bash_profile 里的启动命令（如 pm2 -h |grep logs*）
+        //      因 history -c 未清干净或延迟写入而漏网被上报。
+        //   6. export PROMPT_COMMAND=__rd_report
+        //   7. clear                  — 清屏
         let init = r#"set +o history
 export HISTCONTROL="${HISTCONTROL:+$HISTCONTROL:}ignorespace"
 __rd_report() {
@@ -133,13 +134,15 @@ __rd_report() {
   _n=$(printf '%s\n' "$_raw" | sed -n 's/^[ ]*\([0-9][0-9]*\).*/\1/p')
   _cmd=$(printf '%s\n' "$_raw" | sed 's/^[ ]*[0-9][0-9]*[ ]*//')
   printf "\033]7777;cwd;%s\007" "$PWD"
-  if [ -n "$_n" ] && [ -n "$_cmd" ] && [ "$_n" != "${__rd_last_n:-}" ]; then
+  if [ -n "$_n" ] && [ -n "$_cmd" ] && [ "$_n" != "${__rd_last_n:-}" ] && [ "${_n:-0}" -gt "${__rd_base_n:-0}" ]; then
     printf "\033]7777;cmd;%s\007" "$_cmd"
     __rd_last_n="$_n"
   fi
 }
 history -c
 set -o history
+ __rd_base_n=$(printf '%s\n' "$(HISTTIMEFORMAT= history 1)" | sed -n 's/^[ ]*\([0-9][0-9]*\).*/\1/p')
+ [ -z "$__rd_base_n" ] && __rd_base_n=0
  export PROMPT_COMMAND=__rd_report
  clear
 "#;
