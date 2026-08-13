@@ -57,6 +57,11 @@ html[data-theme="eye-care-green"] body {
   --bg-terminal: #1a1b26;
   --bg-input: #ffffff;
 
+  /* ===== 背景图相关：空串表示无图；有图时启用层叠玻璃效果 ===== */
+  --bg-image: ;                  /* data:image/...;base64,... 或空 */
+  --bg-overlay-alpha: 0.85;      /* 整体遮罩不透明度：越大越看不清底图，读屏越舒服 */
+  --bg-glass-alpha: 1.0;         /* 面板透明度：1.0 = 完全不透明，< 1 开始透出底图（玻璃拟态） */
+
   /* 分割线与边框 —— 更柔和、带高光感 */
   --divider: rgba(0, 0, 0, 0.08);
   --divider-soft: rgba(0, 0, 0, 0.045);
@@ -2375,6 +2380,12 @@ html[data-theme="eye-care-green"] body {
   max-width: calc(100vw - 48px);
 }
 
+/* 编辑器模式下加宽弹窗，给双栏布局足够空间 */
+.dialog-settings-wide {
+  width: 1040px;
+  max-width: calc(100vw - 32px);
+}
+
 .settings-layout {
   display: flex;
   flex: 1 1 auto;
@@ -2573,6 +2584,606 @@ html[data-theme="eye-care-green"] body {
   top: 8px;
   right: 8px;
   color: var(--accent);
+}
+
+/* ---------- 自定义主题卡片操作 ---------- */
+.theme-card.is-custom {
+  position: relative;
+}
+
+.theme-card-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  border-radius: var(--radius-control);
+}
+
+.theme-card-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.theme-card-actions {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.theme-card.is-custom:hover .theme-card-actions {
+  opacity: 1;
+}
+
+.theme-card-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--divider);
+  background: color-mix(in srgb, var(--bg-content) 88%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+}
+
+.theme-card-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.theme-card-action-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* ---------- 新建主题按钮 / 菜单 ---------- */
+.theme-new-bar {
+  padding: 4px 0 8px;
+}
+
+.theme-new-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.theme-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius-control);
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.theme-new-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-style: solid;
+}
+
+.theme-new-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: var(--radius-control);
+  background: var(--bg-content);
+  border: 1px solid var(--divider);
+  box-shadow: var(--shadow-menu);
+  z-index: 100;
+  backdrop-filter: var(--blur-strong);
+  -webkit-backdrop-filter: var(--blur-strong);
+}
+
+.theme-new-menu-title {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 4px 8px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.theme-new-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 5px;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.theme-new-menu-item:hover {
+  background: var(--hover);
+}
+
+.theme-new-menu-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- 主题编辑器 ---------- */
+.theme-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.theme-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--divider);
+  margin-bottom: 14px;
+}
+
+.theme-editor-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.theme-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-editor-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.theme-editor-apply:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.theme-editor-apply.is-active {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.theme-editor-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.theme-editor-close:hover {
+  background: var(--hover);
+  color: var(--danger);
+}
+
+.theme-editor-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.theme-editor-body {
+  display: flex;
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 编辑区 */
+.theme-editor-edit {
+  flex: 1 1 56%;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+/* 预览区 */
+.theme-editor-preview {
+  flex: 0 0 40%;
+  min-width: 300px;
+  max-width: 420px;
+  padding: 14px;
+  border-radius: var(--radius-large);
+  border: 1px solid var(--divider);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---------- 元信息 ---------- */
+.te-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background: var(--bg-input);
+  border: 1px solid var(--divider);
+  margin-bottom: 14px;
+}
+
+.te-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.te-meta-label {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  width: 40px;
+  flex-shrink: 0;
+}
+
+.te-name-input {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--divider);
+  background: var(--bg-content);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.te-name-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.te-base-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ---------- 分组 ---------- */
+.te-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.te-group {
+  border-radius: var(--radius-control);
+  border: 1px solid var(--divider);
+  overflow: hidden;
+}
+
+.te-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.te-group-header:hover {
+  background: var(--hover);
+}
+
+.te-group-title {
+  flex-shrink: 0;
+}
+
+.te-group-desc {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  margin-left: 6px;
+}
+
+.te-group-fields {
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ---------- 颜色字段 ---------- */
+.te-field {
+  padding: 8px 10px;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.te-field:hover {
+  background: var(--hover);
+}
+
+.te-field.is-overridden .te-field-label {
+  color: var(--accent);
+}
+
+.te-field-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.te-field-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.te-field-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.te-field-inputs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.te-color-picker {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.te-color-picker::-webkit-color-swatch-wrapper {
+  padding: 3px;
+}
+
+.te-color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+.te-color-picker:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.te-hex-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--divider);
+  background: var(--bg-content);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--finder-font-mono);
+}
+
+.te-hex-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.te-field-reset {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--divider);
+  background: var(--bg-content);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+
+.te-field-reset:hover {
+  background: var(--hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.te-field-desc {
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* ---------- 预览面板 ---------- */
+.te-preview-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.te-preview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.te-preview-label {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.te-preview-ui {
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.te-preview-window {
+  border-radius: 6px;
+  border: 1px solid;
+  overflow: hidden;
+  font-size: 11.5px;
+}
+
+.te-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid;
+  font-size: 10.5px;
+}
+
+.te-preview-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.te-preview-content {
+  padding: 6px 0;
+}
+
+.te-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 10.5px;
+}
+
+.te-preview-selected {
+  font-weight: 600;
+}
+
+.te-preview-statusbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-top: 1px solid;
+  font-size: 9.5px;
+}
+
+.te-preview-terminal {
+  border-radius: 6px;
+  border: 1px solid;
+  overflow: hidden;
+  font-family: var(--finder-font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+}
+
+.te-preview-term-titlebar {
+  display: flex;
+  gap: 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid;
+  font-size: 9.5px;
+}
+
+.te-preview-term-body {
+  padding: 8px 10px;
+}
+
+/* ---------- ANSI 色板 ---------- */
+.te-preview-ansi {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+}
+
+.te-ansi-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.te-ansi-swatch {
+  width: 100%;
+  height: 22px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.2);
+}
+
+.te-ansi-label {
+  font-size: 9px;
+  text-align: center;
 }
 
 /* ---------- 右侧功能面板 ---------- */
@@ -4065,4 +4676,349 @@ select.form-input-compact {
 .update-footer-installing {
   color: var(--accent-3);
   justify-content: center;
+}
+
+/* ==========================================================================
+ * 自定义背景图 & 玻璃拟态层（经验 id:731064 + 495218 + 1089303 + 1284067）
+ *
+ *   背景图直接通过 document.documentElement.style.backgroundImage 设置在 html 元素上
+ *   （内联 style 优先级最高，不受 CSS 变量层叠问题影响）。
+ *
+ *   层叠结构：
+ *     html background-image  —— 底图（内联 style 设置，优先级最高）
+ *     html::after (z-index:1) —— 遮罩（color-mix(bg-app × overlay-alpha, transparent)）
+ *     body/#root (z-index:2)  —— 内容层 + 各面板（面板底色已在 palette 注入时乘 glass-alpha）
+ *
+ *   关键点：有底图时，html/body/app-root 的 CSS 画布背景必须变 transparent，
+ *   否则会盖住 html 的 background-image。
+ * ========================================================================== */
+
+/* 给 html 建立可靠的层叠上下文 */
+html {
+  position: relative;
+  isolation: isolate;
+}
+body,
+#root {
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
+}
+
+/* ---- 遮罩层（html::after）—— 叠在 html background 之上、内容下 ----------
+ *
+ *  ⚠️ 之前的实现：遮罩 = bgApp 颜色 × overlay-alpha 直接盖层
+ *  问题：深色主题（tech-dark: bgApp=#050810，黑夜科技的更深）的遮罩层几乎是纯黑，
+ *        一旦 overlay>0.5 就把暖色/亮色图的颜色、细节完全吃没了，只剩一片黑。
+ *
+ *  新方案（经验 1310006 + 1089303）：双层叠加，各司其职 ——
+ *    ① 亮度调节层（linear-gradient 叠加纯黑/纯白线性半透明，按 --overlay-brightness-mode 选方向）：
+ *       负责"让文字有对比度"，但不改变原图色相。
+ *       - 深色主题（bg 很暗）→ 白字需要压暗图 → 黑 overlay（保证文字白字可读）
+ *       - 浅色主题（bg 很亮）→ 黑字需要提亮+柔光 → 极浅灰 overlay
+ *       这一层的强度由 bgOverlayAlpha 的 65% 承担。
+ *    ② 主题染色层（bgApp 颜色 × 低百分比 × bgOverlayAlpha）：
+ *       只负责给整体轻微染上主题氛围，避免原图和主题完全脱节（"暖色图在冷色科技风里太跳"）。
+ *       强度固定 25% × overlay-alpha，保证染色柔和、原色仍占主导。
+ *
+ *  另外，用 CSS 变量 --overlay-brightness-mode 表达"该主题下用黑 overlay 还是白 overlay"，
+ *  由 palette 注入层/预设主题 CSS（:root[data-theme]）设置 —— 深色主题 'dark'（盖黑），
+ *  浅色主题 'light'（柔光白，让面板边缘不会显得突兀）。
+ */
+html::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  /* 单层遮罩：用 --overlay-base 做底色，--bg-overlay-alpha 控制 opacity。
+   * 避免 color-mix() 内嵌 var() 百分比在 WebView 中不生效的问题。 */
+  background: var(--overlay-base, #000000);
+  opacity: var(--bg-overlay-alpha, 0.85);
+  transition: opacity 0.2s ease;
+}
+/* 遮罩基色按主题区分（定义在 :root[data-theme] 上供 ::after 继承） */
+:root[data-theme="light"],
+:root[data-theme="eye-care-green"] {
+  --overlay-base: rgba(242, 242, 247, 0.9);
+}
+:root[data-theme="dark"] {
+  --overlay-base: #000000;
+}
+/* 黑夜科技主题：深暖灰，压暗保白字可读但不抹掉暖色通道 */
+:root[data-theme="tech-dark"] {
+  --overlay-base: #12100E;
+}
+/* 没有底图时遮罩透明 */
+html:not([data-bg-image="1"])::after {
+  background: transparent;
+}
+
+/* ---- 有底图时：把硬编码画布底色去掉（否则盖住 html background-image） ----
+ *
+ *  ⚠️ 关键：html 元素只能用 background-color: transparent，不能用 background 简写！
+ *  因为 background 简写会重置 background-image: none，且 !important 优先级高于
+ *  内联 style.backgroundImage，会把 JS 设置的背景图直接覆盖掉。
+ *  body / #root / .app-root 不设内联 background-image，所以可以用简写。
+ */
+html[data-bg-image="1"] {
+  background-color: transparent !important;
+}
+
+html[data-bg-image="1"] body {
+  background: transparent !important;
+}
+
+/* #root/app-root 的兜底背景也要去掉：背景由 ::before + ::after 两层提供 */
+html[data-bg-image="1"] #root {
+  background: transparent !important;
+}
+
+/* ---- 最关键：有底图时应用全屏外壳必须透明，否则其 solid background 直接盖住 ::before 图片 ----
+ *
+ *  .app-root 原本自带 radial-gradient + var(--bg-app) 的复合背景，且铺满 100vh×100vw。
+ *  如果不去掉，它就像一张不透明画布一样贴在内容层最下面，图片层和遮罩层会被完全挡住。
+ *  去背后：应用底色改为由 html::after（遮罩层）统一承载，侧边栏、内容、按钮这些面板
+ *  则以"毛玻璃卡片"的形式漂在底图之上。
+ */
+html[data-bg-image="1"] .app-root {
+  background: transparent !important;
+  /* 保留一层极微弱的 accent 环境光，提升观感（纯透明会有点太"平"） */
+  box-shadow:
+    inset 0 0 240px color-mix(in srgb, var(--accent) 5%, transparent),
+    inset 0 0 120px color-mix(in srgb, var(--accent-2) 3%, transparent);
+}
+
+/* 窗口外壳如果单独有 background 也一起透 */
+html[data-bg-image="1"] .host-window {
+  background: transparent !important;
+}
+
+/* app-root / .finder-wrap 等最外层容器通常是真正的"应用壳"，
+   它们的底色在有底图时应该直接用变量（变量已在注入层乘了 glass-alpha），
+   不再额外盖一层 solid 背景 → 什么都不用改，保持变量引用即可 */
+
+/* ---- 当有背景图时，按钮/弹框/面板统一毛玻璃化（背景色玻璃化在 JS 注入层算好写入 CSS 变量） ----
+ *
+ * 颜色半透明在 palette → CSS 变量注入阶段计算（paletteToCssText + bgGlassAlpha），
+ * CSS 层这里只负责：
+ *   1. backdrop-filter：让透出的底图模糊，呈现毛玻璃质感（符合 iOS/macOS 视觉风格）
+ *   2. 让 xterm 的 canvas 底色不抢玻璃感（不额外遮罩）
+ */
+
+html[data-bg-image="1"] .sidebar,
+html[data-bg-image="1"] .sidebar-wrap,
+html[data-bg-image="1"] .rightpanel-wrap,
+html[data-bg-image="1"] .main-wrap,
+html[data-bg-image="1"] .toolbar,
+html[data-bg-image="1"] .statusbar,
+html[data-bg-image="1"] .terminal-area,
+html[data-bg-image="1"] .terminal-panel,
+html[data-bg-image="1"] .finder-sidebar,
+html[data-bg-image="1"] .finder-toolbar,
+html[data-bg-image="1"] .finder-content,
+html[data-bg-image="1"] .finder-statusbar,
+html[data-bg-image="1"] .tabs-bar,
+html[data-bg-image="1"] .host-menu,
+html[data-bg-image="1"] .context-menu,
+html[data-bg-image="1"] .toast,
+html[data-bg-image="1"] .modal-body,
+html[data-bg-image="1"] .settings-body,
+html[data-bg-image="1"] .theme-card,
+html[data-bg-image="1"] input:not([type="file"]):not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+html[data-bg-image="1"] select,
+html[data-bg-image="1"] textarea,
+html[data-bg-image="1"] button,
+html[data-bg-image="1"] .te-field,
+html[data-bg-image="1"] .te-name-input,
+html[data-bg-image="1"] .theme-editor-preview,
+html[data-bg-image="1"] .log-area,
+html[data-bg-image="1"] .tab-bar-item,
+html[data-bg-image="1"] .host-window,
+html[data-bg-image="1"] .term-shell,
+html[data-bg-image="1"] .transfer-item,
+html[data-bg-image="1"] .host-menu-panel {
+  /* 经验 1310006：原图要清晰 → 从 18→10→8，saturate 从 180%→125%→115%
+   *   继续降低 blur 至 8px：面板透明度 0.60（tech-dark 推荐值）下，
+   *   8px 仍有毛玻璃质感，但底图的结构线、主色块、人脸轮廓等已可辨认；
+   *   saturate 115% 只做轻微色彩提亮，避免玻璃面板色彩溢出盖过原图。
+   */
+  backdrop-filter: saturate(115%) blur(8px);
+  -webkit-backdrop-filter: saturate(115%) blur(8px);
+}
+
+/* 有些元素有显式的 background-color（硬编码 rgba/hex），兜底让它们在有背景图时也跟着玻璃化 */
+html[data-bg-image="1"] .finder-btn,
+html[data-bg-image="1"] .modal-footer-btn,
+html[data-bg-image="1"] .host-menu-item,
+html[data-bg-image="1"] .context-menu-item {
+  backdrop-filter: saturate(110%) blur(6px);
+  -webkit-backdrop-filter: saturate(110%) blur(6px);
+}
+
+/* ---- tech-dark 主题 + 有背景图：xterm canvas 背景由 glassAlpha 滑块统一控制 ----
+ *
+ *  xtermBg 已加入 GLASSIFIED_KEYS，paletteToCssText 会自动把 --term-xterm-bg 乘以 glassAlpha。
+ *  配合 Terminal 的 allowTransparency:true，xterm canvas 即可半透明透出底图。
+ *  不再在此处硬编码覆盖，避免阻止用户滑块生效。
+ */
+
+/* ---------- 主题编辑器：背景图分组 / 滑块样式 ---------- */
+.te-bg-image-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.te-bg-image-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.te-bg-image-thumb {
+  width: 92px;
+  height: 62px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--divider);
+  background: var(--bg-input);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.te-bg-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.te-bg-image-empty {
+  width: 92px;
+  height: 62px;
+  border-radius: 8px;
+  border: 1px dashed var(--divider);
+  background: var(--bg-input);
+  color: var(--text-tertiary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+}
+
+.te-bg-image-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.te-btn-primary,
+.te-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+.te-btn-primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.te-btn-primary:hover { filter: brightness(1.08); }
+.te-btn-primary:active { transform: translateY(1px); }
+.te-btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.te-btn-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.te-btn-danger:active { transform: translateY(1px); }
+
+/* 滑块字段 */
+.te-slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+.te-slider {
+  width: 100%;
+  height: 20px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.te-slider:focus { outline: none; }
+
+.te-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--pct, 50%),
+    var(--divider) var(--pct, 50%),
+    var(--divider) 100%
+  );
+}
+.te-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--accent);
+  margin-top: -6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.08s ease, box-shadow 0.12s ease;
+}
+.te-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.te-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--divider);
+}
+.te-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.te-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.te-slider-value {
+  min-width: 44px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--divider-soft);
 }

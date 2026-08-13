@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3 } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
-import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
+import { useThemeStore, useThemeOptions, PRESET_OPTIONS } from '../store/themeStore';
+import type { PresetThemeId } from '../theme/palette';
+import { ThemeEditor } from './ThemeEditor';
 import { useShortcutStore, SHORTCUTS, eventToShortcut } from '../store/shortcutStore';
 import { useTerminalStore } from '../store/terminalStore';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -519,7 +521,38 @@ export function SettingsDialog() {
   const pushToast = useToastStore((s) => s.push);
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
+  const createCustomTheme = useThemeStore((s) => s.createCustomTheme);
+  const deleteCustomTheme = useThemeStore((s) => s.deleteCustomTheme);
+  const themeOptions = useThemeOptions();
   const updater = useAppUpdater();
+
+  // 自定义主题编辑器状态
+  const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
+  const [showNewThemeMenu, setShowNewThemeMenu] = useState(false);
+
+  /** 基于某个预设新建自定义主题，并打开编辑器 */
+  const handleCreateCustomTheme = useCallback(
+    (baseId: PresetThemeId) => {
+      const baseName = PRESET_OPTIONS.find((o) => o.id === baseId)?.name ?? baseId;
+      const newId = createCustomTheme(`${baseName} 副本`, baseId);
+      setTheme(newId);
+      setEditingThemeId(newId);
+      setShowNewThemeMenu(false);
+      pushToast('success', `已创建自定义主题，可在编辑器中调整颜色`);
+    },
+    [createCustomTheme, setTheme, pushToast]
+  );
+
+  /** 删除自定义主题（带确认） */
+  const handleDeleteCustomTheme = useCallback(
+    (id: string, name: string) => {
+      if (!window.confirm(`确定删除自定义主题「${name}」吗？`)) return;
+      deleteCustomTheme(id);
+      if (editingThemeId === id) setEditingThemeId(null);
+      pushToast('success', `已删除自定义主题`);
+    },
+    [deleteCustomTheme, editingThemeId, pushToast]
+  );
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [rememberDirGlobal, setRememberDirGlobal] = useState(true);
@@ -727,7 +760,7 @@ export function SettingsDialog() {
       aria-labelledby="settings-dialog-title"
       onClick={handleClose}
     >
-      <div className="dialog dialog-settings" onClick={(e) => e.stopPropagation()}>
+      <div className={`dialog dialog-settings ${editingThemeId ? 'dialog-settings-wide' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <h2 id="settings-dialog-title" className="dialog-title">
             设置
@@ -799,29 +832,91 @@ export function SettingsDialog() {
             {/* 主题 */}
             {activeTab === 'theme' && (
               <div className="settings-pane">
-                <div className="settings-pane-title">主题外观</div>
-                <div className="settings-pane-desc">
-                  选择应用的配色风格，切换后即时生效。
-                </div>
-                <div className="settings-theme-grid">
-                  {THEME_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      className={`theme-card ${theme === opt.id ? 'is-selected' : ''}`}
-                      onClick={() => {
-                        setTheme(opt.id);
-                        pushToast('success', `已切换主题：${opt.name}`);
-                      }}
-                      aria-pressed={theme === opt.id}
-                    >
-                      <span className="theme-card-swatch" style={{ background: opt.swatch }} />
-                      <span className="theme-card-name">{opt.name}</span>
-                      <span className="theme-card-desc">{opt.desc}</span>
-                      {theme === opt.id && <Check size={14} className="theme-card-check" />}
-                    </button>
-                  ))}
-                </div>
+                {editingThemeId ? (
+                  /* 编辑器模式 */
+                  <ThemeEditor themeId={editingThemeId} onClose={() => setEditingThemeId(null)} />
+                ) : (
+                  <>
+                    <div className="settings-pane-title">主题外观</div>
+                    <div className="settings-pane-desc">
+                      选择应用的配色风格，切换后即时生效。可基于预设主题创建自定义主题，精细调整每个颜色。
+                    </div>
+
+                    {/* 新建自定义主题按钮 */}
+                    <div className="theme-new-bar">
+                      <div className="theme-new-wrap">
+                        <button
+                          className="theme-new-btn"
+                          onClick={() => setShowNewThemeMenu((v) => !v)}
+                          type="button"
+                        >
+                          <Plus size={14} />
+                          <span>新建自定义主题</span>
+                        </button>
+                        {showNewThemeMenu && (
+                          <div className="theme-new-menu">
+                            <div className="theme-new-menu-title">选择基础主题</div>
+                            {(['tech-dark', 'dark', 'eye-care-green', 'light'] as PresetThemeId[]).map((pid) => (
+                              <button
+                                key={pid}
+                                className="theme-new-menu-item"
+                                onClick={() => handleCreateCustomTheme(pid)}
+                                type="button"
+                              >
+                                <span className="theme-new-menu-swatch" style={{ background: PRESET_OPTIONS.find((o) => o.id === pid)?.swatch }} />
+                                <span>{PRESET_OPTIONS.find((o) => o.id === pid)?.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="settings-theme-grid">
+                      {themeOptions.map((opt) => (
+                        <div
+                          key={opt.id}
+                          className={`theme-card ${theme === opt.id ? 'is-selected' : ''} ${opt.custom ? 'is-custom' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            className="theme-card-main"
+                            onClick={() => {
+                              setTheme(opt.id);
+                            }}
+                            aria-pressed={theme === opt.id}
+                          >
+                            <span className="theme-card-swatch" style={{ background: opt.swatch }} />
+                            <span className="theme-card-name">{opt.name}</span>
+                            <span className="theme-card-desc">{opt.desc}</span>
+                            {theme === opt.id && <Check size={14} className="theme-card-check" />}
+                            {opt.custom && <span className="theme-card-badge">自定义</span>}
+                          </button>
+                          {opt.custom && (
+                            <div className="theme-card-actions">
+                              <button
+                                className="theme-card-action"
+                                onClick={() => setEditingThemeId(opt.id)}
+                                title="编辑"
+                                type="button"
+                              >
+                                <Edit3 size={12} />
+                              </button>
+                              <button
+                                className="theme-card-action theme-card-action-danger"
+                                onClick={() => handleDeleteCustomTheme(opt.id, opt.name)}
+                                title="删除"
+                                type="button"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

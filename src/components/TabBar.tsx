@@ -12,7 +12,7 @@ import {
   Palette,
   Check,
 } from 'lucide-react';
-import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
+import { useThemeStore, useThemeOptions } from '../store/themeStore';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { useHostStore } from '../store/hostStore';
@@ -45,6 +45,7 @@ export function TabBar() {
   // 主题切换
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
+  const themeOptions = useThemeOptions();
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const themeMenuRef = useRef<HTMLDivElement | null>(null);
   const themeBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -375,7 +376,7 @@ export function TabBar() {
           }}
           onContextMenu={(e) => e.preventDefault()}
         >
-          {THEME_OPTIONS.map((opt) => {
+          {themeOptions.map((opt) => {
             const active = theme === opt.id;
             return (
               <button

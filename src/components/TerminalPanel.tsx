@@ -327,6 +327,8 @@ export function TerminalPanel() {
     if (tabsRef.current.has(tabId)) return;
 
     const ts = getTerminalSettings();
+    // 仅在有自定义背景图时开启透明支持，避免无背景图时 xterm canvas 渲染异常
+    const hasBgImage = document.documentElement.hasAttribute('data-bg-image');
     const term = new Terminal({
       fontSize: ts.fontSize,
       fontFamily: ts.fontFamily,
@@ -335,6 +337,7 @@ export function TerminalPanel() {
       cursorStyle: 'bar',
       scrollback: 10000,
       allowProposedApi: true,
+      allowTransparency: hasBgImage,
       lineHeight: ts.lineHeight,
       letterSpacing: ts.letterSpacing,
       theme: getTerminalThemeFromCSS(),
@@ -591,7 +594,8 @@ export function TerminalPanel() {
     let rafId = requestAnimationFrame(() => applyThemeToAllTerms());
     const obs = new MutationObserver((mutations) => {
       for (const m of mutations) {
-        if (m.type === 'attributes' && m.attributeName === 'data-theme') {
+        // data-theme 变化（主题切换）或 data-bg-image 变化（背景图设置/移除）都需重读 CSS 变量
+        if (m.type === 'attributes' && (m.attributeName === 'data-theme' || m.attributeName === 'data-bg-image')) {
           cancelAnimationFrame(rafId);
           rafId = requestAnimationFrame(applyThemeToAllTerms);
           break;
@@ -600,12 +604,20 @@ export function TerminalPanel() {
     });
     obs.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-theme'],
+      attributeFilter: ['data-theme', 'data-bg-image'],
     });
+    // 监听 ThemeEditor 的自定义事件：滑块拖动（bgGlassAlpha/bgOverlayAlpha）或背景图变化时
+    // 通知终端重读 CSS 变量并刷新 xterm canvas 主题
+    const onThemeUpdate = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(applyThemeToAllTerms);
+    };
+    window.addEventListener('terminal-theme-update', onThemeUpdate);
     return () => {
       disposed = true;
       cancelAnimationFrame(rafId);
       obs.disconnect();
+      window.removeEventListener('terminal-theme-update', onThemeUpdate);
     };
   }, []);
 
