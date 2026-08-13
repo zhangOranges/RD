@@ -565,6 +565,33 @@ export function fileToDataURL(file: File): Promise<string> {
   });
 }
 
+/**
+ * 压缩图片：缩放到 maxSize 以内，转为 JPEG DataURL。
+ * 避免大图 base64 超出 localStorage 5MB 限额导致重启丢失。
+ */
+export function compressImage(dataUrl: string, maxSize = 1920, quality = 0.82): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxSize || height > maxSize) {
+        const ratio = Math.min(maxSize / width, maxSize / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(dataUrl); return; }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataUrl); // 压缩失败回退原图
+    img.src = dataUrl;
+  });
+}
+
 /** 需要乘 glassAlpha 的"背景类"字段：按钮/弹框/面板的底色都会变半透明，透出底图 */
 const GLASSIFIED_KEYS: readonly (keyof ThemePalette)[] = [
   'bgApp',

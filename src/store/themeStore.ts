@@ -10,6 +10,7 @@ import {
   paletteToCssText,
   generateCustomThemeId,
 } from '../theme/palette';
+import { useToastStore } from '../components/Toast';
 
 /**
  * 主题系统 Store
@@ -71,11 +72,20 @@ function loadCustomThemes(): CustomTheme[] {
   }
 }
 
-function saveCustomThemes(themes: CustomTheme[]) {
+function saveCustomThemes(themes: CustomTheme[]): boolean {
   try {
-    localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(themes));
-  } catch {
-    /* ignore */
+    const serialized = JSON.stringify(themes);
+    // 预检：localStorage 通常限 5MB，接近时提前拒绝
+    if (serialized.length > 4_500_000) {
+      useToastStore.getState().push('error', '背景图过大，保存失败。请使用更小的图片。');
+      return false;
+    }
+    localStorage.setItem(CUSTOM_THEMES_KEY, serialized);
+    return true;
+  } catch (e) {
+    // QuotaExceededError 等：提示用户而非静默吞错
+    useToastStore.getState().push('error', '主题保存失败（存储空间不足），背景图可能过大。');
+    return false;
   }
 }
 
@@ -290,7 +300,8 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
         updatedAt: Date.now(),
       };
     });
-    saveCustomThemes(next);
+    // 持久化失败时不更新内存 state，避免"会话内看似生效但重启丢失"
+    if (!saveCustomThemes(next)) return;
     set({ customThemes: next });
     // 若当前正在使用该主题，重新注入以即时生效
     if (get().theme === id) {

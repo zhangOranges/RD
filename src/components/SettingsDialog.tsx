@@ -672,6 +672,8 @@ export function SettingsDialog() {
 
   function handleClose() {
     setSettingsVisible(false);
+    // 清空编辑中的主题 ID，避免下次打开设置时 ThemeEditor 残留并自动切回旧主题
+    setEditingThemeId(null);
   }
 
   async function handleToggleDebugLog(checked: boolean) {

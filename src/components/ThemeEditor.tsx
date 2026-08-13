@@ -8,6 +8,7 @@ import {
   PRESET_PALETTES,
   resolveCustomPalette,
   fileToDataURL,
+  compressImage,
 } from '../theme/palette';
 import { logInfo } from '../utils/log';
 
@@ -445,9 +446,11 @@ function BackgroundImageFields({
     }
     try {
       // 经验 495218：FileReader → DataURL 全链路 base64，展示时直接当 URL 用
-      const dataUrl = await fileToDataURL(f);
+      const rawDataUrl = await fileToDataURL(f);
+      // 压缩图片：缩放到 1920px 以内 + JPEG 0.82，避免 base64 超出 localStorage 5MB 限额
+      const dataUrl = await compressImage(rawDataUrl);
       onChange('bgImage', dataUrl);
-      logInfo(`[theme-editor] 已设置背景图：${Math.round(dataUrl.length / 1024)}KB`);
+      logInfo(`[theme-editor] 已设置背景图：原始 ${Math.round(rawDataUrl.length / 1024)}KB → 压缩后 ${Math.round(dataUrl.length / 1024)}KB`);
 
       // 首次配背景图时，按预设主题深浅给推荐的遮罩/面板联动默认值
       // （用户手动改过的字段不覆盖）
