@@ -890,6 +890,8 @@ export function TerminalPanel() {
    *   1. 在 .app-root 上同步 terminal-fullscreen-on 类，让 CSS 禁用
    *      .terminal-panel 的 backdrop-filter，修复 position:fixed 包含块问题
    *   2. 三层 rAF 后执行 fit + refresh + focus，恢复 xterm 光标和尺寸
+   *   3. fit 后增加安全校验：若 xterm canvas 实际高度超出父容器可见区，
+   *      主动减少 1~2 行并重绘，避免光标跑出底部边界。
    */
   useEffect(() => {
     // 同步 CSS 类（快捷键路径不会经过 handleToggleFullscreen，必须在此处补上）
@@ -904,40 +906,88 @@ export function TerminalPanel() {
     const inst = tabsRef.current.get(tabId);
     if (!inst) return;
 
+    /**
+     * 执行一次完整的"尺寸对齐 + 光标恢复"流程。
+     * @param retry 第几次尝试（用于极端情况下越界时递减行数）
+     */
+    const alignSizeAndCursor = (retry = 0) => {
+      try {
+        inst.fitAddon.fit();
+      } catch {
+        /* ignore */
+      }
+
+      // ----- 越界保护：检查 xterm 渲染层是否超出父容器 -----
+      // xterm 会把 canvas 叠在 .xterm 容器里，我们直接对比外层 container clientHeight
+      // 与 xterm 自身渲染出来的 canvas 高度/行数，如果超出则减 1 行重试（最多 2 次）
+      try {
+        const container = inst.container as HTMLElement | undefined;
+        const xtermEl = container?.querySelector('.xterm') as HTMLElement | null;
+        if (container && xtermEl && retry < 2) {
+          const avail = container.clientHeight;
+          // xterm 的实际渲染高度 ≈ rows * lineHeight，这里用 scrollHeight/offsetHeight 兜底
+          const used = Math.max(
+            xtermEl.scrollHeight,
+            xtermEl.offsetHeight,
+            (xtermEl.querySelector('.xterm-screen') as HTMLElement | null)?.offsetHeight ?? 0,
+          );
+          if (used > avail + 1 /* 允许 1px 的舍入误差 */) {
+            // 手动减 1 行
+            const newRows = Math.max(5, inst.term.rows - 1);
+            try {
+              inst.term.resize(inst.term.cols, newRows);
+            } catch {
+              /* ignore */
+            }
+            // 减行后再递归校验一次
+            alignSizeAndCursor(retry + 1);
+            return;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+
+      try {
+        // 强制重绘全部行，含光标渲染层
+        inst.term.refresh(0, inst.term.rows - 1);
+      } catch {
+        /* ignore */
+      }
+      try {
+        // xterm 官方 focus()：聚焦 textarea 并刷新光标状态
+        inst.term.focus();
+      } catch {
+        /* ignore */
+      }
+      try {
+        // 兜底：手动聚焦 textarea
+        const textarea = inst.container.querySelector(
+          '.xterm-helper-textarea'
+        ) as HTMLTextAreaElement | null;
+        if (textarea) textarea.focus({ preventScroll: true });
+      } catch {
+        /* ignore */
+      }
+      // 同步尺寸到后端
+      if (hostId && tabId) {
+        void invoke('pty_resize', {
+          hostId,
+          tabId,
+          cols: inst.term.cols,
+          rows: inst.term.rows,
+        }).catch(() => {});
+      }
+    };
+
     const raf1 = requestAnimationFrame(() => {
       const raf2 = requestAnimationFrame(() => {
         const raf3 = requestAnimationFrame(() => {
-          try {
-            inst.fitAddon.fit();
-            // 强制重绘全部行，含光标渲染层
-            inst.term.refresh(0, inst.term.rows - 1);
-          } catch {
-            /* ignore */
-          }
-          try {
-            // xterm 官方 focus()：聚焦 textarea 并刷新光标状态
-            inst.term.focus();
-          } catch {
-            /* ignore */
-          }
-          try {
-            // 兜底：手动聚焦 textarea
-            const textarea = inst.container.querySelector(
-              '.xterm-helper-textarea'
-            ) as HTMLTextAreaElement | null;
-            if (textarea) textarea.focus({ preventScroll: true });
-          } catch {
-            /* ignore */
-          }
-          // 同步尺寸到后端
-          if (hostId && tabId) {
-            void invoke('pty_resize', {
-              hostId,
-              tabId,
-              cols: inst.term.cols,
-              rows: inst.term.rows,
-            }).catch(() => {});
-          }
+          alignSizeAndCursor(0);
+          // 保险：全屏 CSS 过渡/布局在某些 WebView 中 2 帧后才真正稳定，
+          // 再推一帧重新 fit 一次（不会重复 resize 后端，因为 retry 已校验尺寸）
+          const raf4 = requestAnimationFrame(() => alignSizeAndCursor(0));
+          setTimeout(() => cancelAnimationFrame(raf4), 200);
         });
         return () => cancelAnimationFrame(raf3);
       });

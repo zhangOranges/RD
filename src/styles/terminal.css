@@ -15,6 +15,7 @@
   color: var(--term-fg);
   overflow: hidden;
   position: relative;
+  box-sizing: border-box;
 }
 
 /* 顶部科技感微光 */
@@ -140,11 +141,22 @@
   min-height: 0;
   background: var(--term-xterm-bg);
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* Xterm 渲染的根节点撑满容器 */
 .terminal-body .xterm {
   height: 100%;
+  width: 100%;
+  /* 关键：FitAddon 测量 .xterm 的 clientHeight 来算行数，
+     如果 padding 在 .xterm 自身上，会导致 canvas 实际高度 = clientHeight，
+     但内部行渲染会再算 padding，底部越界。所以 padding 放到外层。 */
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 把 padding 放到 viewport 外层，避免影响 xterm fit 的高度计算 */
+.terminal-body {
   padding: 8px 10px;
 }
 
@@ -449,14 +461,19 @@
   margin-right: 4px;
 }
 
-/* 每个标签的 xterm 容器：撑满 body */
+/* 每个标签的 xterm 容器：撑满 body（注意：.terminal-body 已经带了 padding，
+   所以这里 inset:0 得到的就是净渲染区域，xterm fit 高度不会越界） */
 .terminal-tab-container {
   position: absolute;
   inset: 0;
+  box-sizing: border-box;
 }
 .terminal-tab-container .xterm {
   height: 100%;
-  padding: 8px 10px;
+  width: 100%;
+  /* padding 放到父层 .terminal-body，避免影响 fit 计算 */
+  padding: 0;
+  box-sizing: border-box;
 }
 .terminal-tab-container .xterm-viewport {
   background-color: transparent !important;
@@ -481,11 +498,38 @@
   box-shadow: 0 0 8px var(--term-scrollbar-glow);
 }
 
-/* 终端全屏：fixed 覆盖整个视口，无需修改 App.tsx 布局 */
+/* 终端全屏：fixed 覆盖整个视口，无需修改 App.tsx 布局
+ *
+ * 注意事项：
+ * 1. 只使用 inset: 0 不使用 height:100vh，避免 Tauri 自定义标题栏 + 全屏时
+ *    100vh 与实际 inset 可用高度不一致，导致底部额外溢出；
+ * 2. 强制 border-box + 无内边距/外边距，所有"边距"都由内部 .terminal-body 的 padding 承担，
+ *    这样 xterm fit 计算 clientHeight 时得到的是纯渲染区，不会多算一行溢出。
+ * 3. 确保 flex-shrink:0 应用在头部，36px 头部不会被压缩，terminal-body 拿到正确剩余高度。
+ */
 .terminal-fullscreen {
-  position: fixed;
-  inset: 0;
+  position: fixed !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
   z-index: 9999;
-  height: 100vh !important;
   border-radius: 0;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.terminal-fullscreen .terminal-header {
+  flex: 0 0 36px !important;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+
+.terminal-fullscreen .terminal-body {
+  /* Flex 剩余空间 = 100% - header(36px) - border-bottom(0.5px)
+     再扣掉自身 padding 8px 10px 就是净渲染区。xterm 在里面撑满 100%，
+     fit 拿到的 clientHeight 完全不会越界。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
 }
