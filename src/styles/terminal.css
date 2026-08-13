@@ -1,6 +1,6 @@
 /* ============================================================
- * 终端面板样式 — Tokyo Night + 科技感玻璃拟态标题栏
- * 与 Finder 整体风格统一：渐变分割、发光按钮、流畅动画
+ * 终端面板样式 — 由 finder.css 中的主题 CSS 变量驱动（--term-*）
+ * 一套样式随 light / dark / tech-dark / system 自动切换
  * ============================================================ */
 
 .terminal-panel-root {
@@ -10,9 +10,9 @@
   width: 100%;
   min-height: 0;
   background:
-    radial-gradient(600px 200px at 50% -50%, rgba(122, 162, 247, 0.06), transparent 70%),
-    #1a1b26;
-  color: #a9b1d6;
+    radial-gradient(600px 200px at 50% -50%, var(--term-topline-glow), transparent 70%),
+    var(--term-bg);
+  color: var(--term-fg);
   overflow: hidden;
   position: relative;
 }
@@ -25,8 +25,8 @@
   height: 0.5px;
   background: linear-gradient(90deg,
     transparent 0%,
-    rgba(122, 162, 247, 0.55) 30%,
-    rgba(158, 206, 106, 0.55) 70%,
+    var(--term-topline-grad-a) 30%,
+    var(--term-topline-grad-b) 70%,
     transparent 100%);
   pointer-events: none;
   z-index: 5;
@@ -41,12 +41,12 @@
   gap: 8px;
   padding: 0 10px 0 14px;
   background: linear-gradient(180deg,
-    rgba(34, 36, 52, 0.92) 0%,
-    rgba(26, 27, 38, 0.92) 100%);
+    var(--term-titlebar-bg-a) 0%,
+    var(--term-titlebar-bg-b) 100%);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
-  border-bottom: 0.5px solid rgba(122, 162, 247, 0.18);
-  color: #7aa2f7;
+  border-bottom: 0.5px solid var(--term-titlebar-border);
+  color: var(--term-accent);
   font-size: 12px;
   font-weight: 500;
   user-select: none;
@@ -57,9 +57,9 @@
 
 .terminal-titlebar-icon {
   flex: 0 0 auto;
-  color: #7aa2f7;
+  color: var(--term-accent);
   display: inline-flex;
-  filter: drop-shadow(0 0 4px rgba(122, 162, 247, 0.35));
+  filter: drop-shadow(0 0 4px var(--term-accent-glow));
 }
 
 .terminal-titlebar-title {
@@ -69,7 +69,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--finder-font-mono);
-  color: #c0caf5;
+  color: var(--term-titlebar-text);
   letter-spacing: 0.01em;
   font-weight: 500;
 }
@@ -77,14 +77,14 @@
 .terminal-titlebar-state {
   flex: 0 0 auto;
   font-size: 10px;
-  color: #9ece6a;
+  color: var(--term-state-ok);
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(158, 206, 106, 0.12);
-  border: 0.5px solid rgba(158, 206, 106, 0.25);
+  background: var(--term-state-ok-soft);
+  border: 0.5px solid color-mix(in srgb, var(--term-state-ok) 25%, transparent);
   font-weight: 600;
   letter-spacing: 0.3px;
-  box-shadow: 0 0 10px rgba(158, 206, 106, 0.15);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--term-state-ok) 15%, transparent);
 }
 
 .terminal-titlebar-actions {
@@ -102,7 +102,7 @@
   height: 26px;
   border: none;
   background: transparent;
-  color: #565f89;
+  color: var(--term-btn);
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s cubic-bezier(.2,.7,.3,1),
@@ -113,9 +113,9 @@
 }
 
 .terminal-titlebar-btn:hover {
-  background: rgba(122, 162, 247, 0.12);
-  color: #7aa2f7;
-  box-shadow: inset 0 0 0 0.5px rgba(122, 162, 247, 0.25);
+  background: var(--term-btn-hover-bg);
+  color: var(--term-btn-hover-text);
+  box-shadow: inset 0 0 0 0.5px var(--term-btn-hover-border);
 }
 
 .terminal-titlebar-btn:active {
@@ -123,13 +123,13 @@
 }
 
 .terminal-titlebar-btn:disabled {
-  color: #3b3f54;
+  color: var(--term-btn-disabled);
   cursor: default;
 }
 
 .terminal-titlebar-btn:disabled:hover {
   background: transparent;
-  color: #3b3f54;
+  color: var(--term-btn-disabled);
   box-shadow: none;
 }
 
@@ -138,7 +138,7 @@
   flex: 1 1 auto;
   position: relative;
   min-height: 0;
-  background: #1a1b26;
+  background: var(--term-xterm-bg);
   overflow: hidden;
 }
 
@@ -152,7 +152,7 @@
   background-color: transparent !important;
 }
 
-/* 自定义滚动条：霓虹蓝风格 */
+/* 自定义滚动条：跟随主题强调色 */
 .terminal-body .xterm-viewport::-webkit-scrollbar {
   width: 10px;
 }
@@ -162,7 +162,7 @@
 }
 
 .terminal-body .xterm-viewport::-webkit-scrollbar-thumb {
-  background: rgba(122, 162, 247, 0.22);
+  background: var(--term-scrollbar);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -170,10 +170,10 @@
 }
 
 .terminal-body .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: rgba(122, 162, 247, 0.38);
+  background: var(--term-scrollbar-hover);
   border: 2px solid transparent;
   background-clip: padding-box;
-  box-shadow: 0 0 8px rgba(122, 162, 247, 0.3);
+  box-shadow: 0 0 8px var(--term-scrollbar-glow);
 }
 
 /* ---------- 覆盖层（提示 / 断开重试）：玻璃 + 微光 ---------- */
@@ -185,10 +185,10 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: rgba(22, 22, 30, 0.92);
+  background: var(--term-overlay-bg);
   backdrop-filter: blur(8px) saturate(180%);
   -webkit-backdrop-filter: blur(8px) saturate(180%);
-  color: #a9b1d6;
+  color: var(--term-overlay-text);
   font-size: 13px;
   text-align: center;
   z-index: 10;
@@ -203,28 +203,28 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(400px 200px at 50% 0%, rgba(122, 162, 247, 0.08), transparent 70%);
+    radial-gradient(400px 200px at 50% 0%, var(--term-topline-glow), transparent 70%);
   pointer-events: none;
 }
 
 .terminal-overlay-icon {
-  color: #565f89;
+  color: var(--term-overlay-icon);
   margin-bottom: 4px;
-  filter: drop-shadow(0 0 6px rgba(122, 162, 247, 0.25));
+  filter: drop-shadow(0 0 6px var(--term-accent-glow));
 }
 
 .terminal-overlay-title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #c0caf5;
+  color: var(--term-overlay-title);
   letter-spacing: 0.01em;
 }
 
 .terminal-overlay-sub {
   margin: 0;
   font-size: 12px;
-  color: #565f89;
+  color: var(--term-overlay-text);
   line-height: 1.6;
   max-width: 360px;
 }
@@ -236,9 +236,9 @@
   min-width: 96px;
   height: 32px;
   padding: 0 18px;
-  border: 0.5px solid rgba(122, 162, 247, 0.28);
-  background: linear-gradient(180deg, rgba(36, 40, 64, 0.9), rgba(26, 28, 46, 0.9));
-  color: #c0caf5;
+  border: 0.5px solid var(--term-overlay-btn-border);
+  background: linear-gradient(180deg, var(--term-overlay-btn-bg-a), var(--term-overlay-btn-bg-b));
+  color: var(--term-overlay-btn-text);
   border-radius: 7px;
   font-family: var(--finder-font);
   font-size: 12.5px;
@@ -257,14 +257,14 @@
 }
 
 .terminal-retry-btn:hover {
-  background: linear-gradient(180deg, rgba(40, 52, 84, 0.95), rgba(28, 36, 60, 0.95));
-  border-color: #7aa2f7;
-  color: #7aa2f7;
+  background: linear-gradient(180deg, var(--term-overlay-btn-hover-bg-a), var(--term-overlay-btn-hover-bg-b));
+  border-color: var(--term-overlay-btn-hover-border);
+  color: var(--term-overlay-btn-hover-text);
   box-shadow:
     0 1px 0 0 rgba(255,255,255,0.06) inset,
     0 -1px 0 0 rgba(0,0,0,0.12) inset,
-    0 6px 18px rgba(122, 162, 247, 0.2),
-    0 0 20px rgba(122, 162, 247, 0.12);
+    0 6px 18px var(--term-overlay-btn-hover-glow),
+    0 0 20px var(--term-overlay-btn-hover-glow);
 }
 
 .terminal-retry-btn:active {
@@ -288,12 +288,12 @@
   gap: 4px;
   padding: 0 8px 0 4px;
   background: linear-gradient(180deg,
-    rgba(34, 36, 52, 0.92) 0%,
-    rgba(26, 27, 38, 0.92) 100%);
+    var(--term-titlebar-bg-a) 0%,
+    var(--term-titlebar-bg-b) 100%);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
-  border-bottom: 0.5px solid rgba(122, 162, 247, 0.18);
-  color: #7aa2f7;
+  border-bottom: 0.5px solid var(--term-titlebar-border);
+  color: var(--term-accent);
   font-size: 12px;
   user-select: none;
   position: relative;
@@ -306,8 +306,8 @@
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  color: #7aa2f7;
-  filter: drop-shadow(0 0 4px rgba(122, 162, 247, 0.35));
+  color: var(--term-accent);
+  filter: drop-shadow(0 0 4px var(--term-accent-glow));
   padding: 0 2px 0 6px;
 }
 
@@ -337,7 +337,7 @@
   padding: 0 6px 0 12px;
   border-radius: 7px 7px 0 0;
   background: transparent;
-  color: #565f89;
+  color: var(--term-tab-inactive);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -349,15 +349,15 @@
 }
 
 .terminal-tab:hover {
-  background: rgba(122, 162, 247, 0.08);
-  color: #a9b1d6;
+  background: var(--term-tab-hover-bg);
+  color: var(--term-tab-hover-text);
 }
 
 .terminal-tab.active {
-  background: rgba(122, 162, 247, 0.14);
-  color: #c0caf5;
-  border-color: rgba(122, 162, 247, 0.28);
-  box-shadow: 0 -1px 0 0 rgba(122, 162, 247, 0.4) inset;
+  background: var(--term-tab-active-bg);
+  color: var(--term-tab-active-text);
+  border-color: var(--term-tab-active-border);
+  box-shadow: 0 -1px 0 0 var(--term-tab-active-insert) inset;
 }
 
 .terminal-tab-label {
@@ -401,7 +401,7 @@
   height: 26px;
   border: none;
   background: transparent;
-  color: #565f89;
+  color: var(--term-btn);
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s cubic-bezier(.2,.7,.3,1),
@@ -409,8 +409,8 @@
 }
 
 .terminal-tab-add:hover {
-  background: rgba(158, 206, 106, 0.16);
-  color: #9ece6a;
+  background: var(--term-state-ok-soft);
+  color: var(--term-state-ok);
 }
 
 .terminal-tab-add:active {
@@ -418,13 +418,13 @@
 }
 
 .terminal-tab-add:disabled {
-  color: #3b3f54;
+  color: var(--term-btn-disabled);
   cursor: default;
 }
 
 .terminal-tab-add:disabled:hover {
   background: transparent;
-  color: #3b3f54;
+  color: var(--term-btn-disabled);
 }
 
 /* 头部右侧操作按钮组 */
@@ -438,14 +438,14 @@
 .terminal-header-state {
   flex: 0 0 auto;
   font-size: 10px;
-  color: #9ece6a;
+  color: var(--term-state-ok);
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(158, 206, 106, 0.12);
-  border: 0.5px solid rgba(158, 206, 106, 0.25);
+  background: var(--term-state-ok-soft);
+  border: 0.5px solid color-mix(in srgb, var(--term-state-ok) 25%, transparent);
   font-weight: 600;
   letter-spacing: 0.3px;
-  box-shadow: 0 0 10px rgba(158, 206, 106, 0.15);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--term-state-ok) 15%, transparent);
   margin-right: 4px;
 }
 
@@ -468,17 +468,17 @@
   background: transparent;
 }
 .terminal-tab-container .xterm-viewport::-webkit-scrollbar-thumb {
-  background: rgba(122, 162, 247, 0.22);
+  background: var(--term-scrollbar);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: padding-box;
   transition: background 0.15s, box-shadow 0.15s;
 }
 .terminal-tab-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: rgba(122, 162, 247, 0.38);
+  background: var(--term-scrollbar-hover);
   border: 2px solid transparent;
   background-clip: padding-box;
-  box-shadow: 0 0 8px rgba(122, 162, 247, 0.3);
+  box-shadow: 0 0 8px var(--term-scrollbar-glow);
 }
 
 /* 终端全屏：fixed 覆盖整个视口，无需修改 App.tsx 布局 */
@@ -489,4 +489,3 @@
   height: 100vh !important;
   border-radius: 0;
 }
-

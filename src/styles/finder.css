@@ -114,6 +114,81 @@ html[data-theme="dark"] body {
   --selected-gradient: linear-gradient(135deg, #0A84FF 0%, #5AC8FA 100%);
   --selected-gradient-soft: linear-gradient(135deg, rgba(10,132,255,0.14) 0%, rgba(90,200,250,0.10) 100%);
 
+  /* ===== 终端专用变量（light 主题：Solarized Light + macOS 浅灰终端风） ===== */
+  --term-bg: #ffffff;
+  --term-fg: #3c3c3c;
+  --term-accent: #0A84FF;
+  --term-accent-soft: rgba(10, 132, 255, 0.12);
+  --term-accent-glow: rgba(10, 132, 255, 0.28);
+  --term-accent-2: #5856D6;
+  --term-state-ok: #30D158;
+  --term-state-ok-soft: rgba(48, 209, 88, 0.12);
+
+  --term-titlebar-bg-a: rgba(246, 246, 248, 0.92);
+  --term-titlebar-bg-b: rgba(238, 238, 242, 0.92);
+  --term-titlebar-border: rgba(0, 0, 0, 0.10);
+  --term-titlebar-text: #3c3c3c;
+  --term-titlebar-text-dim: #8e8e93;
+
+  --term-tab-inactive: #8e8e93;
+  --term-tab-hover-bg: rgba(10, 132, 255, 0.06);
+  --term-tab-hover-text: #3c3c3c;
+  --term-tab-active-bg: rgba(10, 132, 255, 0.10);
+  --term-tab-active-text: #1d1d1f;
+  --term-tab-active-border: rgba(10, 132, 255, 0.22);
+  --term-tab-active-insert: rgba(10, 132, 255, 0.45);
+
+  --term-btn: #8e8e93;
+  --term-btn-hover-bg: rgba(10, 132, 255, 0.08);
+  --term-btn-hover-text: #0A84FF;
+  --term-btn-hover-border: rgba(10, 132, 255, 0.2);
+  --term-btn-disabled: #c7c7cc;
+
+  --term-scrollbar: rgba(10, 132, 255, 0.18);
+  --term-scrollbar-hover: rgba(10, 132, 255, 0.32);
+  --term-scrollbar-glow: rgba(10, 132, 255, 0.24);
+
+  --term-overlay-bg: rgba(245, 245, 247, 0.94);
+  --term-overlay-icon: #8e8e93;
+  --term-overlay-title: #1d1d1f;
+  --term-overlay-text: #8e8e93;
+  --term-overlay-btn-bg-a: rgba(255, 255, 255, 0.95);
+  --term-overlay-btn-bg-b: rgba(245, 245, 247, 0.95);
+  --term-overlay-btn-border: rgba(10, 132, 255, 0.22);
+  --term-overlay-btn-text: #1d1d1f;
+  --term-overlay-btn-hover-bg-a: rgba(255, 255, 255, 1);
+  --term-overlay-btn-hover-bg-b: rgba(240, 245, 255, 1);
+  --term-overlay-btn-hover-border: #0A84FF;
+  --term-overlay-btn-hover-text: #0A84FF;
+  --term-overlay-btn-hover-glow: rgba(10, 132, 255, 0.18);
+
+  --term-topline-grad-a: rgba(10, 132, 255, 0.5);
+  --term-topline-grad-b: rgba(48, 209, 88, 0.5);
+  --term-topline-glow: rgba(10, 132, 255, 0.08);
+
+  /* xterm 配色（Solarized Light 变种） */
+  --term-xterm-bg: #ffffff;
+  --term-xterm-fg: #586e75;
+  --term-xterm-cursor: #0A84FF;
+  --term-xterm-cursor-accent: #ffffff;
+  --term-xterm-selection: rgba(10, 132, 255, 0.22);
+  --term-xterm-black: #073642;
+  --term-xterm-red: #dc322f;
+  --term-xterm-green: #859900;
+  --term-xterm-yellow: #b58900;
+  --term-xterm-blue: #268bd2;
+  --term-xterm-magenta: #d33682;
+  --term-xterm-cyan: #2aa198;
+  --term-xterm-white: #eee8d5;
+  --term-xterm-bright-black: #002b36;
+  --term-xterm-bright-red: #cb4b16;
+  --term-xterm-bright-green: #586e75;
+  --term-xterm-bright-yellow: #657b83;
+  --term-xterm-bright-blue: #839496;
+  --term-xterm-bright-magenta: #6c71c4;
+  --term-xterm-bright-cyan: #93a1a1;
+  --term-xterm-bright-white: #fdf6e3;
+
   /* 间距网格 */
   --space-1: 2px;
   --space-2: 4px;
@@ -169,6 +244,81 @@ html[data-theme="dark"] body {
 
   --selected-gradient: linear-gradient(135deg, #0A84FF 0%, #64D2FF 100%);
   --selected-gradient-soft: linear-gradient(135deg, rgba(10,132,255,0.28) 0%, rgba(100,210,255,0.18) 100%);
+
+  /* ===== 终端专用变量（dark 主题：macOS 标准暗色 + One Dark 风格） ===== */
+  --term-bg: #1e1e20;
+  --term-fg: #e6e6e6;
+  --term-accent: #0A84FF;
+  --term-accent-soft: rgba(10, 132, 255, 0.18);
+  --term-accent-glow: rgba(10, 132, 255, 0.32);
+  --term-accent-2: #5E5CE6;
+  --term-state-ok: #30D158;
+  --term-state-ok-soft: rgba(48, 209, 88, 0.16);
+
+  --term-titlebar-bg-a: rgba(38, 38, 42, 0.92);
+  --term-titlebar-bg-b: rgba(30, 30, 32, 0.92);
+  --term-titlebar-border: rgba(255, 255, 255, 0.10);
+  --term-titlebar-text: #e6e6e6;
+  --term-titlebar-text-dim: #6e6e73;
+
+  --term-tab-inactive: #6e6e73;
+  --term-tab-hover-bg: rgba(10, 132, 255, 0.10);
+  --term-tab-hover-text: #a1a1a6;
+  --term-tab-active-bg: rgba(10, 132, 255, 0.18);
+  --term-tab-active-text: #f5f5f7;
+  --term-tab-active-border: rgba(10, 132, 255, 0.32);
+  --term-tab-active-insert: rgba(10, 132, 255, 0.5);
+
+  --term-btn: #6e6e73;
+  --term-btn-hover-bg: rgba(10, 132, 255, 0.14);
+  --term-btn-hover-text: #0A84FF;
+  --term-btn-hover-border: rgba(10, 132, 255, 0.28);
+  --term-btn-disabled: #48484a;
+
+  --term-scrollbar: rgba(10, 132, 255, 0.22);
+  --term-scrollbar-hover: rgba(10, 132, 255, 0.4);
+  --term-scrollbar-glow: rgba(10, 132, 255, 0.32);
+
+  --term-overlay-bg: rgba(28, 28, 30, 0.94);
+  --term-overlay-icon: #6e6e73;
+  --term-overlay-title: #f5f5f7;
+  --term-overlay-text: #8e8e93;
+  --term-overlay-btn-bg-a: rgba(58, 58, 62, 0.9);
+  --term-overlay-btn-bg-b: rgba(38, 38, 42, 0.9);
+  --term-overlay-btn-border: rgba(10, 132, 255, 0.28);
+  --term-overlay-btn-text: #f5f5f7;
+  --term-overlay-btn-hover-bg-a: rgba(68, 78, 102, 0.95);
+  --term-overlay-btn-hover-bg-b: rgba(44, 52, 76, 0.95);
+  --term-overlay-btn-hover-border: #0A84FF;
+  --term-overlay-btn-hover-text: #0A84FF;
+  --term-overlay-btn-hover-glow: rgba(10, 132, 255, 0.22);
+
+  --term-topline-grad-a: rgba(10, 132, 255, 0.55);
+  --term-topline-grad-b: rgba(48, 209, 88, 0.55);
+  --term-topline-glow: rgba(10, 132, 255, 0.10);
+
+  /* xterm 配色（One Dark 变种） */
+  --term-xterm-bg: #1e1e20;
+  --term-xterm-fg: #abb2bf;
+  --term-xterm-cursor: #528bff;
+  --term-xterm-cursor-accent: #1e1e20;
+  --term-xterm-selection: rgba(82, 139, 255, 0.25);
+  --term-xterm-black: #2c323c;
+  --term-xterm-red: #e06c75;
+  --term-xterm-green: #98c379;
+  --term-xterm-yellow: #e5c07b;
+  --term-xterm-blue: #61afef;
+  --term-xterm-magenta: #c678dd;
+  --term-xterm-cyan: #56b6c2;
+  --term-xterm-white: #abb2bf;
+  --term-xterm-bright-black: #5c6370;
+  --term-xterm-bright-red: #e06c75;
+  --term-xterm-bright-green: #98c379;
+  --term-xterm-bright-yellow: #e5c07b;
+  --term-xterm-bright-blue: #61afef;
+  --term-xterm-bright-magenta: #c678dd;
+  --term-xterm-bright-cyan: #56b6c2;
+  --term-xterm-bright-white: #e5e9f0;
 }
 
 /* ---------- 主题：tech-dark（黑夜科技，应用默认主题） ----------
@@ -224,6 +374,81 @@ html[data-theme="dark"] body {
 
   --selected-gradient: linear-gradient(135deg, #00D4FF 0%, #A855F7 100%);
   --selected-gradient-soft: linear-gradient(135deg, rgba(0,212,255,0.30) 0%, rgba(168,85,247,0.20) 100%);
+
+  /* ===== 终端专用变量（tech-dark：黑夜科技，青蓝荧光 + 紫色辅助，Tokyo Night 风格） ===== */
+  --term-bg: #0a0e1a;
+  --term-fg: #a9b1d6;
+  --term-accent: #00D4FF;
+  --term-accent-soft: rgba(0, 212, 255, 0.14);
+  --term-accent-glow: rgba(0, 212, 255, 0.35);
+  --term-accent-2: #A855F7;
+  --term-state-ok: #00E5A0;
+  --term-state-ok-soft: rgba(0, 229, 160, 0.14);
+
+  --term-titlebar-bg-a: rgba(14, 20, 38, 0.94);
+  --term-titlebar-bg-b: rgba(10, 14, 26, 0.94);
+  --term-titlebar-border: rgba(122, 162, 247, 0.18);
+  --term-titlebar-text: #c0caf5;
+  --term-titlebar-text-dim: #565f89;
+
+  --term-tab-inactive: #565f89;
+  --term-tab-hover-bg: rgba(122, 162, 247, 0.08);
+  --term-tab-hover-text: #a9b1d6;
+  --term-tab-active-bg: rgba(122, 162, 247, 0.14);
+  --term-tab-active-text: #c0caf5;
+  --term-tab-active-border: rgba(122, 162, 247, 0.28);
+  --term-tab-active-insert: rgba(122, 162, 247, 0.4);
+
+  --term-btn: #565f89;
+  --term-btn-hover-bg: rgba(122, 162, 247, 0.12);
+  --term-btn-hover-text: #7aa2f7;
+  --term-btn-hover-border: rgba(122, 162, 247, 0.25);
+  --term-btn-disabled: #3b3f54;
+
+  --term-scrollbar: rgba(122, 162, 247, 0.22);
+  --term-scrollbar-hover: rgba(122, 162, 247, 0.38);
+  --term-scrollbar-glow: rgba(122, 162, 247, 0.3);
+
+  --term-overlay-bg: rgba(10, 14, 26, 0.94);
+  --term-overlay-icon: #565f89;
+  --term-overlay-title: #c0caf5;
+  --term-overlay-text: #565f89;
+  --term-overlay-btn-bg-a: rgba(36, 40, 64, 0.9);
+  --term-overlay-btn-bg-b: rgba(26, 28, 46, 0.9);
+  --term-overlay-btn-border: rgba(122, 162, 247, 0.28);
+  --term-overlay-btn-text: #c0caf5;
+  --term-overlay-btn-hover-bg-a: rgba(40, 52, 84, 0.95);
+  --term-overlay-btn-hover-bg-b: rgba(28, 36, 60, 0.95);
+  --term-overlay-btn-hover-border: #7aa2f7;
+  --term-overlay-btn-hover-text: #7aa2f7;
+  --term-overlay-btn-hover-glow: rgba(122, 162, 247, 0.2);
+
+  --term-topline-grad-a: rgba(0, 212, 255, 0.55);
+  --term-topline-grad-b: rgba(0, 229, 160, 0.55);
+  --term-topline-glow: rgba(0, 212, 255, 0.08);
+
+  /* xterm 配色（Tokyo Night — 当前默认） */
+  --term-xterm-bg: #0a0e1a;
+  --term-xterm-fg: #a9b1d6;
+  --term-xterm-cursor: #c0caf5;
+  --term-xterm-cursor-accent: #0a0e1a;
+  --term-xterm-selection: rgba(122, 162, 247, 0.3);
+  --term-xterm-black: #32344a;
+  --term-xterm-red: #f7768e;
+  --term-xterm-green: #9ece6a;
+  --term-xterm-yellow: #e0af68;
+  --term-xterm-blue: #7aa2f7;
+  --term-xterm-magenta: #bb9af7;
+  --term-xterm-cyan: #7dcfff;
+  --term-xterm-white: #c0caf5;
+  --term-xterm-bright-black: #565f89;
+  --term-xterm-bright-red: #f7768e;
+  --term-xterm-bright-green: #9ece6a;
+  --term-xterm-bright-yellow: #e0af68;
+  --term-xterm-bright-blue: #7aa2f7;
+  --term-xterm-bright-magenta: #bb9af7;
+  --term-xterm-bright-cyan: #7dcfff;
+  --term-xterm-bright-white: #acb0d0;
 }
 
 /* 系统跟随：仅当用户未显式选择主题时（data-theme 未设置或为 "system"），

@@ -172,30 +172,57 @@ function restoreTerminalSnapshot(term: Terminal, lines: string[] | undefined) {
 
 const EMPTY_TABS: string[] = [];
 
-/** xterm 主题（Tokyo Night） */
-const TERMINAL_THEME = {
-  background: '#1a1b26',
-  foreground: '#a9b1d6',
-  cursor: '#c0caf5',
-  cursorAccent: '#1a1b26',
-  selectionBackground: 'rgba(122, 162, 247, 0.3)',
-  black: '#32344a',
-  red: '#f7768e',
-  green: '#9ece6a',
-  yellow: '#e0af68',
-  blue: '#7aa2f7',
-  magenta: '#bb9af7',
-  cyan: '#7dcfff',
-  white: '#c0caf5',
-  brightBlack: '#565f89',
-  brightRed: '#f7768e',
-  brightGreen: '#9ece6a',
-  brightYellow: '#e0af68',
-  brightBlue: '#7aa2f7',
-  brightMagenta: '#bb9af7',
-  brightCyan: '#7dcfff',
-  brightWhite: '#acb0d0',
-} as const;
+/**
+ * 从 CSS 变量读取当前主题的 xterm 配色（--term-xterm-* 定义在 finder.css 每个主题块中）。
+ * theme 切换时 documentElement[data-theme] 变化 → CSS 变量被重写 → 重新调用本函数即可获得新配色。
+ */
+function getTerminalThemeFromCSS(): {
+  background: string; foreground: string; cursor: string; cursorAccent: string;
+  selectionBackground: string;
+  black: string; red: string; green: string; yellow: string;
+  blue: string; magenta: string; cyan: string; white: string;
+  brightBlack: string; brightRed: string; brightGreen: string; brightYellow: string;
+  brightBlue: string; brightMagenta: string; brightCyan: string; brightWhite: string;
+} {
+  const fallback = {
+    background: '#1a1b26', foreground: '#a9b1d6', cursor: '#c0caf5',
+    cursorAccent: '#1a1b26', selectionBackground: 'rgba(122,162,247,0.3)',
+    black: '#32344a', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68',
+    blue: '#7aa2f7', magenta: '#bb9af7', cyan: '#7dcfff', white: '#c0caf5',
+    brightBlack: '#565f89', brightRed: '#f7768e', brightGreen: '#9ece6a',
+    brightYellow: '#e0af68', brightBlue: '#7aa2f7', brightMagenta: '#bb9af7',
+    brightCyan: '#7dcfff', brightWhite: '#acb0d0',
+  };
+  if (typeof window === 'undefined' || typeof getComputedStyle !== 'function') return fallback;
+  const cs = getComputedStyle(document.documentElement);
+  const get = (name: string) => {
+    const raw = cs.getPropertyValue(name).trim();
+    return raw || (fallback as unknown as Record<string, string>)[name.replace('--term-xterm-', '')] || fallback.background;
+  };
+  return {
+    background: get('--term-xterm-bg') || fallback.background,
+    foreground: get('--term-xterm-fg') || fallback.foreground,
+    cursor: get('--term-xterm-cursor') || fallback.cursor,
+    cursorAccent: get('--term-xterm-cursor-accent') || fallback.cursorAccent,
+    selectionBackground: get('--term-xterm-selection') || fallback.selectionBackground,
+    black: get('--term-xterm-black') || fallback.black,
+    red: get('--term-xterm-red') || fallback.red,
+    green: get('--term-xterm-green') || fallback.green,
+    yellow: get('--term-xterm-yellow') || fallback.yellow,
+    blue: get('--term-xterm-blue') || fallback.blue,
+    magenta: get('--term-xterm-magenta') || fallback.magenta,
+    cyan: get('--term-xterm-cyan') || fallback.cyan,
+    white: get('--term-xterm-white') || fallback.white,
+    brightBlack: get('--term-xterm-bright-black') || fallback.brightBlack,
+    brightRed: get('--term-xterm-bright-red') || fallback.brightRed,
+    brightGreen: get('--term-xterm-bright-green') || fallback.brightGreen,
+    brightYellow: get('--term-xterm-bright-yellow') || fallback.brightYellow,
+    brightBlue: get('--term-xterm-bright-blue') || fallback.brightBlue,
+    brightMagenta: get('--term-xterm-bright-magenta') || fallback.brightMagenta,
+    brightCyan: get('--term-xterm-bright-cyan') || fallback.brightCyan,
+    brightWhite: get('--term-xterm-bright-white') || fallback.brightWhite,
+  };
+}
 
 /**
  * 终端面板：Xterm.js + Tauri PTY 集成（Task 8 多标签）。
@@ -310,7 +337,7 @@ export function TerminalPanel() {
       allowProposedApi: true,
       lineHeight: ts.lineHeight,
       letterSpacing: ts.letterSpacing,
-      theme: TERMINAL_THEME,
+      theme: getTerminalThemeFromCSS(),
     });
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
@@ -535,6 +562,51 @@ export function TerminalPanel() {
       });
     });
     return sub;
+  }, []);
+
+  /* ---------- Effect 0.5：主题切换 → 同步更新所有终端的 xterm 配色 + 容器样式 ----------
+   * 用 MutationObserver 监听 <html data-theme="...">：
+   *   - 用户手动切换 light / dark / tech-dark / system → setAttribute 触发
+   *   - system 模式下 prefers-color-scheme 切换，themeStore 重新 resolve 并 setAttribute → 触发
+   * 数据来源：finder.css 每个主题块的 --term-xterm-* 与 --term-* CSS 变量。
+   */
+  useEffect(() => {
+    let disposed = false;
+    const applyThemeToAllTerms = () => {
+      if (disposed) return;
+      const xtermTheme = getTerminalThemeFromCSS();
+      let count = 0;
+      tabsRef.current.forEach((inst) => {
+        try {
+          inst.term.options.theme = xtermTheme;
+          inst.term.refresh(0, inst.term.rows - 1);
+          count++;
+        } catch {
+          /* ignore */
+        }
+      });
+      logInfo(`[terminal-theme] 已同步主题配色到 ${count} 个终端实例`);
+    };
+    // 等待 DOM/data-theme 写入后再执行一次（初始化时保证底色一致）
+    let rafId = requestAnimationFrame(() => applyThemeToAllTerms());
+    const obs = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'attributes' && m.attributeName === 'data-theme') {
+          cancelAnimationFrame(rafId);
+          rafId = requestAnimationFrame(applyThemeToAllTerms);
+          break;
+        }
+      }
+    });
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(rafId);
+      obs.disconnect();
+    };
   }, []);
 
   /* ---------- Effect 1：全局事件监听 + ResizeObserver（仅 mount 一次） ---------- */
