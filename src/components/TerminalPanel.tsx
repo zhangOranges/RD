@@ -18,6 +18,7 @@ import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
 import { useFileStore, lastPtyCdPath } from '../store/fileStore';
 import { useHistoryStore } from '../store/historyStore';
+import { matchShortcut, useShortcut } from '../store/shortcutStore';
 import { logInfo } from '../utils/log';
 import { useToastStore } from './Toast';
 import '@xterm/xterm/css/xterm.css';
@@ -55,13 +56,9 @@ interface TabInstance {
   customKeyHandlerDispose?: { dispose: () => void };
 }
 
-/** 判断是否为全屏切换快捷键：Ctrl+Shift+Enter 或 Cmd+Shift+Enter */
+/** 判断是否为全屏切换快捷键（可在设置面板自定义） */
 function isFullscreenShortcut(e: KeyboardEvent): boolean {
-  return (
-    (e.ctrlKey || e.metaKey) &&
-    e.shiftKey &&
-    (e.key === 'Enter' || e.code === 'Enter')
-  );
+  return matchShortcut('terminalFullscreen', e);
 }
 
 /**
@@ -248,6 +245,7 @@ export function TerminalPanel() {
   const addTerminalTab = useUIStore((s) => s.addTerminalTab);
   const removeTerminalTab = useUIStore((s) => s.removeTerminalTab);
   const setActiveTerminalTab = useUIStore((s) => s.setActiveTerminalTab);
+  const fullscreenShortcut = useShortcut('terminalFullscreen');
 
   const terminalVisible = !!selectedHostId && !!terminalVisibleMap[selectedHostId];
   const isConnected =
@@ -933,7 +931,7 @@ export function TerminalPanel() {
             className="terminal-titlebar-btn"
             type="button"
             aria-label={terminalFullscreen ? '退出全屏' : '全屏'}
-            title={terminalFullscreen ? '退出全屏 (Ctrl+Shift+Enter)' : '全屏 (Ctrl+Shift+Enter)'}
+            title={terminalFullscreen ? `退出全屏 (${fullscreenShortcut})` : `全屏 (${fullscreenShortcut})`}
             onClick={handleToggleFullscreen}
           >
             {terminalFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}

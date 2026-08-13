@@ -11,6 +11,7 @@ import { RightPanel } from './components/RightPanel';
 import { useHostStore } from './store/hostStore';
 import { useUIStore } from './store/uiStore';
 import { useFileStore } from './store/fileStore';
+import { matchShortcut } from './store/shortcutStore';
 import { bindTransferProgressListener } from './store/transferStore';
 import './styles/finder.css';
 import './styles/tabbar.css';
@@ -74,28 +75,28 @@ function App() {
     return () => document.removeEventListener('contextmenu', handler);
   }, []);
 
-  // 全局快捷键：
-  // - Ctrl+,（Windows/Linux）/ Cmd+,（macOS）→ 打开设置
-  // - Ctrl+`（Windows/Linux）/ Cmd+`（macOS）→ 切换终端
-  // - F5 或 Ctrl+R（Windows/Linux）/ Cmd+R（macOS）→ 刷新当前目录
+  // 全局快捷键（可通过设置面板自定义）：
+  // - openSettings: 打开设置
+  // - toggleTerminal: 切换终端显示
+  // - terminalFullscreen: 切换终端全屏（仅终端可见时生效）
+  // - refreshDir: 刷新当前目录
   useEffect(() => {
     function onGlobalKeyDown(e: KeyboardEvent) {
-      const mod = e.metaKey || e.ctrlKey;
-      // Ctrl+, / Cmd+, → 打开设置
-      if (mod && e.key === ',') {
+      // 打开设置
+      if (matchShortcut('openSettings', e)) {
         e.preventDefault();
         useUIStore.getState().setSettingsVisible(true);
         return;
       }
-      // Ctrl+` / Cmd+` → 切换终端
-      if (mod && e.key === '`') {
+      // 切换终端显示
+      if (matchShortcut('toggleTerminal', e)) {
         e.preventDefault();
         const hid = useHostStore.getState().selectedHostId;
         if (hid) useUIStore.getState().toggleTerminal(hid);
         return;
       }
-      // Ctrl+Shift+Enter / Cmd+Shift+Enter → 切换终端全屏（仅终端可见时生效）
-      if (mod && e.shiftKey && e.key === 'Enter') {
+      // 切换终端全屏（仅终端可见时生效）
+      if (matchShortcut('terminalFullscreen', e)) {
         const hid = useHostStore.getState().selectedHostId;
         const visible = hid ? !!useUIStore.getState().terminalVisible[hid] : false;
         if (visible) {
@@ -106,8 +107,8 @@ function App() {
         }
         return;
       }
-      // F5 或 Ctrl+R / Cmd+R → 刷新当前目录
-      if (e.key === 'F5' || (mod && (e.key === 'r' || e.key === 'R'))) {
+      // 刷新当前目录
+      if (matchShortcut('refreshDir', e)) {
         const hostId = useHostStore.getState().selectedHostId;
         const connState = hostId
           ? useHostStore.getState().connectionStates[hostId]

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw } from 'lucide-react';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
+import { useShortcutStore, SHORTCUTS, eventToShortcut } from '../store/shortcutStore';
 import {
   useAppUpdater,
   getMirrorOptions,
@@ -18,7 +19,7 @@ import {
   type MirrorOption,
 } from '../hooks/useAppUpdater';
 
-type SettingsTab = 'general' | 'theme' | 'update' | 'debug';
+type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'debug';
 
 interface TabItem {
   id: SettingsTab;
@@ -30,6 +31,7 @@ const TABS: TabItem[] = [
   { id: 'general', label: '通用', icon: Sliders },
   { id: 'theme', label: '主题', icon: Palette },
   { id: 'update', label: '更新', icon: DownloadCloud },
+  { id: 'shortcuts', label: '快捷键', icon: Keyboard },
   { id: 'debug', label: '调试', icon: Bug },
 ];
 
@@ -63,6 +65,41 @@ export function SettingsDialog() {
   const [delays, setDelays] = useState<MirrorDelayResult>({});
   const [probing, setProbing] = useState(false);
   const [debugLogging, setDebugLogging] = useState(false);
+
+  // 快捷键设置
+  const shortcutMap = useShortcutStore((s) => s.map);
+  const setShortcut = useShortcutStore((s) => s.setShortcut);
+  const resetShortcut = useShortcutStore((s) => s.resetShortcut);
+  const resetAllShortcuts = useShortcutStore((s) => s.resetAll);
+  /** 正在录制的快捷键 id；null 表示未在录制 */
+  const [recordingId, setRecordingId] = useState<string | null>(null);
+
+  // 录制快捷键：监听按键，按下有效组合键即写入并结束录制
+  useEffect(() => {
+    if (!recordingId) return;
+    const id = recordingId;
+    function onKey(e: KeyboardEvent) {
+      // Esc 取消录制，不写入
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setRecordingId(null);
+        return;
+      }
+      // 忽略纯修饰键按下（等用户按下主键）
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const value = eventToShortcut(e);
+      // 至少要有一个主键
+      if (!value || value.endsWith('+')) return;
+      setShortcut(id, value);
+      setRecordingId(null);
+    }
+    // 捕获阶段优先拦截，避免被其他监听器处理
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [recordingId, setShortcut]);
 
   // 弹窗打开时加载设置
   useEffect(() => {
@@ -416,6 +453,66 @@ export function SettingsDialog() {
                   <div className="settings-add-mirror-hint">
                     输入镜像站点地址（如 https://v4.gh-proxy.org），会作为 GitHub URL 的前缀拼接。
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* 快捷键 */}
+            {activeTab === 'shortcuts' && (
+              <div className="settings-pane">
+                <div className="settings-pane-header">
+                  <div className="settings-pane-title-wrap">
+                    <div className="settings-pane-title">快捷键</div>
+                    <div className="settings-update-mirror-desc">
+                      点击右侧按钮录制新的快捷键组合。Esc 取消录制。
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-compact"
+                    onClick={() => {
+                      resetAllShortcuts();
+                      pushToast('success', '已重置所有快捷键');
+                    }}
+                  >
+                    <RotateCcw size={13} />
+                    <span>重置全部</span>
+                  </button>
+                </div>
+
+                <div className="settings-shortcut-list">
+                  {SHORTCUTS.map((sc) => {
+                    const current = shortcutMap[sc.id] ?? sc.defaultValue;
+                    const isDefault = current === sc.defaultValue;
+                    const isRecording = recordingId === sc.id;
+                    return (
+                      <div key={sc.id} className="settings-shortcut-row">
+                        <div className="settings-shortcut-info">
+                          <div className="settings-shortcut-label">{sc.label}</div>
+                          <div className="settings-shortcut-desc">{sc.desc}</div>
+                        </div>
+                        <div className="settings-shortcut-actions">
+                          <button
+                            type="button"
+                            className={`shortcut-badge ${isRecording ? 'is-recording' : ''} ${!isDefault ? 'is-custom' : ''}`}
+                            onClick={() => setRecordingId(isRecording ? null : sc.id)}
+                          >
+                            {isRecording ? '按下快捷键…' : current}
+                          </button>
+                          {!isDefault && (
+                            <button
+                              type="button"
+                              className="shortcut-reset-btn"
+                              title="重置为默认"
+                              onClick={() => resetShortcut(sc.id)}
+                            >
+                              <RotateCcw size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

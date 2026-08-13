@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore, type ToolType } from '../store/uiStore';
+import { matchShortcut } from '../store/shortcutStore';
 import { useToastStore } from './Toast';
 import { HostDialog } from './HostDialog';
 import type { HostConfig, CategoryConfig, HostFormValues } from '../types';
@@ -152,10 +153,10 @@ export function Sidebar() {
   // ========== 搜索框 ==========
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Ctrl+K / Cmd+K 全局快捷键聚焦搜索框
+  // 聚焦搜索框快捷键（可在设置面板自定义）
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if (matchShortcut('focusSearch', e)) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();

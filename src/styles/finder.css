@@ -3210,6 +3210,95 @@ html[data-theme="dark"] body {
   flex-shrink: 0;
 }
 
+/* ---------- 设置：快捷键 ---------- */
+.settings-shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: var(--radius-small);
+  transition: background 0.12s;
+}
+.settings-shortcut-row:hover {
+  background: var(--hover-bg);
+}
+.settings-shortcut-info {
+  min-width: 0;
+  flex: 1;
+}
+.settings-shortcut-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.settings-shortcut-desc {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+.settings-shortcut-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+/* 快捷键徽章按钮：点击录制 */
+.shortcut-badge {
+  min-width: 120px;
+  padding: 5px 10px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--divider);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--finder-font-mono);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.shortcut-badge:hover {
+  border-color: var(--accent);
+}
+.shortcut-badge.is-custom {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.shortcut-badge.is-recording {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  animation: shortcut-pulse 1.2s ease-in-out infinite;
+}
+@keyframes shortcut-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.shortcut-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.shortcut-reset-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
 /* ---------- 更新对话框：状态 banner ---------- */
 .update-banner {
   display: flex;
