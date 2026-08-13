@@ -890,7 +890,12 @@ export function TerminalPanel() {
               onClick={() =>
                 selectedHostId && setActiveTerminalTab(selectedHostId, tabId)
               }
-              title={`${hostName} — 终端 ${idx + 1}`}
+              onDoubleClick={(e) => {
+                // 双击标签本身切换全屏（单击仍为切换标签）
+                e.stopPropagation();
+                handleToggleFullscreen();
+              }}
+              title={`${hostName} — 终端 ${idx + 1}（双击最大化/还原）`}
             >
               <span className="terminal-tab-label">终端 {idx + 1}</span>
               {tabs.length > 1 && (
