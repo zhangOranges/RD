@@ -3299,6 +3299,248 @@ html[data-theme="dark"] body {
   color: var(--text-primary);
 }
 
+/* ---------- 设置：通用组件 ---------- */
+/* 分组分隔线：显示小节标题 */
+.settings-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+.settings-section-divider::before,
+.settings-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 0.5px;
+  background: var(--divider);
+  opacity: 0.6;
+}
+/* 紧凑表单输入（用于设置面板） */
+.form-input-compact {
+  height: 28px;
+  padding: 4px 8px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--divider);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  box-sizing: border-box;
+}
+.form-input-compact:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+select.form-input-compact {
+  cursor: pointer;
+  appearance: none;
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237aa2f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+/* ---------- 设置：终端外观 ---------- */
+.settings-terminal-font-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+.terminal-font-group {
+  position: relative;
+  width: 220px;
+  max-width: 100%;
+}
+.terminal-font-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  cursor: pointer;
+  user-select: none;
+}
+.terminal-font-trigger-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.terminal-font-trigger-arrow {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s;
+}
+.terminal-font-trigger-arrow.open {
+  transform: rotate(180deg);
+}
+.terminal-font-search {
+  width: 100%;
+  border-radius: var(--radius-small) var(--radius-small) 0 0;
+  border-bottom: 1px solid var(--divider);
+}
+.terminal-font-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 100%;
+  z-index: 100;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-small);
+  background: var(--bg-content);
+  margin-top: 2px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+.terminal-font-loading {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.terminal-font-list {
+  max-height: 160px;
+  overflow-y: auto;
+}
+.terminal-font-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 5px 12px;
+  text-align: left;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.terminal-font-item:hover,
+.terminal-font-item.keyboard-active {
+  background: var(--accent-soft);
+}
+.terminal-font-item.active {
+  color: var(--accent);
+  font-weight: 500;
+}
+.terminal-font-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.terminal-font-item-check {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--accent);
+}
+.terminal-font-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.terminal-font-custom-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-decoration: underline;
+  font-family: inherit;
+}
+.terminal-font-custom-btn:hover {
+  color: var(--accent-2);
+}
+.terminal-font-footer {
+  padding: 6px 12px;
+  border-top: 1px solid var(--divider);
+  text-align: center;
+}
+.terminal-custom-font-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+}
+.terminal-custom-font-input {
+  width: 100%;
+}
+.terminal-custom-font-buttons {
+  display: flex;
+  gap: 6px;
+}
+/* 数值输入行（输入框 + 单位 + 重置按钮） */
+.settings-number-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-number-input {
+  width: 72px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.settings-number-suffix {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-right: 4px;
+  min-width: 16px;
+}
+/* 最后一行去掉底部边框 */
+.settings-row-no-bottom {
+  border-bottom: none !important;
+  padding-bottom: 0 !important;
+}
+
+/* 字体预览区 */
+.terminal-font-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-small);
+  border: 1px solid var(--divider);
+  background: var(--bg-elevated);
+  min-width: 280px;
+}
+.terminal-font-preview .preview-line {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  color: var(--text-primary);
+}
+.terminal-font-preview .preview-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--accent);
+  letter-spacing: 2px;
+  user-select: none;
+  margin-top: 4px;
+}
+/* 无 Nerd Font 时降级：显示问号/方块用中性色 */
+.terminal-font-preview .preview-icons > * {
+  display: inline-block;
+}
+
 /* ---------- 更新对话框：状态 banner ---------- */
 .update-banner {
   display: flex;

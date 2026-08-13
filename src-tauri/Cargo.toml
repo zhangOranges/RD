@@ -38,6 +38,7 @@ tauri-plugin-clipboard-manager = "2.3.2"
 tauri-plugin-window-state = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 chrono = "0.4"
+ttf-parser = "0.25"
 
 # ========== 新增编译优化配置（解决CI无法增量编译、减小包体积） ==========
 [profile.release]

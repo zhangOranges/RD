@@ -19,6 +19,7 @@ import { useUIStore } from '../store/uiStore';
 import { useFileStore, lastPtyCdPath } from '../store/fileStore';
 import { useHistoryStore } from '../store/historyStore';
 import { matchShortcut, useShortcut } from '../store/shortcutStore';
+import { useTerminalStore, getTerminalSettings } from '../store/terminalStore';
 import { logInfo } from '../utils/log';
 import { useToastStore } from './Toast';
 import '@xterm/xterm/css/xterm.css';
@@ -298,17 +299,17 @@ export function TerminalPanel() {
     if (!bodyRef.current) return;
     if (tabsRef.current.has(tabId)) return;
 
+    const ts = getTerminalSettings();
     const term = new Terminal({
-      fontSize: 14,
-      fontFamily:
-        '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, Consolas, "Courier New", monospace',
+      fontSize: ts.fontSize,
+      fontFamily: ts.fontFamily,
       fontWeight: '400',
       cursorBlink: true,
       cursorStyle: 'bar',
       scrollback: 10000,
       allowProposedApi: true,
-      lineHeight: 1.2,
-      letterSpacing: 0.3,
+      lineHeight: ts.lineHeight,
+      letterSpacing: ts.letterSpacing,
       theme: TERMINAL_THEME,
     });
     const fitAddon = new FitAddon();
@@ -512,6 +513,29 @@ export function TerminalPanel() {
           .push('error', `终端打开失败：${formatErr(err)}`);
       });
   };
+
+  /* ---------- Effect 0：终端字体/字号等设置变化 → 动态更新已创建的 xterm ---------- */
+  useEffect(() => {
+    const sub = useTerminalStore.subscribe((state) => {
+      const { fontFamily, fontSize, lineHeight, letterSpacing } = state.settings;
+      logInfo(`[terminal-settings] 字体设置变更: fontFamily=${fontFamily} fontSize=${fontSize}`);
+      tabsRef.current.forEach((inst) => {
+        const t = inst.term;
+        try {
+          t.options.fontFamily = fontFamily;
+          t.options.fontSize = fontSize;
+          t.options.lineHeight = lineHeight;
+          t.options.letterSpacing = letterSpacing;
+          // 全量重绘：字体/字号变化必须刷新所有行
+          t.refresh(0, t.rows - 1);
+          inst.fitAddon.fit();
+        } catch {
+          /* ignore */
+        }
+      });
+    });
+    return sub;
+  }, []);
 
   /* ---------- Effect 1：全局事件监听 + ResizeObserver（仅 mount 一次） ---------- */
   useEffect(() => {

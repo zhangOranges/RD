@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw } from 'lucide-react';
@@ -6,6 +6,9 @@ import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { useThemeStore, THEME_OPTIONS } from '../store/themeStore';
 import { useShortcutStore, SHORTCUTS, eventToShortcut } from '../store/shortcutStore';
+import { useTerminalStore } from '../store/terminalStore';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { logInfo, logWarn } from '../utils/log';
 import {
   useAppUpdater,
   getMirrorOptions,
@@ -47,6 +50,469 @@ const TABS: TabItem[] = [
  * 弹窗可见性由 uiStore.settingsVisible 控制；
  * 通过 Ctrl+,（Windows）/ Cmd+,（macOS）快捷键打开（监听在 App.tsx）。
  */
+
+/** 终端外观设置分组（字体 / 字号 / 行高 / 字间距） */
+/** 字体列表项高度（与 CSS 中 .terminal-font-item 的 padding + line-height 对应） */
+const FONT_ITEM_HEIGHT = 28;
+
+function TerminalSettingsGroup() {
+  const settings = useTerminalStore((s) => s.settings);
+  const setSettings = useTerminalStore((s) => s.setSettings);
+  const pushToast = useToastStore.getState().push;
+
+  // 系统字体列表
+  const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [fontsLoaded, setFontsLoaded] = useState(false);
+  const [fontSearch, setFontSearch] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [hoverFont, setHoverFont] = useState<string | null>(null);
+  const [keyboardIndex, setKeyboardIndex] = useState<number>(-1);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // 获取系统字体
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFonts() {
+      try {
+        const fonts = await invoke<string[]>('get_system_fonts');
+        if (!cancelled) {
+          setSystemFonts(fonts);
+          setFontsLoaded(true);
+          logInfo(`[terminal-settings] 获取系统字体: ${fonts.length} 个`);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          logWarn(`[terminal-settings] 获取系统字体失败: ${e}`);
+          setFontsLoaded(true);
+        }
+      }
+    }
+    loadFonts();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 点击外部关闭下拉
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+        setShowCustomInput(false);
+        setHoverFont(null);
+        setKeyboardIndex(-1);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [dropdownOpen]);
+
+  // 当前字体（fontFamily fallback 链中的第一个名字）
+  const primaryFont = settings.fontFamily.split(',')[0]?.replace(/^"|"$/g, '').trim() ?? '';
+
+  // 从 fontFamily fallback 链中找到系统已安装的第一个字体名
+  // 如果 primaryFont 不在系统列表中，会按链依次查找
+  const currentFont = useMemo(() => {
+    if (!fontsLoaded || systemFonts.length === 0) return primaryFont;
+    const fontsLower = new Set(systemFonts.map((f) => f.toLowerCase()));
+    const candidates = settings.fontFamily
+      .split(',')
+      .map((s) => s.trim().replace(/^"|"$/g, '').trim())
+      .filter(Boolean);
+    for (const name of candidates) {
+      if (fontsLower.has(name.toLowerCase())) return name;
+    }
+    return primaryFont;
+  }, [primaryFont, fontsLoaded, systemFonts, settings.fontFamily]);
+
+  // 预览字体：hover 时临时使用 hover 字体，否则用当前设置
+  const previewFontFamily = hoverFont
+    ? `"${hoverFont}", Menlo, Monaco, Consolas, "Courier New", monospace`
+    : settings.fontFamily;
+
+  // 过滤后的字体列表
+  const filteredFonts = useMemo(
+    () =>
+      fontSearch
+        ? systemFonts.filter((f) => f.toLowerCase().includes(fontSearch.toLowerCase()))
+        : systemFonts,
+    [systemFonts, fontSearch],
+  );
+
+  // 虚拟滚动
+  const virtualizer = useVirtualizer({
+    count: filteredFonts.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => FONT_ITEM_HEIGHT,
+    overscan: 8,
+  });
+
+  // 展开下拉时自动定位到当前字体
+  useEffect(() => {
+    if (!dropdownOpen || !fontsLoaded) return;
+    const idx = filteredFonts.findIndex(
+      (f) => f.toLowerCase() === currentFont.toLowerCase(),
+    );
+    if (idx >= 0) {
+      setKeyboardIndex(idx);
+      requestAnimationFrame(() => virtualizer.scrollToIndex(idx, { align: 'center' }));
+    } else {
+      setKeyboardIndex(0);
+    }
+  }, [dropdownOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 搜索变化时重置键盘索引
+  useEffect(() => {
+    if (dropdownOpen) setKeyboardIndex(filteredFonts.length > 0 ? 0 : -1);
+  }, [fontSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 键盘导航
+  const handleListKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setKeyboardIndex((prev) => {
+          const next = Math.min(prev + 1, filteredFonts.length - 1);
+          virtualizer.scrollToIndex(next, { align: 'auto' });
+          setHoverFont(filteredFonts[next] ?? null);
+          return next;
+        });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setKeyboardIndex((prev) => {
+          const next = Math.max(prev - 1, 0);
+          virtualizer.scrollToIndex(next, { align: 'auto' });
+          setHoverFont(filteredFonts[next] ?? null);
+          return next;
+        });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (keyboardIndex >= 0 && keyboardIndex < filteredFonts.length) {
+          applySystemFont(filteredFonts[keyboardIndex]);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setDropdownOpen(false);
+        setHoverFont(null);
+        setKeyboardIndex(-1);
+      }
+    },
+    [filteredFonts, keyboardIndex, virtualizer],
+  );
+
+  // 选择系统字体
+  function applySystemFont(fontName: string) {
+    const name = fontName.trim();
+    const quoted = /[\s"'"]/.test(name) ? `"${name}"` : name;
+    setSettings({
+      fontFamily: `${quoted}, Menlo, Monaco, Consolas, "Courier New", monospace`,
+    });
+    setHoverFont(null);
+    setKeyboardIndex(-1);
+    setDropdownOpen(false);
+    setShowCustomInput(false);
+    setFontSearch('');
+  }
+
+  // 应用自定义字体名
+  function applyCustomFont() {
+    if (!fontSearch.trim()) {
+      pushToast('error', '字体名不能为空');
+      return;
+    }
+    const name = fontSearch.trim();
+    const quoted = /[\s"'"]/.test(name) ? `"${name}"` : name;
+    setSettings({
+      fontFamily: `${quoted}, Menlo, Monaco, Consolas, "Courier New", monospace`,
+    });
+    setShowCustomInput(false);
+    setFontSearch('');
+  }
+
+  return (
+    <>
+      <div className="settings-section-divider">
+        <span>终端外观</span>
+      </div>
+
+      {/* 字体预览区：放在字体选择上方，方便对比 */}
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <div className="settings-row-label">字体预览</div>
+          <div className="settings-row-desc">
+            预览当前字体的显示效果
+          </div>
+        </div>
+        <div className="terminal-font-preview" style={{ fontFamily: previewFontFamily }}>
+          <div className="preview-line">
+            ABCDEFGHIJKLMNOPQRSTUVWXYZ
+          </div>
+          <div className="preview-line">
+            abcdefghijklmnopqrstuvwxyz
+          </div>
+          <div className="preview-line">
+            0123456789
+          </div>
+          <div className="preview-line">
+            !@#$%^&*()-_=+[]{}|;:'",&lt;&gt;./?`~
+          </div>
+
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <div className="settings-row-label">字体</div>
+          <div className="settings-row-desc">选择系统中已安装的字体。</div>
+        </div>
+        <div className="terminal-font-group" ref={dropdownRef}>
+          {/* 收起状态：显示当前字体，点击展开 */}
+          <button
+            type="button"
+            className="form-input form-input-compact terminal-font-trigger"
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+          >
+            <span className="terminal-font-trigger-name">{currentFont || '点击选择字体'}</span>
+            <span className={`terminal-font-trigger-arrow ${dropdownOpen ? 'open' : ''}`}>▾</span>
+          </button>
+
+          {/* 展开状态：搜索 + 虚拟滚动列表 */}
+          {dropdownOpen && (
+            <div className="terminal-font-dropdown" onKeyDown={handleListKeyDown}>
+              {!showCustomInput ? (
+                <>
+                  <input
+                    type="text"
+                    className="form-input form-input-compact terminal-font-search"
+                    placeholder="搜索字体... (↑↓ 选择, Enter 确认)"
+                    value={fontSearch}
+                    onChange={(e) => setFontSearch(e.target.value)}
+                    autoFocus
+                  />
+                  {!fontsLoaded ? (
+                    <div className="terminal-font-loading">加载系统字体中...</div>
+                  ) : filteredFonts.length === 0 ? (
+                    <div className="terminal-font-empty">
+                      {fontSearch ? '未找到匹配的字体' : '系统中未检测到字体'}
+                      <button
+                        className="terminal-font-custom-btn"
+                        onClick={() => setShowCustomInput(true)}
+                      >
+                        手动输入
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="terminal-font-list" ref={listRef}>
+                      <div
+                        style={{
+                          height: virtualizer.getTotalSize(),
+                          width: '100%',
+                          position: 'relative',
+                        }}
+                      >
+                        {virtualizer.getVirtualItems().map((vItem) => {
+                          const fontName = filteredFonts[vItem.index];
+                          const isActive =
+                            fontName.toLowerCase() === currentFont.toLowerCase();
+                          const isKbd = vItem.index === keyboardIndex;
+                          return (
+                            <button
+                              key={fontName}
+                              className={`terminal-font-item ${isActive ? 'active' : ''} ${isKbd ? 'keyboard-active' : ''}`}
+                              style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                height: `${vItem.size}px`,
+                                transform: `translateY(${vItem.start}px)`,
+                              }}
+                              onMouseEnter={() => {
+                                setHoverFont(fontName);
+                                setKeyboardIndex(vItem.index);
+                              }}
+                              onMouseLeave={() => setHoverFont(null)}
+                              onClick={() => applySystemFont(fontName)}
+                            >
+                              <span
+                                className="terminal-font-item-name"
+                                style={{ fontFamily: `"${fontName}", monospace` }}
+                              >
+                                {fontName}
+                              </span>
+                              {isActive && <Check size={12} className="terminal-font-item-check" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="terminal-font-footer">
+                    <button
+                      className="terminal-font-custom-btn"
+                      onClick={() => setShowCustomInput(true)}
+                    >
+                      手动输入字体名...
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="terminal-custom-font-row">
+                  <input
+                    type="text"
+                    className="form-input form-input-compact terminal-custom-font-input"
+                    placeholder="输入字体名"
+                    value={fontSearch}
+                    onChange={(e) => setFontSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') applyCustomFont();
+                      if (e.key === 'Escape') setShowCustomInput(false);
+                    }}
+                    autoFocus
+                  />
+                  <div className="terminal-custom-font-buttons">
+                    <button
+                      type="button"
+                      className="btn btn-accent btn-compact"
+                      onClick={applyCustomFont}
+                    >
+                      应用
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-compact"
+                      onClick={() => setShowCustomInput(false)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <div className="settings-row-label">字号</div>
+          <div className="settings-row-desc">终端文字大小，单位 px。</div>
+        </div>
+        <div className="settings-number-control">
+          <input
+            type="number"
+            className="form-input form-input-compact settings-number-input"
+            min={8}
+            max={32}
+            step={1}
+            value={settings.fontSize}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isFinite(v)) return;
+              setSettings({ fontSize: Math.max(8, Math.min(32, v)) });
+            }}
+          />
+          <span className="settings-number-suffix">px</span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-compact"
+            onClick={() => setSettings({ fontSize: 14 })}
+          >
+            重置
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <div className="settings-row-label">行高</div>
+          <div className="settings-row-desc">每行之间的垂直间距倍数，影响整体可读性。</div>
+        </div>
+        <div className="settings-number-control">
+          <input
+            type="number"
+            className="form-input form-input-compact settings-number-input"
+            min={1}
+            max={2}
+            step={0.05}
+            value={settings.lineHeight}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isFinite(v)) return;
+              setSettings({ lineHeight: Math.max(1, Math.min(2, v)) });
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost btn-compact"
+            onClick={() => setSettings({ lineHeight: 1.2 })}
+          >
+            重置
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-main">
+          <div className="settings-row-label">字间距</div>
+          <div className="settings-row-desc">字符之间的水平间距，单位 px。</div>
+        </div>
+        <div className="settings-number-control">
+          <input
+            type="number"
+            className="form-input form-input-compact settings-number-input"
+            min={0}
+            max={3}
+            step={0.1}
+            value={settings.letterSpacing}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isFinite(v)) return;
+              setSettings({ letterSpacing: Math.max(0, Math.min(3, v)) });
+            }}
+          />
+          <span className="settings-number-suffix">px</span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-compact"
+            onClick={() => setSettings({ letterSpacing: 0.3 })}
+          >
+            重置
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-row settings-row-no-bottom">
+        <div className="settings-row-main">
+          <div className="settings-row-label">全部重置</div>
+          <div className="settings-row-desc">将终端外观恢复为默认值。</div>
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost btn-compact"
+          onClick={() => {
+            setSettings({
+              fontFamily: '"JetBrainsMono Nerd Font", "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace',
+              fontSize: 14,
+              lineHeight: 1.2,
+              letterSpacing: 0.3,
+            });
+            setFontSearch('');
+            setShowCustomInput(false);
+            pushToast('success', '终端外观已重置为默认值');
+          }}
+        >
+          <RotateCcw size={13} />
+          <span>重置终端</span>
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function SettingsDialog() {
   const settingsVisible = useUIStore((s) => s.settingsVisible);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
@@ -324,6 +790,9 @@ export function SettingsDialog() {
                     </span>
                   </label>
                 </div>
+
+                {/* 终端外观设置 */}
+                <TerminalSettingsGroup />
               </div>
             )}
 

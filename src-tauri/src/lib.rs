@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+pub mod fonts;
 pub mod local_fs;
 pub mod pty;
 pub mod sftp;
@@ -709,6 +710,8 @@ pub fn run() {
             storage::list_categories,
             storage::save_category,
             storage::delete_category,
+            fonts::get_system_fonts,
+            fonts::check_font_available,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
