@@ -4877,25 +4877,51 @@ html[data-bg-image="1"] .context-menu-item {
   align-items: center;
 }
 
-.te-bg-image-thumb {
-  width: 92px;
-  height: 62px;
+.te-bg-preview {
+  width: 160px;
+  height: 90px;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--divider);
   background: var(--bg-input);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  position: relative;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
 }
-.te-bg-image-thumb img {
+.te-bg-preview:active {
+  cursor: grabbing;
+}
+.te-bg-preview-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  display: block;
+  background-size: cover;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.te-bg-preview-hint {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 1px 7px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.te-bg-preview:hover .te-bg-preview-hint {
+  opacity: 1;
 }
 
 .te-bg-image-empty {
-  width: 92px;
-  height: 62px;
+  width: 160px;
+  height: 90px;
   border-radius: 8px;
   border: 1px dashed var(--divider);
   background: var(--bg-input);
@@ -4906,6 +4932,7 @@ html[data-bg-image="1"] .context-menu-item {
   align-items: center;
   justify-content: center;
   font-size: 10.5px;
+  flex-shrink: 0;
 }
 
 .te-bg-image-actions {
@@ -4916,7 +4943,8 @@ html[data-bg-image="1"] .context-menu-item {
 }
 
 .te-btn-primary,
-.te-btn-danger {
+.te-btn-danger,
+.te-btn-ghost {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4946,6 +4974,15 @@ html[data-bg-image="1"] .context-menu-item {
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 .te-btn-danger:active { transform: translateY(1px); }
+.te-btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--divider);
+}
+.te-btn-ghost:hover {
+  background: var(--hover);
+}
+.te-btn-ghost:active { transform: translateY(1px); }
 
 /* 滑块字段 */
 .te-slider-row {

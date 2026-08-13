@@ -85,10 +85,13 @@ export interface ThemePalette {
    * bgImage: DataURL (base64) 格式图片，存储在 localStorage，避免路径失效
    * bgOverlayAlpha: 0–1，背景图遮罩层透明度（越大越看不清图，面板越不透明更清晰）
    * bgGlassAlpha: 0–1，面板（bg-content/bg-sidebar/...）半透明程度（越大面板越不透明，越小越玻璃透出底图）
+   * bgPositionX/bgPositionY: 0–100，背景图在窗口中的位置百分比（50/50 = 居中）
    */
   bgImage: string;
   bgOverlayAlpha: string;      // '0.85' -> 85% 遮罩
   bgGlassAlpha: string;        // '0.92' -> 面板 92% 不透明
+  bgPositionX: string;         // '50' -> 50% 横向位置
+  bgPositionY: string;         // '50' -> 50% 纵向位置
 
   /* ---------- 圆角体系 ---------- */
   radiusXs: string;
@@ -369,7 +372,7 @@ const PRESET_TECH_DARK: ThemePalette = {
   hover: 'rgba(0, 212, 255, 0.06)', hoverStrong: 'rgba(0, 212, 255, 0.12)',
   stateDisconnected: '#3d566f', stateConnecting: '#FFB020', stateConnected: '#00E5A0',
   danger: '#FF453A', warning: '#FFB020', success: '#00E5A0', info: '#00D4FF',
-  bgImage: '', bgOverlayAlpha: '0.85', bgGlassAlpha: '1.0',
+  bgImage: '', bgOverlayAlpha: '0.85', bgGlassAlpha: '1.0', bgPositionX: '50', bgPositionY: '50',
   radiusXs: '4px', radiusControl: '7px', radiusLarge: '10px', radiusDialog: '14px', radiusXl: '20px',
   shadowDialog: '0 24px 72px rgba(0, 0, 0, 0.7), 0 6px 18px rgba(0, 0, 0, 0.5)',
   shadowToast: '0 8px 28px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4)',
@@ -513,6 +516,7 @@ const PALETTE_KEY_TO_CSS: Record<keyof ThemePalette, string> = {
   stateDisconnected: '--state-disconnected', stateConnecting: '--state-connecting', stateConnected: '--state-connected',
   danger: '--danger', warning: '--warning', success: '--success', info: '--info',
   bgImage: '--bg-image', bgOverlayAlpha: '--bg-overlay-alpha', bgGlassAlpha: '--bg-glass-alpha',
+  bgPositionX: '--bg-position-x', bgPositionY: '--bg-position-y',
   radiusXs: '--radius-xs', radiusControl: '--radius-control', radiusLarge: '--radius-large',
   radiusDialog: '--radius-dialog', radiusXl: '--radius-xl',
   shadowDialog: '--shadow-dialog', shadowToast: '--shadow-toast', shadowMenu: '--shadow-menu',
@@ -697,6 +701,10 @@ export function paletteToCssText(palette: Partial<ThemePalette>, hasBgImageFlag?
     if (key === 'bgGlassAlpha' || key === 'bgOverlayAlpha') {
       // 原样写（CSS 层读取这些数字做 color-mix / overlay 合成用）
       lines.push(`  ${cssVar}: ${value};`);
+      return;
+    }
+    if (key === 'bgPositionX' || key === 'bgPositionY') {
+      // position 走内联 style（与 bgImage 同路径），不写入 CSS 变量
       return;
     }
     if (doGlass && GLASSIFIED_KEYS.includes(key)) {

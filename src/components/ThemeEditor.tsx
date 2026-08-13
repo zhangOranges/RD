@@ -475,6 +475,39 @@ function BackgroundImageFields({
 
   const handleClearImage = () => onChange('bgImage', '');
 
+  /** 拖拽预览图调整背景图位置 */
+  const handlePreviewMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startPosX = parseFloat(palette.bgPositionX || '50');
+    const startPosY = parseFloat(palette.bgPositionY || '50');
+
+    const handleMove = (ev: MouseEvent) => {
+      // 鼠标位移转换为百分比（预览框宽高比例换算）
+      const dx = ((ev.clientX - startX) / rect.width) * 100;
+      const dy = ((ev.clientY - startY) / rect.height) * 100;
+      const newPosX = Math.max(0, Math.min(100, startPosX - dx));
+      const newPosY = Math.max(0, Math.min(100, startPosY - dy));
+      onChange('bgPositionX', String(Math.round(newPosX)));
+      onChange('bgPositionY', String(Math.round(newPosY)));
+    };
+    const handleUp = () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+    };
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+  };
+
+  /** 重置背景图位置到居中 */
+  const handleResetPosition = () => {
+    onChange('bgPositionX', '50');
+    onChange('bgPositionY', '50');
+  };
+
   const overlayValue = parseFloat(palette.bgOverlayAlpha || '0.85');
   const glassValue = parseFloat(palette.bgGlassAlpha || '1.0');
 
@@ -488,7 +521,7 @@ function BackgroundImageFields({
         onChange={handleFile}
       />
 
-      {/* 背景图上传 + 缩略图预览 */}
+      {/* 背景图上传 + 拖拽定位预览 */}
       <div className={`te-field ${isOverriddenImage ? 'is-overridden' : ''}`}>
         <div className="te-field-label">
           <ImageIcon size={13} />
@@ -507,8 +540,19 @@ function BackgroundImageFields({
         <div className="te-field-main">
           <div className="te-bg-image-row">
             {palette.bgImage ? (
-              <div className="te-bg-image-thumb" title="当前背景图缩略图">
-                <img src={palette.bgImage} alt="" draggable={false} />
+              <div
+                className="te-bg-preview"
+                title="拖拽以调整背景图显示位置"
+                onMouseDown={handlePreviewMouseDown}
+              >
+                <div
+                  className="te-bg-preview-img"
+                  style={{
+                    backgroundImage: `url("${palette.bgImage}")`,
+                    backgroundPosition: `${palette.bgPositionX || '50'}% ${palette.bgPositionY || '50'}%`,
+                  }}
+                />
+                <div className="te-bg-preview-hint">拖拽调整位置</div>
               </div>
             ) : (
               <div className="te-bg-image-empty">
@@ -522,21 +566,32 @@ function BackgroundImageFields({
                 <span>上传图片</span>
               </button>
               {palette.bgImage && (
-                <button
-                  type="button"
-                  className="te-btn-danger"
-                  onClick={handleClearImage}
-                  title="清除背景图"
-                >
-                  <Trash2 size={13} />
-                  <span>清除</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="te-btn-ghost"
+                    onClick={handleResetPosition}
+                    title="重置位置到居中"
+                  >
+                    <RotateCcw size={13} />
+                    <span>重置位置</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="te-btn-danger"
+                    onClick={handleClearImage}
+                    title="清除背景图"
+                  >
+                    <Trash2 size={13} />
+                    <span>清除</span>
+                  </button>
+                </>
               )}
             </div>
           </div>
         </div>
         <div className="te-field-desc">
-          上传一张图片作为应用背景（会以内联 Base64 形式保存在配置中，单张建议 2MB 以内）。
+          上传一张图片作为应用背景（会以内联 Base64 形式保存在配置中，单张建议 2MB 以内）。拖拽预览图可调整显示位置。
         </div>
       </div>
 

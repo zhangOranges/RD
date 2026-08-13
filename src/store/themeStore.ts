@@ -137,7 +137,10 @@ function injectCustomTheme(theme: CustomTheme) {
     const htmlEl = document.documentElement;
     htmlEl.style.backgroundImage = `url("${dataUrl}")`;
     htmlEl.style.backgroundSize = 'cover';
-    htmlEl.style.backgroundPosition = 'center';
+    // 背景图位置：用户可通过主题编辑器拖拽设定（百分比），默认 50%/50% = center
+    const posX = palette.bgPositionX || '50';
+    const posY = palette.bgPositionY || '50';
+    htmlEl.style.backgroundPosition = `${posX}% ${posY}%`;
     htmlEl.style.backgroundRepeat = 'no-repeat';
     htmlEl.style.backgroundAttachment = 'fixed';
     htmlEl.setAttribute('data-bg-image', '1');
