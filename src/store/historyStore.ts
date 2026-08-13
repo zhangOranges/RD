@@ -95,13 +95,16 @@ export const useHistoryStore = create<HistoryState>((set) => ({
       const now = Date.now();
       const idx = s.entries.findIndex((e) => e.id === id);
       let next: HistoryEntry[];
+      let action: 'increment' | 'insert';
       if (idx >= 0) {
         // 已存在：count+1，更新 lastUsed
+        action = 'increment';
         next = s.entries.map((e) =>
           e.id === id ? { ...e, count: e.count + 1, lastUsed: now } : e,
         );
       } else {
         // 新增
+        action = 'insert';
         next = [
           ...s.entries,
           { id, command, count: 1, lastUsed: now },
@@ -110,7 +113,14 @@ export const useHistoryStore = create<HistoryState>((set) => ({
       // 排序 + 裁剪 + 持久化
       const sorted = sortEntries(next);
       const trimmed = trimEntries(sorted);
+      const evicted = sorted.length - trimmed.length;
       saveEntries(trimmed);
+      // 调试日志：记录 store 写入动作与淘汰情况，便于排查"为什么存了/没存"
+      // eslint-disable-next-line no-console
+      console.debug(
+        `[history-store] ${action}: id=${id} cmd=${JSON.stringify(command)} total=${trimmed.length}` +
+          (evicted > 0 ? ` evicted=${evicted}` : ''),
+      );
       return { entries: trimmed };
     });
   },

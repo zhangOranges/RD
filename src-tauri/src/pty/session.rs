@@ -365,6 +365,14 @@ fn handle_output(
         );
     }
     for command in commands {
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!(
+                "[PTY] cmd-executed emit: host_id={} tab_id={} cmd={:?}",
+                host_id, tab_id, command
+            ),
+        );
         let _ = app.emit(
             CMD_EXECUTED_EVENT,
             &PtyCmdPayload {

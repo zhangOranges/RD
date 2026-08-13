@@ -231,12 +231,6 @@ export function TerminalPanel() {
   // 每个标签是否处于 alternate screen（vim/less/htop/nano 等全屏 TUI 进入时置为 true，退出时 false）
   // 处于该模式下时不记录任何命令历史，避免捕获 TUI 内部击键
   const altScreenActiveRef = useRef<Map<string, boolean>>(new Map());
-  // 每个标签是否已进入"接受命令上报"阶段。初始化脚本会触发几次 PROMPT_COMMAND
-  // 并上报注入命令的假象。只有在用户通过 xterm.onData 发出第一个"真实输入字节"
-  // （可打印字符 / 回车 / 退格 / Ctrl+U/W/C 等）后，才把对应标签置为 true，
-  // pty://cmd-executed 之后才会记录。方向键、Home/End 等控制序列不解锁。
-  const acceptingCmdRef = useRef<Map<string, boolean>>(new Map());
-
   const [activeDisconnected, setActiveDisconnected] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
@@ -394,6 +388,10 @@ export function TerminalPanel() {
             for (const p of params) {
               if (p === 1049 || p === 1047 || p === 47) {
                 altScreenActiveRef.current.set(tabKey, mark);
+                // eslint-disable-next-line no-console
+                console.debug(
+                  `[history] alt-screen ${mark ? 'enter' : 'leave'}: tab=${tabKey} param=${p}`,
+                );
               }
             }
             return false;
@@ -412,31 +410,6 @@ export function TerminalPanel() {
       void invoke('pty_write', { hostId, tabId, data: bytes }).catch(() => {
         /* PTY 可能已关闭 */
       });
-
-      // 第一个"真实输入字节"到达时解锁该标签的 cmd 上报。
-      // 方向键 / Home / End / 功能键等控制序列（ESC 开头）不解锁，
-      // 避免仅通过上下键查看 history 就解锁（初始化 HOOK 仍在触发）。
-      const key = makeTabKey(hostId, tabId);
-      if (!acceptingCmdRef.current.get(key)) {
-        const first = bytes[0];
-        const isControlSeq = first === 0x1b; // ESC
-        const isRealInput =
-          !isControlSeq &&
-          bytes.some(
-            (b) =>
-              // 可打印字符 / 回车 / LF / TAB / BS / DEL / Ctrl+C / Ctrl+U / Ctrl+W
-              (b >= 0x20 && b <= 0x7e) ||
-              b === 0x09 ||
-              b === 0x0a ||
-              b === 0x0d ||
-              b === 0x03 ||
-              b === 0x08 ||
-              b === 0x15 ||
-              b === 0x17 ||
-              b === 0x7f,
-          );
-        if (isRealInput) acceptingCmdRef.current.set(key, true);
-      }
     });
 
     // 右键复制 / 粘贴
@@ -580,18 +553,33 @@ export function TerminalPanel() {
     );
 
     // 命令执行完毕：shell PROMPT_COMMAND 通过 OSC 7777;cmd;<command> 报告
+    // 后端 __rd_base_n 已保证只 emit 编号 > 基准的真实用户命令，
+    // 初始化脚本（set/history -c/clear 等）不会到达这里。
     const cmdListenerPromise = listen<PtyCmdPayload>(
       'pty://cmd-executed',
       (event) => {
         const { host_id, tab_id, command } = event.payload;
-        if (currentHostRef.current !== host_id) return;
         const key = makeTabKey(host_id, tab_id);
-        // 初始化阶段未解锁：注入命令的上报全部丢弃
-        if (!acceptingCmdRef.current.get(key)) return;
-        if (altScreenActiveRef.current.get(key)) return;
+        if (currentHostRef.current !== host_id) {
+          return;
+        }
+        // eslint-disable-next-line no-console
+        console.debug(
+          `[history] cmd-executed recv: tab=${key} cmd=${JSON.stringify(command)}`,
+        );
+        if (altScreenActiveRef.current.get(key)) {
+          // eslint-disable-next-line no-console
+          console.debug(`[history] drop (alt-screen active): tab=${key}`);
+          return;
+        }
         const cmd = command.replace(/\s+/g, ' ').trim();
         if (isLikelyShellCommand(cmd)) {
           useHistoryStore.getState().recordCommand(cmd);
+          // eslint-disable-next-line no-console
+          console.debug(`[history] recorded: tab=${key} cmd=${JSON.stringify(cmd)}`);
+        } else {
+          // eslint-disable-next-line no-console
+          console.debug(`[history] rejected (not shell command): tab=${key} cmd=${JSON.stringify(cmd)}`);
         }
       },
     );
