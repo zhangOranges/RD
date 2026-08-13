@@ -884,6 +884,69 @@ export function TerminalPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalHeight, terminalVisible, terminalFullscreen]);
 
+  /* ---------- 全屏状态同步：CSS 类 + xterm 恢复 ----------
+   * 无论通过哪种方式触发全屏（快捷键 / 双击标签 / 工具栏按钮），
+   * terminalFullscreen 状态变化后都统一在此 Effect 中：
+   *   1. 在 .app-root 上同步 terminal-fullscreen-on 类，让 CSS 禁用
+   *      .terminal-panel 的 backdrop-filter，修复 position:fixed 包含块问题
+   *   2. 三层 rAF 后执行 fit + refresh + focus，恢复 xterm 光标和尺寸
+   */
+  useEffect(() => {
+    // 同步 CSS 类（快捷键路径不会经过 handleToggleFullscreen，必须在此处补上）
+    const appRoot = document.querySelector('.app-root') as HTMLElement | null;
+    if (appRoot) appRoot.classList.toggle('terminal-fullscreen-on', terminalFullscreen);
+
+    // 初始化首次不触发 xterm 恢复
+    if (!currentHostRef.current) return;
+    const hostId = currentHostRef.current;
+    const tabId = activeTerminalTabMap[hostId];
+    if (!tabId) return;
+    const inst = tabsRef.current.get(tabId);
+    if (!inst) return;
+
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => {
+        const raf3 = requestAnimationFrame(() => {
+          try {
+            inst.fitAddon.fit();
+            // 强制重绘全部行，含光标渲染层
+            inst.term.refresh(0, inst.term.rows - 1);
+          } catch {
+            /* ignore */
+          }
+          try {
+            // xterm 官方 focus()：聚焦 textarea 并刷新光标状态
+            inst.term.focus();
+          } catch {
+            /* ignore */
+          }
+          try {
+            // 兜底：手动聚焦 textarea
+            const textarea = inst.container.querySelector(
+              '.xterm-helper-textarea'
+            ) as HTMLTextAreaElement | null;
+            if (textarea) textarea.focus({ preventScroll: true });
+          } catch {
+            /* ignore */
+          }
+          // 同步尺寸到后端
+          if (hostId && tabId) {
+            void invoke('pty_resize', {
+              hostId,
+              tabId,
+              cols: inst.term.cols,
+              rows: inst.term.rows,
+            }).catch(() => {});
+          }
+        });
+        return () => cancelAnimationFrame(raf3);
+      });
+      return () => cancelAnimationFrame(raf2);
+    });
+    return () => cancelAnimationFrame(raf1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminalFullscreen]);
+
   /* ---------- 新增标签 ---------- */
   const handleAddTab = () => {
     if (!selectedHostId || !isConnected) return;
@@ -937,7 +1000,10 @@ export function TerminalPanel() {
     if (selectedHostId) setTerminalVisible(selectedHostId, false);
   };
 
-  /* ---------- 全屏切换 ---------- */
+  /* ---------- 全屏切换（按钮 / 双击标签） ----------
+   * CSS 类切换和 xterm 恢复已统一由 useEffect([terminalFullscreen]) 处理，
+   * 此处只需切换状态，快捷键路径（debouncedToggleFullscreen）同理。
+   */
   const handleToggleFullscreen = () => {
     setTerminalFullscreen(!terminalFullscreen);
   };
@@ -979,7 +1045,7 @@ export function TerminalPanel() {
   const showConnectPrompt = !isConnected;
   const showEmptyState = isConnected && tabs.length === 0;
 
-  return (
+  const rootEl = (
     <div
       className={`terminal-panel-root${terminalFullscreen ? ' terminal-fullscreen' : ''}`}
     >
@@ -1123,4 +1189,6 @@ export function TerminalPanel() {
       </div>
     </div>
   );
+
+  return rootEl;
 }

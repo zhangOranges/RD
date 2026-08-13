@@ -4847,6 +4847,17 @@ html[data-bg-image="1"] .host-menu-panel {
   -webkit-backdrop-filter: saturate(115%) blur(8px);
 }
 
+/* 终端全屏时禁用 .terminal-panel 的 backdrop-filter：
+ * 背景图下 .terminal-panel 带 backdrop-filter 会导致后代 position:fixed
+ * 元素（.terminal-fullscreen）的包含块从视口变成 .terminal-panel，全屏高度受限。
+ * 通过在 .app-root 上挂 terminal-fullscreen-on 标记，在此处禁用 backdrop-filter，
+ * 既不搬迁 xterm DOM（避免光标丢失），又能让 fixed 正常铺满整个视口。
+ */
+html[data-bg-image="1"] .app-root.terminal-fullscreen-on .terminal-panel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* 有些元素有显式的 background-color（硬编码 rgba/hex），兜底让它们在有背景图时也跟着玻璃化 */
 html[data-bg-image="1"] .finder-btn,
 html[data-bg-image="1"] .modal-footer-btn,
