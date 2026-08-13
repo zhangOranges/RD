@@ -1445,7 +1445,10 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
       </div>
 
       {/* ==================== 右键菜单 ==================== */}
-      {ctxMenu && (
+      {/* 用 Portal 渲染到 document.body：背景图启用时，.finder-content 等面板带
+          backdrop-filter，会使后代 position:fixed 元素的包含块变成该面板而非视口，
+          导致菜单 translate(clientX,clientY) 偏离鼠标。Portal 让菜单脱离这些祖先。 */}
+      {ctxMenu && createPortal(
         <div
           className="host-menu sidebar-context-menu fb-context-menu"
           ref={ctxMenuRef}
@@ -1539,7 +1542,8 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               </button>
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ==================== 文本编辑器 ==================== */}
