@@ -10,6 +10,7 @@ import type {
   CredentialType,
 } from '../types';
 import { useToastStore } from '../components/Toast';
+import { logError } from '../utils/log';
 // 用动态 getState 避免 zustand 循环依赖
 import { useUIStore } from './uiStore';
 
@@ -212,7 +213,7 @@ export const useHostStore = create<HostState>((set, get) => ({
             credType: 'password',
           });
         } catch (err) {
-          console.error('[connect] get_credential password failed:', err);
+          logError(`[connect] get_credential password failed: ${formatErr(err)}`);
           throw new Error(`读取密码失败：${formatErr(err)}，请编辑主机重新输入密码`);
         }
         if (!password) {
@@ -225,7 +226,7 @@ export const useHostStore = create<HostState>((set, get) => ({
             credType: 'private_key',
           });
         } catch (err) {
-          console.error('[connect] get_credential private_key failed:', err);
+          logError(`[connect] get_credential private_key failed: ${formatErr(err)}`);
           throw new Error(`读取私钥失败：${formatErr(err)}，请编辑主机重新粘贴私钥`);
         }
         if (!privateKey) {

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { joinLocalPath, type LocalFileEntry } from '../store/localFileStore';
 import { useTransferStore, genTaskId } from '../store/transferStore';
+import { logWarn, logError } from '../utils/log';
 
 export interface LocalFlatItem {
   relPath: string;
@@ -216,6 +217,7 @@ async function uploadFolderCompressed(
       cancelTransferTask(taskId);
       pushToast('info', `已取消上传：${folderName}`);
     } else {
+      logError(`文件夹上传失败: ${folderName} - ${msg}`);
       pushToast('error', `文件夹上传失败：${folderName} - ${msg}`);
       cancelTransferTask(taskId);
     }
@@ -297,6 +299,7 @@ export async function uploadLocalItemsToRemote(
   try {
     flat = await collectLocalForUpload(localBaseDir, topLevelFiles);
   } catch (err) {
+    logError(`读取本地文件失败: ${String(err)}`);
     pushToast('error', `读取本地文件失败：${String(err)}`);
     return { successes, skipped, errors: errors + topLevelFiles.length };
   }
@@ -331,7 +334,7 @@ export async function uploadLocalItemsToRemote(
         await invoke('sftp_mkdir_all', { hostId, path: remotePath });
         successes++;
       } catch (e) {
-        console.warn('mkdir failed (ignored)', remotePath, e);
+        logWarn(`mkdir failed (ignored): ${remotePath} ${String(e)}`);
       }
       continue;
     }
@@ -416,7 +419,7 @@ export async function uploadLocalItemsToRemote(
         errors++;
       } else {
         errors++;
-        console.error('upload failed', remotePath, err);
+        logError(`upload failed: ${remotePath} ${String(err)}`);
         pushToast('error', `${item.relPath}: ${msg}`);
         if (uploadTaskId) cancelTransferTask(uploadTaskId);
       }

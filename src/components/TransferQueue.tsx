@@ -4,6 +4,7 @@ import { ask } from '@tauri-apps/plugin-dialog';
 import { useTransferStore, formatBytes, formatSpeed } from '../store/transferStore';
 import { useToastStore } from './Toast';
 import type { TransferTask } from '../types';
+import { logError } from '../utils/log';
 
 /**
  * 右侧面板 - 传输队列区（常驻面板版）
@@ -122,7 +123,7 @@ async function revealDownloaded(task: TransferTask) {
     } catch {
       // ignore second error
     }
-    console.error('reveal download failed', e, 'target:', target);
+    logError(`reveal download failed: ${String(e)} target: ${target}`);
     pushToast('error', `无法打开文件夹：${task.name}`);
   }
 }

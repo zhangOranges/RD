@@ -18,6 +18,7 @@ import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
 import { useFileStore, lastPtyCdPath } from '../store/fileStore';
 import { useHistoryStore } from '../store/historyStore';
+import { logInfo } from '../utils/log';
 import { useToastStore } from './Toast';
 import '@xterm/xterm/css/xterm.css';
 import '../styles/terminal.css';
@@ -388,8 +389,7 @@ export function TerminalPanel() {
             for (const p of params) {
               if (p === 1049 || p === 1047 || p === 47) {
                 altScreenActiveRef.current.set(tabKey, mark);
-                // eslint-disable-next-line no-console
-                console.debug(
+                logInfo(
                   `[history] alt-screen ${mark ? 'enter' : 'leave'}: tab=${tabKey} param=${p}`,
                 );
               }
@@ -563,23 +563,19 @@ export function TerminalPanel() {
         if (currentHostRef.current !== host_id) {
           return;
         }
-        // eslint-disable-next-line no-console
-        console.debug(
+        logInfo(
           `[history] cmd-executed recv: tab=${key} cmd=${JSON.stringify(command)}`,
         );
         if (altScreenActiveRef.current.get(key)) {
-          // eslint-disable-next-line no-console
-          console.debug(`[history] drop (alt-screen active): tab=${key}`);
+          logInfo(`[history] drop (alt-screen active): tab=${key}`);
           return;
         }
         const cmd = command.replace(/\s+/g, ' ').trim();
         if (isLikelyShellCommand(cmd)) {
           useHistoryStore.getState().recordCommand(cmd);
-          // eslint-disable-next-line no-console
-          console.debug(`[history] recorded: tab=${key} cmd=${JSON.stringify(cmd)}`);
+          logInfo(`[history] recorded: tab=${key} cmd=${JSON.stringify(cmd)}`);
         } else {
-          // eslint-disable-next-line no-console
-          console.debug(`[history] rejected (not shell command): tab=${key} cmd=${JSON.stringify(cmd)}`);
+          logInfo(`[history] rejected (not shell command): tab=${key} cmd=${JSON.stringify(cmd)}`);
         }
       },
     );

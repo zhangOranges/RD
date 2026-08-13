@@ -52,7 +52,8 @@ fn get_update_log_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 
 /// 写入一行日志到 update.log（自动追加时间戳和级别标签）
 /// 调试关闭时仅记录 Warn/Error，开启后记录所有级别
-fn write_update_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
+/// 注意：msg 应已包含来源标签（[BE]/[FE]），此函数不再添加
+fn write_update_log_raw(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
     // 调试未开启时，跳过 Info 级别日志
     let debug_enabled = app
         .try_state::<DebugLogState>()
@@ -84,17 +85,23 @@ fn write_update_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
     eprint!("[UPDATE-LOG] {}", line);
 }
 
+/// 后端写入日志：自动加 [BE] 标签，用于区分前端 [FE] 日志
+fn write_update_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
+    write_update_log_raw(app, level, &format!("[BE] {}", msg));
+}
+
 /// 全局调试日志：受 DebugLogState 控制
 /// - Info 级别仅在调试开启时写入
 /// - Warn/Error 始终写入
 ///
-/// 供其他模块调用，统一写入 update.log
+/// 供其他模块调用，统一写入 update.log，自动加 [BE] 标签
 pub fn debug_log(app: &tauri::AppHandle, level: LogLevel, msg: &str) {
     write_update_log(app, level, msg);
 }
 
 /// 前端调用：写入一条更新日志
 /// level: "info" | "warn" | "error"
+/// msg 已包含 [FE] 标签（由前端 log.ts 添加），直接写入不再加 [BE]
 #[tauri::command]
 fn update_log(app: tauri::AppHandle, level: String, msg: String) {
     let lv = match level.as_str() {
@@ -102,7 +109,7 @@ fn update_log(app: tauri::AppHandle, level: String, msg: String) {
         "error" | "ERROR" => LogLevel::Error,
         _ => LogLevel::Info,
     };
-    write_update_log(&app, lv, &msg);
+    write_update_log_raw(&app, lv, &msg);
 }
 
 /// 前端调用：获取调试日志开关状态

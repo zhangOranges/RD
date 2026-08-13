@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText as clipboardWriteText } from '@tauri-apps/plugin-clipboard-manager';
+import { logWarn, logError } from '../utils/log';
 import {
   Folder,
   File as FileIcon,
@@ -491,7 +492,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               });
             } catch (err) {
               // 目录创建失败通常是权限/已存在，这里宽容不中止
-              console.warn('mkdir failed', remotePath, err);
+              logWarn(`mkdir failed: ${remotePath} ${String(err)}`);
             }
             continue;
           }
@@ -637,7 +638,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               // 不打错误 toast；UI 状态已经由 Rust emit 的 canceled 事件同步
             } else {
               errors++;
-              console.error('upload failed', remotePath, err);
+              logError(`upload failed: ${remotePath} ${String(err)}`);
               pushToast('error', `${item.relPath}: ${errMsg}`);
             }
           }

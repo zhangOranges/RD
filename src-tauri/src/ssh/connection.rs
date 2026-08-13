@@ -272,7 +272,10 @@ impl ConnectionHandle {
                     debug_log(
                         app,
                         LogLevel::Info,
-                        &format!("home_dir 解析成功: {} -> {}", host_port, path),
+                        &format!(
+                            "远程家目录解析成功: {} -> {} (用于初始化远程文件浏览器根路径)",
+                            host_port, path
+                        ),
                     );
                 }
                 path
@@ -282,12 +285,24 @@ impl ConnectionHandle {
                     debug_log(
                         app,
                         LogLevel::Warn,
-                        &format!("home_dir 解析失败，回退到 ~: {} - {}", host_port, e),
+                        &format!("远程家目录解析失败，回退到 ~: {} - {}", host_port, e),
                     );
                 }
                 "~".to_string()
             }
         };
+
+        // 记录本地家目录路径，用于双栏文件管理器左栏初始化
+        if let Some(app) = &app_handle {
+            let local_home = dirs::home_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!("本地家目录: {} (用于初始化本地文件浏览器根路径)", local_home),
+            );
+        }
 
         let fingerprint = shared
             .fingerprint

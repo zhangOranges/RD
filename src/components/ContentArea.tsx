@@ -15,6 +15,7 @@ import LocalFilePane from './LocalFilePane';
 import { useUIStore } from '../store/uiStore';
 import { useTransferStore, genTaskId } from '../store/transferStore';
 import { useLocalFileStore } from '../store/localFileStore';
+import { logInfo, logWarn } from '../utils/log';
 
 // 已为主机做过初始化的 hostId 集合。避免连接成功后 useEffect 重触发时重复加载。
 // 主机断开重连后我们希望重新走缓存逻辑，因此在断开时清掉记录。
@@ -92,10 +93,13 @@ export function ContentArea() {
             hostId,
             tabId: activeTabId,
           });
+          logInfo(`[remote-dir] 读取缓存路径: host=${hostId} tab=${activeTabId} cached=${JSON.stringify(cachedPath)}`);
         } catch {
           cachedPath = null;
         }
         if (!isValidAbsPath(cachedPath)) cachedPath = null;
+      } else {
+        logInfo(`[remote-dir] 主机未开启目录记忆，跳过缓存读取: host=${hostId}`);
       }
 
       const home = useHostStore.getState().homeDirs[hostId];
@@ -110,9 +114,12 @@ export function ContentArea() {
         startPath = '/';
       }
 
+      logInfo(`[remote-dir] 起始路径决定: start=${JSON.stringify(startPath)} cached=${JSON.stringify(cachedPath)} home=${JSON.stringify(home)} rememberDir=${rememberDir}`);
+
       // 4) 尝试 navigate；缓存路径失效时降级到家目录
       const ok = await navigate(hostId, startPath);
       if (!ok && isValidAbsPath(cachedPath) && isValidAbsPath(home) && cachedPath !== home) {
+        logWarn(`[remote-dir] 缓存路径失效，降级到家目录: cached=${JSON.stringify(cachedPath)} home=${JSON.stringify(home)}`);
         pushToast('warning', `上次路径已失效，已切换到家目录：${home}`);
         await navigate(hostId, home);
       }

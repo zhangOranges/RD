@@ -21,6 +21,7 @@ import {
   formatDuration,
 } from '../store/transferStore';
 import { useToastStore } from './Toast';
+import { logError } from '../utils/log';
 import type { TransferTask } from '../types';
 import '../styles/transfer.css';
 
@@ -268,7 +269,7 @@ async function revealDownloaded(task: TransferTask) {
     }
     await revealItemInDir(target);
   } catch (e) {
-    console.error('reveal download failed', e, 'target:', target);
+    logError(`reveal download failed: ${String(e)} target: ${target}`);
     useToastStore
       .getState()
       .push('error', `无法打开文件夹：${task.name}`);

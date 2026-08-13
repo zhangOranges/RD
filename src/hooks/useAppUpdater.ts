@@ -4,14 +4,15 @@ import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useToastStore } from '../components/Toast';
+import { logInfo, logWarn, logError } from '../utils/log';
 import type { ToastKind } from '../types';
 
 /** 写入更新日志（fire-and-forget，不等待不抛错） */
 function logUpdate(level: 'info' | 'warn' | 'error', msg: string): void {
   if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
-  void invoke('update_log', { level, msg }).catch(() => {
-    /* 日志失败静默忽略 */
-  });
+  if (level === 'error') logError(msg);
+  else if (level === 'warn') logWarn(msg);
+  else logInfo(msg);
 }
 
 function showToast(opts: {
@@ -894,6 +895,7 @@ const useUpdaterStore = create<AppUpdaterStore>((set, get) => ({
       await invoke('open_folder', { path });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      logError(`打开文件夹失败: ${msg} (path=${path})`);
       showToast({ type: 'error', message: `打开文件夹失败：${msg}`, duration: 3000 });
     }
   },

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { logInfo } from '../utils/log';
 
 /**
  * 命令历史存储：
@@ -116,8 +117,7 @@ export const useHistoryStore = create<HistoryState>((set) => ({
       const evicted = sorted.length - trimmed.length;
       saveEntries(trimmed);
       // 调试日志：记录 store 写入动作与淘汰情况，便于排查"为什么存了/没存"
-      // eslint-disable-next-line no-console
-      console.debug(
+      logInfo(
         `[history-store] ${action}: id=${id} cmd=${JSON.stringify(command)} total=${trimmed.length}` +
           (evicted > 0 ? ` evicted=${evicted}` : ''),
       );
