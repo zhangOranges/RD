@@ -36,13 +36,13 @@
   <img src="图3.png" alt="SSH 主机配置" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
-<p align="center"><em>图3 · SSH 主机配置：密码/私钥认证、分类管理、端口自定义</em></p>
+
 
 <p align="center">
   <img src="图4.png" alt="文件传输" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
 </p>
 
-<p align="center"><em>图4 · 文件传输：256KB 分块流式上传，实时进度/速率，文件夹压缩传输</em></p>
+
 
 <p align="center">
   <img src="图5.png" alt="自定义主题编辑器" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 16px 0; max-width: 100%;" />
