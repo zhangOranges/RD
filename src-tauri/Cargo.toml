@@ -1,6 +1,6 @@
 [package]
 name = "rd-app"
-version = "0.1.54"
+version = "0.1.55"
 description = "RD - SSH/SFTP Remote Desktop"
 authors = ["orange"]
 edition = "2021"
