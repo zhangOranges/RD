@@ -78,14 +78,32 @@ fn get_font_directories() -> Vec<std::path::PathBuf> {
 
 /// 常见字体样式后缀（文件名 fallback 时从字体文件名中移除）
 const FONT_STYLE_SUFFIXES: &[&str] = &[
-    "-Regular", "-Bold", "-Italic", "-BoldItalic",
-    "-Light", "-Medium", "-Semibold", "-Black",
-    "-Thin", "-ExtraLight", "-ExtraBold",
-    " Regular", " Bold", " Italic", " BoldItalic",
-    " Light", " Medium", " Semibold", " Black",
-    " Thin", " ExtraLight", " ExtraBold",
-    "Windows", "Windows Compatible",
-    "-Win", "-GDI",
+    "-Regular",
+    "-Bold",
+    "-Italic",
+    "-BoldItalic",
+    "-Light",
+    "-Medium",
+    "-Semibold",
+    "-Black",
+    "-Thin",
+    "-ExtraLight",
+    "-ExtraBold",
+    " Regular",
+    " Bold",
+    " Italic",
+    " BoldItalic",
+    " Light",
+    " Medium",
+    " Semibold",
+    " Black",
+    " Thin",
+    " ExtraLight",
+    " ExtraBold",
+    "Windows",
+    "Windows Compatible",
+    "-Win",
+    "-GDI",
 ];
 
 /// 从字体文件名提取字体名称（仅作为 ttf-parser 失败时的 fallback）
@@ -224,7 +242,11 @@ fn read_family_names_from_font(data: &[u8]) -> Vec<String> {
                     let is_en = is_english_language(pid_num, r.language_id);
                     if is_unicode && is_en {
                         let s = r.to_string()?.trim().to_string();
-                        if s.is_empty() { None } else { Some(s) }
+                        if s.is_empty() {
+                            None
+                        } else {
+                            Some(s)
+                        }
                     } else {
                         None
                     }
@@ -241,7 +263,11 @@ fn read_family_names_from_font(data: &[u8]) -> Vec<String> {
                     let is_unicode = (pid_num == 0) || (pid_num == 3 && r.encoding_id == 1);
                     if is_unicode {
                         let s = r.to_string()?.trim().to_string();
-                        if s.is_empty() { None } else { Some(s) }
+                        if s.is_empty() {
+                            None
+                        } else {
+                            Some(s)
+                        }
                     } else {
                         None
                     }
@@ -255,7 +281,11 @@ fn read_family_names_from_font(data: &[u8]) -> Vec<String> {
                 // 3. 兜底：任何能转字符串的记录
                 if let Some(s) = records.iter().find_map(|r| {
                     let s = r.to_string()?.trim().to_string();
-                    if s.is_empty() { None } else { Some(s) }
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
                 }) {
                     if seen.insert(s.clone()) {
                         names.push(s);

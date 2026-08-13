@@ -23,8 +23,8 @@ use tokio::task::JoinHandle;
 
 use super::parser::OscParser;
 use super::{
-    CMD_EXECUTED_EVENT, CLOSED_EVENT, CWD_CHANGED_EVENT, DATA_EVENT, PtyClosedPayload, PtyCmdPayload,
-    PtyCwdPayload, PtyDataPayload,
+    PtyClosedPayload, PtyCmdPayload, PtyCwdPayload, PtyDataPayload, CLOSED_EVENT,
+    CMD_EXECUTED_EVENT, CWD_CHANGED_EVENT, DATA_EVENT,
 };
 use crate::{debug_log, LogLevel};
 

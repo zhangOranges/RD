@@ -273,7 +273,7 @@ impl ConnectionHandle {
                         app,
                         LogLevel::Info,
                         &format!(
-                            "远程家目录解析成功: {} -> {} (用于初始化远程文件浏览器根路径)",
+                            "远程目录解析成功: {} -> {} (用于初始化远程文件浏览器根路径)",
                             host_port, path
                         ),
                     );
@@ -285,14 +285,14 @@ impl ConnectionHandle {
                     debug_log(
                         app,
                         LogLevel::Warn,
-                        &format!("远程家目录解析失败，回退到 ~: {} - {}", host_port, e),
+                        &format!("远程目录解析失败，回退到 ~: {} - {}", host_port, e),
                     );
                 }
                 "~".to_string()
             }
         };
 
-        // 记录本地家目录路径，用于双栏文件管理器左栏初始化
+        // 记录本地目录路径，用于双栏文件管理器左栏初始化
         if let Some(app) = &app_handle {
             let local_home = dirs::home_dir()
                 .map(|p| p.to_string_lossy().to_string())
@@ -300,7 +300,10 @@ impl ConnectionHandle {
             debug_log(
                 app,
                 LogLevel::Info,
-                &format!("本地家目录: {} (用于初始化本地文件浏览器根路径)", local_home),
+                &format!(
+                    "本地目录: {} (用于初始化本地文件浏览器根路径)",
+                    local_home
+                ),
             );
         }
 
