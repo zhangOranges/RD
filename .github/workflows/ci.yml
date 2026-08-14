@@ -81,7 +81,6 @@ jobs:
           npm run tauri -- build \
             --target x86_64-unknown-linux-gnu \
             --no-bundle \
-            --skip-sign \
             --verbose
         env:
           CARGO_INCREMENTAL: 1
@@ -121,7 +120,6 @@ jobs:
           npm run tauri -- build \
             --target x86_64-pc-windows-msvc \
             --no-bundle \
-            --skip-sign \
             --verbose
         env:
           CARGO_INCREMENTAL: 1
@@ -160,7 +158,6 @@ jobs:
           npm run tauri -- build \
             --target aarch64-apple-darwin \
             --no-bundle \
-            --skip-sign \
             --verbose
         env:
           CARGO_INCREMENTAL: 1
