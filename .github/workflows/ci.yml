@@ -27,7 +27,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install npm deps
-        run: npm ci --prefer-offline --no-audit --no-fund
+        run: npm install --no-audit --no-fund
       - name: TypeScript type-check (tsc --noEmit)
         run: npx tsc --noEmit
       - name: Build frontend (vite build)
@@ -67,9 +67,10 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 只允许精确 key 匹配，不做 restore-keys 回退
-          # 原因：跨平台恢复缓存会导致 glibc 不兼容（如 ubuntu-latest → ubuntu-22.04）
-          key: rust-cache-ubuntu-22.04-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
+          # 使用固定 key，不依赖 Cargo.lock hash
+          # 原因：bump 版本号会改变 Cargo.lock 中 rd-app 的 version 字段，
+          # 但这不应导致缓存失效。固定 key 让每次 bump 都覆盖同一个缓存。
+          key: rust-cache-ubuntu-22.04-Linux-latest
 
       # ------------------------------------------------------------------
       # 关键：保存并恢复 Cargo.lock 原始状态
@@ -93,7 +94,7 @@ jobs:
       - name: Install frontend deps & build dist
         working-directory: ..
         run: |
-          npm ci --prefer-offline --no-audit --no-fund
+          npm install --no-audit --no-fund
           npm run build
 
       - name: cargo build --release (缓存 release 产物)
@@ -129,8 +130,8 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 只允许精确 key 匹配，与 Release workflow 一致
-          key: rust-cache-windows-latest-Windows-${{ hashFiles('src-tauri/Cargo.lock') }}
+          # 使用固定 key，不依赖 Cargo.lock hash
+          key: rust-cache-windows-latest-Windows-latest
 
       - name: Save original Cargo.lock
         shell: bash
@@ -143,7 +144,7 @@ jobs:
         working-directory: ..
         shell: bash
         run: |
-          npm ci --prefer-offline --no-audit --no-fund
+          npm install --no-audit --no-fund
           npm run build
 
       - name: cargo build --release (缓存 release 产物)
@@ -177,8 +178,8 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 只允许精确 key 匹配，与 Release workflow 一致
-          key: rust-cache-macos-latest-macOS-${{ hashFiles('src-tauri/Cargo.lock') }}
+          # 使用固定 key，不依赖 Cargo.lock hash
+          key: rust-cache-macos-latest-macOS-latest
 
       - name: Save original Cargo.lock
         run: cp Cargo.lock Cargo.lock.orig
@@ -189,7 +190,7 @@ jobs:
       - name: Install frontend deps & build dist
         working-directory: ..
         run: |
-          npm ci --prefer-offline --no-audit --no-fund
+          npm install --no-audit --no-fund
           npm run build
 
       - name: cargo build --release (缓存 release 产物)

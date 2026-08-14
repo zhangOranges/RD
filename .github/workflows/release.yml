@@ -95,7 +95,7 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-latest
       # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
       - name: Cache Tauri Wix tools (Windows only)
         if: matrix.platform == 'windows-latest'
