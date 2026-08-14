@@ -1,13 +1,16 @@
 name: Bump Version
 
 # 手动触发：在 Actions 页面运行，选择递增类型（patch / minor / major）。
-# 工作流会同步更新 package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json
-# 三处版本号，提交到 main 分支并打上对应 git tag，tag 随后触发 release.yml 构建发布。
+# 工作流分两步执行：
+#   1) 更新版本号 → commit 并 push 到 main → 触发 CI 工作流
+#   2) 等待 CI 工作流成功完成后，再 push tag → 触发 Release 工作流
+#
+# 这样确保 Release 能命中 CI 在 main 上保存的 Rust 编译缓存。
 #
 # 使用方式：
 #   1. GitHub 仓库 → Actions 标签页 → 左侧选择 "Bump Version"
 #   2. 点击 "Run workflow" → 选择分支（main）→ 选择 bump 类型 → Run
-#   3. 等待该工作流完成（约 10 秒），release.yml 会被 tag 自动触发
+#   3. 等待该工作流完成（CI 通常 3-5 分钟），release.yml 会被 tag 自动触发
 
 on:
   workflow_dispatch:
@@ -24,19 +27,19 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   bump:
     name: Bump & Tag
     runs-on: ubuntu-latest
+    outputs:
+      next: ${{ steps.ver.outputs.next }}
+      tag: ${{ steps.commit-and-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # 需要 fetch-depth: 0 才能拿到完整历史用于提交
           fetch-depth: 0
-          # 使用 GITHUB_TOKEN 触发后续 release.yml 时，默认不会再次触发工作流
-          # （防止递归触发）。这里用 PAT 才能让 tag push 触发 release.yml。
-          # 若无 PAT，可改为让 release.yml 监听 workflow_run 事件。
           token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js 22
@@ -51,7 +54,6 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          # 以 package.json 为基准读取当前版本号
           CUR=$(node -p "require('./package.json').version")
           echo "当前版本: $CUR"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CUR"
@@ -80,7 +82,6 @@ jobs:
 
       - name: Bump src-tauri/Cargo.toml
         run: |
-          # 仅替换 [package] 段下的 version 字段，避免误伤其他依赖的 version
           sed -i -E '0,/^version = ".*"/s/^version = ".*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.toml
           grep -m1 '^version' src-tauri/Cargo.toml
 
@@ -130,7 +131,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit & tag
+      - name: Commit to main (触发 CI) & 创建 tag（暂不推送）
+        id: commit-and-tag
         run: |
           TAG="v${{ steps.ver.outputs.next }}"
           git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
@@ -138,10 +140,92 @@ jobs:
 
           bump: ${{ inputs.bump }} (${{ steps.ver.outputs.current }} → ${{ steps.ver.outputs.next }})
           由 Bump Version 工作流自动生成。"
-          git tag "$TAG"
+          # 先推 commit 到 main，这会触发 CI 工作流
           git push origin "$GITHUB_REF_NAME"
-          git push origin "$TAG"
-          echo "已推送 tag: $TAG"
+          # 创建 tag 但暂不推送，等 CI 完成后再推
+          git tag "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "已推送 commit 到 main，CI 将被触发。等待 CI 完成后再推送 tag $TAG"
+
+  # ------------------------------------------------------------
+  # 等待 CI 工作流成功完成后再推送 tag
+  # ------------------------------------------------------------
+  wait-for-ci:
+    name: Wait for CI
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for CI workflow to complete
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "等待 CI 工作流完成..."
+          # CI 由 commit push 到 main 触发，需要轮询直到它完成
+          MAX_WAIT=600  # 最长等待 10 分钟
+          WAITED=0
+          while [ "$WAITED" -lt "$MAX_WAIT" ]; do
+            # 查询最近运行的 CI 工作流
+            RUN=$(gh run list \
+              --workflow=ci.yml \
+              --branch=main \
+              --limit=1 \
+              --json status,conclusion,databaseId \
+              --jq '.[0]')
+            STATUS=$(echo "$RUN" | jq -r '.status')
+            CONCLUSION=$(echo "$RUN" | jq -r '.conclusion')
+            RUN_ID=$(echo "$RUN" | jq -r '.databaseId')
+            echo "CI run #$RUN_ID: status=$STATUS conclusion=$CONCLUSION (已等待 ${WAITED}s)"
+            if [ "$STATUS" = "completed" ]; then
+              if [ "$CONCLUSION" = "success" ]; then
+                echo "CI 成功完成！"
+                exit 0
+              else
+                echo "::error::CI 工作流失败 (conclusion=$CONCLUSION)，取消发布"
+                exit 1
+              fi
+            fi
+            sleep 15
+            WAITED=$((WAITED + 15))
+          done
+          echo "::error::等待 CI 超时（${MAX_WAIT}s）"
+          exit 1
+
+  # ------------------------------------------------------------
+  # CI 成功后推送 tag，触发 Release
+  # ------------------------------------------------------------
+  push-tag:
+    name: Push Tag (Trigger Release)
+    needs: [bump, wait-for-ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Push tag
+        run: |
+          TAG="${{ needs.bump.outputs.tag }}"
+          # tag 在 bump job 的 runner 本地创建但未推送，这里新 checkout 不会有该 tag
+          # 直接在远程创建 tag（指向 main 最新 commit）
+          SHA=$(git rev-parse HEAD)
+          echo "在 commit $SHA 上创建并推送 tag: $TAG"
+          # 用 GitHub API 创建 tag，确保跨 runner 可用
+          gh api \
+            --method POST \
+            /repos/${{ github.repository }}/git/refs \
+            -f ref="refs/tags/$TAG" \
+            -f sha="$SHA" || {
+              # 如果 tag 已存在（重试场景），直接 push
+              echo "tag 可能已存在，尝试直接 push"
+              git tag "$TAG" "$SHA" 2>/dev/null || true
+              git push origin "$TAG" 2>/dev/null || true
+            }
+          echo "已推送 tag $TAG，Release 工作流将被触发"
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
@@ -149,9 +233,8 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| 项目 | 值 |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|-----|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 上一版本 | ${{ steps.ver.outputs.current }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 新版本 | ${{ steps.ver.outputs.next }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 新版本 | ${{ needs.bump.outputs.next }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| 递增类型 | ${{ inputs.bump }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Tag | \`v${{ steps.ver.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`v${{ needs.bump.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "tag 推送后将自动触发 **Release** 工作流构建三平台产物（Windows / Linux / macOS Universal）。" >> "$GITHUB_STEP_SUMMARY"
+          echo "CI 已通过 ✅，tag 已推送，**Release** 工作流正在构建三平台产物。" >> "$GITHUB_STEP_SUMMARY"

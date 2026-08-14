@@ -87,6 +87,14 @@ jobs:
       # ========== 4. Rust 增量缓存（手动管理，更可靠） ==========
       # 使用 actions/cache@v4 直接管理，key 基于 Cargo.lock hash + 平台，
       # restore-keys 允许在 Cargo.lock 变化时回退到上一份缓存（部分命中）。
+      #
+      # 缓存作用域说明（关键！）：GitHub Actions 的缓存按分支/tag 隔离：
+      #   - CI 工作流：push 到 main → 缓存归在 "main" scope
+      #   - Release 工作流：push tag v0.1.x → 缓存归在 "v0.1.x" tag scope
+      # tag scope 只能访问自己 scope + 默认分支(main) scope 下的缓存，
+      # 因此 Release 的 restore-keys 必须能命中 CI 在 main 上保存的 key。
+      # CI 的 label 是 ubuntu-latest / windows-latest，Release label 是 ubuntu-22.04 /
+      # windows-latest / macos-latest，所以这里把 ubuntu-latest 也放入 restore-keys。
       - name: Cache Cargo registry & target
         uses: actions/cache@v4
         with:
@@ -97,6 +105,9 @@ jobs:
           key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
             rust-cache-${{ matrix.platform }}-${{ runner.os }}-
+            rust-cache-ubuntu-latest-${{ runner.os }}-
+            rust-cache-windows-latest-${{ runner.os }}-
+            rust-cache-macos-latest-${{ runner.os }}-
             rust-cache-${{ matrix.platform }}-
 
       # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
