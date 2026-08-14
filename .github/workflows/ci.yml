@@ -61,11 +61,15 @@ jobs:
             libjavascriptcoregtk-4.1-dev
 
       - name: Cache cargo registry & target
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v4
         with:
-          workspaces: |
-            src-tauri
-          cache-all-crates: true
+          path: |
+            src-tauri/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-cache-ci-linux-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            rust-cache-ci-linux-
 
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
@@ -90,11 +94,15 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Cache cargo registry & target
-        uses: Swatinem/rust-cache@v2
+        uses: actions/cache@v4
         with:
-          workspaces: |
-            src-tauri
-          cache-all-crates: true
+          path: |
+            src-tauri/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-cache-ci-windows-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            rust-cache-ci-windows-
 
       - name: cargo check --target x86_64-pc-windows-msvc
         run: cargo check --locked --target x86_64-pc-windows-msvc

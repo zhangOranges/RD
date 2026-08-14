@@ -84,19 +84,20 @@ jobs:
             dpkg \
             file
 
-      # ========== 4. Rust 增量缓存 ==========
-      # Swatinem/rust-cache@v2 自动缓存 target 目录 + cargo 注册表。
-      # 注意：workspaces 是 v2 格式，直接写 Cargo 工作区目录路径。
-      # v1 的 "路径 -> 目标目录" 写法在 v2 中已不支持，会导致缓存 key 计算错误。
-      - name: Rust incremental compile cache
-        uses: Swatinem/rust-cache@v2
+      # ========== 4. Rust 增量缓存（手动管理，更可靠） ==========
+      # 使用 actions/cache@v4 直接管理，key 基于 Cargo.lock hash + 平台，
+      # restore-keys 允许在 Cargo.lock 变化时回退到上一份缓存（部分命中）。
+      - name: Cache Cargo registry & target
+        uses: actions/cache@v4
         with:
-          workspaces: |
-            src-tauri
-          cache-all-crates: true
-        env:
-          # 显式暴露缓存环境变量，便于调试
-          CARGO_INCREMENTAL: 1
+          path: |
+            src-tauri/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            rust-cache-${{ matrix.platform }}-${{ runner.os }}-
+            rust-cache-${{ matrix.platform }}-
 
       # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
       - name: Cache Tauri Wix tools (Windows only)
