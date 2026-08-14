@@ -78,7 +78,7 @@ jobs:
       # 原始 Cargo.lock hash 不一致，从而无法命中。
       # ------------------------------------------------------------------
       - name: Save original Cargo.lock
-        run: cp src-tauri/Cargo.lock src-tauri/Cargo.lock.orig
+        run: cp Cargo.lock Cargo.lock.orig
 
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
@@ -100,7 +100,7 @@ jobs:
       # cargo 操作可能修改 Cargo.lock，导致 Post Cache 保存时的 hash 与
       # Release 查找时的 hash 不一致。这里在 Post Cache 之前恢复。
       - name: Restore original Cargo.lock
-        run: cp src-tauri/Cargo.lock.orig src-tauri/Cargo.lock
+        run: cp Cargo.lock.orig Cargo.lock
   # ------------------------------------------------------------
   # 3) Rust backend: cargo check on Windows (native target for Tauri)
   # ------------------------------------------------------------
