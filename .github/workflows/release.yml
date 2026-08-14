@@ -123,7 +123,9 @@ jobs:
             echo "target/release 不存在 → 缓存未命中 ❌ 预期全量编译"
           fi
 
+      # 关键修正：使用 bash shell 避免 PowerShell 解析 `--` 出错
       - name: Tauri build
+        shell: bash
         run: |
           npm run tauri -- build \
             --target ${{ matrix.target }} \
