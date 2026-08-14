@@ -11,10 +11,8 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
-  # ------------------------------------------------------------
-  # 1) TypeScript / Frontend: install deps, type-check, build frontend
-  # ------------------------------------------------------------
   frontend:
     name: Frontend · tsc + vite build
     runs-on: ubuntu-latest
@@ -28,14 +26,11 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install npm deps
         run: npm install --no-audit --no-fund
-      - name: TypeScript type-check (tsc --noEmit)
+      - name: TypeScript type-check
         run: npx tsc --noEmit
-      - name: Build frontend (vite build)
+      - name: Build frontend
         run: npm run build
 
-  # ------------------------------------------------------------
-  # 2) Rust backend: cargo check / clippy / fmt + release build (Ubuntu)
-  # ------------------------------------------------------------
   rust-lint:
     name: Rust (Ubuntu) · check + clippy + fmt + release cache
     runs-on: ubuntu-22.04
@@ -68,36 +63,29 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 固定 key，不依赖 Cargo.lock hash，版本号变化不影响依赖缓存
           key: rust-cache-ubuntu-22.04-Linux-latest
 
-      - name: cargo fmt (check format)
+      - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo check --locked
         run: cargo check --locked
-      - name: cargo clippy linter
+      - name: cargo clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
-      # ------------------------------------------------------------------
-      # 构建前端（Release 同样需要）
-      # ------------------------------------------------------------------
-      - name: Install frontend deps & build dist
+      - name: Install npm deps
         working-directory: ${{ github.workspace }}
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
+        run: npm install --no-audit --no-fund
 
-      # ------------------------------------------------------------------
-      # 关键：使用与 Release 完全相同的构建命令，并带上 --locked
-      # 这样 Cargo.lock 不会改变，编译产物与 Release 完全兼容
-      # ------------------------------------------------------------------
-      - name: cargo build --release (缓存 release 产物)
+      - name: Build release cache (tauri build --no-bundle)
         run: |
-          cargo build --release --locked --bins --target x86_64-unknown-linux-gnu --features tauri/custom-protocol
+          npm run tauri -- build \
+            --target x86_64-unknown-linux-gnu \
+            --no-bundle \
+            --skip-sign \
+            --verbose
+        env:
+          CARGO_INCREMENTAL: 1
 
-  # ------------------------------------------------------------
-  # 3) Rust backend: cargo check + release build on Windows
-  # ------------------------------------------------------------
   rust-windows-check:
     name: Rust (Windows) · check + release cache
     runs-on: windows-latest
@@ -106,7 +94,7 @@ jobs:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Rust toolchain (stable-x86_64-pc-windows-msvc)
+      - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -120,23 +108,24 @@ jobs:
             ~/.cargo/git
           key: rust-cache-windows-latest-Windows-latest
 
-      - name: cargo check --locked --target x86_64-pc-windows-msvc
+      - name: cargo check --locked
         run: cargo check --locked --target x86_64-pc-windows-msvc
 
-      - name: Install frontend deps & build dist
+      - name: Install npm deps
         working-directory: ${{ github.workspace }}
         shell: bash
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
+        run: npm install --no-audit --no-fund
 
-      - name: cargo build --release (缓存 release 产物)
+      - name: Build release cache (tauri build --no-bundle)
         run: |
-          cargo build --release --locked --bins --target x86_64-pc-windows-msvc --features tauri/custom-protocol
+          npm run tauri -- build \
+            --target x86_64-pc-windows-msvc \
+            --no-bundle \
+            --skip-sign \
+            --verbose
+        env:
+          CARGO_INCREMENTAL: 1
 
-  # ------------------------------------------------------------
-  # 4) Rust backend: cargo check + release build on macOS (Apple Silicon)
-  # ------------------------------------------------------------
   rust-macos-check:
     name: Rust (macOS) · check + release cache
     runs-on: macos-latest
@@ -145,7 +134,7 @@ jobs:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Rust toolchain (stable-aarch64-apple-darwin)
+      - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
@@ -159,15 +148,19 @@ jobs:
             ~/.cargo/git
           key: rust-cache-macos-latest-macOS-latest
 
-      - name: cargo check --locked --target aarch64-apple-darwin
+      - name: cargo check --locked
         run: cargo check --locked --target aarch64-apple-darwin
 
-      - name: Install frontend deps & build dist
+      - name: Install npm deps
         working-directory: ${{ github.workspace }}
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
+        run: npm install --no-audit --no-fund
 
-      - name: cargo build --release (缓存 release 产物)
+      - name: Build release cache (tauri build --no-bundle)
         run: |
-          cargo build --release --locked --bins --target aarch64-apple-darwin --features tauri/custom-protocol
+          npm run tauri -- build \
+            --target aarch64-apple-darwin \
+            --no-bundle \
+            --skip-sign \
+            --verbose
+        env:
+          CARGO_INCREMENTAL: 1

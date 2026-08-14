@@ -8,14 +8,8 @@ permissions:
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
+
 jobs:
-  # ------------------------------------------------------------
-  # 三平台构建：Windows / Linux / macOS (Apple Silicon)
-  # 每个 job：
-  #   1) Tauri build（自动生成 .sig 签名文件）
-  #   2) 上传产物 artifact（附带 .sig 文件）
-  #   3) 输出本平台 platform-manifest.json（给汇总 job 生成 latest.json 用）
-  # ------------------------------------------------------------
   build:
     strategy:
       fail-fast: false
@@ -49,7 +43,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ========== 1. Node 缓存强化，锁定 package-lock 哈希 ==========
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -60,13 +53,11 @@ jobs:
       - name: Install npm deps
         run: npm install --no-audit --no-fund
 
-      # ========== 2. Rust 工具链 ==========
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      # ========== 3. 系统依赖（Linux 专用） ==========
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
@@ -84,9 +75,6 @@ jobs:
             dpkg \
             file
 
-      # ========== 4. Rust 增量缓存（只恢复，不保存） ==========
-      # 使用 actions/cache/restore 只读取 CI 在 main scope 保存的缓存，
-      # 不产生 Post Cache 步骤，避免浪费 tag scope 的缓存配额。
       - name: Restore Cargo cache
         uses: actions/cache/restore@v4
         with:
@@ -96,7 +84,6 @@ jobs:
             ~/.cargo/git
           key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-latest
 
-      # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
       - name: Cache Tauri Wix tools (Windows only)
         if: matrix.platform == 'windows-latest'
         uses: actions/cache@v4
@@ -108,7 +95,6 @@ jobs:
         shell: bash
         run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
 
-      # ========== 6. 签名密钥校验 ==========
       - name: Verify signing key secret
         shell: bash
         run: |
@@ -119,7 +105,6 @@ jobs:
           fi
           echo "Key length: ${#KEY} chars"
 
-      # ========== 7. Tauri 构建（增量编译） ==========
       - name: Diagnose cache state
         shell: bash
         run: |
@@ -139,13 +124,17 @@ jobs:
           fi
 
       - name: Tauri build
-        run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
+        run: |
+          npm run tauri -- build \
+            --target ${{ matrix.target }} \
+            -b ${{ matrix.bundles }} \
+            --verbose \
+            -- --locked
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CARGO_INCREMENTAL: 1
 
-      # ========== 诊断产物目录（仅在构建失败时执行，减少日志噪音） ==========
       - name: Diagnose bundle output (on failure)
         if: failure()
         shell: bash
@@ -181,7 +170,6 @@ jobs:
           echo "=== Diagnostic complete ==="
           true
 
-      # ========== 收集产物（Windows） ==========
       - name: Collect artifacts (Windows)
         id: collect-windows
         if: matrix.platform == 'windows-latest'
@@ -222,7 +210,6 @@ jobs:
           Write-Host "=== Artifacts ==="
           Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
 
-      # ========== 收集产物（Linux） ==========
       - name: Collect artifacts (Linux)
         id: collect-linux
         if: matrix.platform == 'ubuntu-22.04'
@@ -262,7 +249,6 @@ jobs:
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
 
-      # ========== 收集产物（macOS ARM64 + Intel） ==========
       - name: Collect artifacts (macOS)
         id: collect-macos
         if: startsWith(matrix.platform, 'macos-')
@@ -293,7 +279,6 @@ jobs:
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
 
-      # ========== 生成平台更新清单 ==========
       - name: Write platform manifest
         id: write-manifest
         shell: bash
@@ -330,7 +315,6 @@ jobs:
           cat "$MANIFEST_FILE"
           echo "manifest=$(cat "$MANIFEST_FILE" | tr -d '\n' | sed 's/"/\\"/g')" >> "$GITHUB_OUTPUT"
 
-      # 上传产物
       - uses: actions/upload-artifact@v4
         with:
           name: rd-app-${{ matrix.label }}
@@ -339,9 +323,6 @@ jobs:
             manifests/*.json
           retention-days: 30
 
-  # ------------------------------------------------------------
-  # 汇总发布 Job
-  # ------------------------------------------------------------
   release:
     name: Publish Release
     needs: build

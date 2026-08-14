@@ -1,17 +1,5 @@
 name: Bump Version
 
-# 手动触发：在 Actions 页面运行，选择递增类型（patch / minor / major）。
-# 工作流分两步执行：
-#   1) 更新版本号 → commit 并 push 到 main → 触发 CI 工作流
-#   2) 等待 CI 工作流成功完成后，再 push tag → 触发 Release 工作流
-#
-# 这样确保 Release 能命中 CI 在 main 上保存的 Rust 编译缓存。
-#
-# 使用方式：
-#   1. GitHub 仓库 → Actions 标签页 → 左侧选择 "Bump Version"
-#   2. 点击 "Run workflow" → 选择分支（main）→ 选择 bump 类型 → Run
-#   3. 等待该工作流完成（CI 通常 3-5 分钟），release.yml 会被 tag 自动触发
-
 on:
   workflow_dispatch:
     inputs:
@@ -85,10 +73,8 @@ jobs:
           sed -i -E '0,/^version = ".*"/s/^version = ".*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.toml
           grep -m1 '^version' src-tauri/Cargo.toml
 
-      - name: Sync Cargo.lock version (只修改 rd-app 的版本，保持其他依赖不变)
+      - name: Sync Cargo.lock version (仅修改 rd-app 的版本)
         run: |
-          # 直接使用 sed 替换 Cargo.lock 中 rd-app 的 version，不执行 cargo update
-          # 避免因重新解析依赖而改变 lock 文件的其他部分，确保缓存 key 稳定
           if grep -q 'name = "rd-app"' src-tauri/Cargo.lock; then
             sed -i '/name = "rd-app"/,/version = /s/version = "[^"]*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.lock
             echo "Cargo.lock rd-app version 已同步"
@@ -134,7 +120,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit to main (触发 CI) & 创建 tag（暂不推送）
+      - name: Commit to main & 创建 tag（暂不推送）
         id: commit-and-tag
         run: |
           TAG="v${{ steps.ver.outputs.next }}"
@@ -143,16 +129,11 @@ jobs:
 
           bump: ${{ inputs.bump }} (${{ steps.ver.outputs.current }} → ${{ steps.ver.outputs.next }})
           由 Bump Version 工作流自动生成。"
-          # 先推 commit 到 main，这会触发 CI 工作流
           git push origin "$GITHUB_REF_NAME"
-          # 创建 tag 但暂不推送，等 CI 完成后再推
           git tag "$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "已推送 commit 到 main，CI 将被触发。等待 CI 完成后再推送 tag $TAG"
 
-  # ------------------------------------------------------------
-  # 等待 CI 工作流成功完成后再推送 tag
-  # ------------------------------------------------------------
   wait-for-ci:
     name: Wait for CI
     needs: bump
@@ -165,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "等待 CI 工作流完成 (repo=$REPO)..."
-          MAX_WAIT=1800  # 最长等待 30 分钟（三平台 release 首次构建约 15min，后续命中缓存约 5min）
+          MAX_WAIT=1800
           WAITED=0
           while [ "$WAITED" -lt "$MAX_WAIT" ]; do
             RUN=$(gh run list \
@@ -195,9 +176,6 @@ jobs:
           echo "::error::等待 CI 超时（${MAX_WAIT}s）"
           exit 1
 
-  # ------------------------------------------------------------
-  # CI 成功后推送 tag，触发 Release
-  # ------------------------------------------------------------
   push-tag:
     name: Push Tag (Trigger Release)
     needs: [bump, wait-for-ci]
@@ -212,17 +190,13 @@ jobs:
       - name: Push tag
         run: |
           TAG="${{ needs.bump.outputs.tag }}"
-          # tag 在 bump job 的 runner 本地创建但未推送，这里新 checkout 不会有该 tag
-          # 直接在远程创建 tag（指向 main 最新 commit）
           SHA=$(git rev-parse HEAD)
           echo "在 commit $SHA 上创建并推送 tag: $TAG"
-          # 用 GitHub API 创建 tag，确保跨 runner 可用
           gh api \
             --method POST \
             /repos/${{ github.repository }}/git/refs \
             -f ref="refs/tags/$TAG" \
             -f sha="$SHA" || {
-              # 如果 tag 已存在（重试场景），直接 push
               echo "tag 可能已存在，尝试直接 push"
               git tag "$TAG" "$SHA" 2>/dev/null || true
               git push origin "$TAG" 2>/dev/null || true
