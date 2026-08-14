@@ -85,12 +85,6 @@ jobs:
           sed -i -E '0,/^version = ".*"/s/^version = ".*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.toml
           grep -m1 '^version' src-tauri/Cargo.toml
 
-      - name: Update Cargo.lock
-        run: |
-          cd src-tauri
-          cargo generate-lockfile
-          grep -A2 'name = "rd-app"' Cargo.lock | head -3
-
       - name: Bump src-tauri/tauri.conf.json
         run: |
           node -e "
@@ -107,17 +101,12 @@ jobs:
           V_PKG=$(node -p "require('./package.json').version")
           V_TF=$(node -p "require('./src-tauri/tauri.conf.json').version")
           V_CARGO=$(grep -m1 '^version' src-tauri/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
-          V_LOCK=$(grep -A2 'name = "rd-app"' src-tauri/Cargo.lock | grep 'version' | sed -E 's/.*"(.*)".*/\1/')
-          echo "package.json:      $V_PKG"
-          echo "tauri.conf.json:   $V_TF"
-          echo "Cargo.toml:        $V_CARGO"
-          echo "Cargo.lock rd-app: $V_LOCK"
+          echo "package.json:    $V_PKG"
+          echo "tauri.conf.json: $V_TF"
+          echo "Cargo.toml:      $V_CARGO"
+          # 注：不再检查 Cargo.lock — 它由 cargo build 自动同步，无需手动 generate
           if [ "$V_PKG" != "$V_TF" ] || [ "$V_PKG" != "$V_CARGO" ]; then
             echo "::error::版本号不一致"
-            exit 1
-          fi
-          if [ "$V_PKG" != "$V_LOCK" ]; then
-            echo "::error::Cargo.lock 中 rd-app 版本号未同步"
             exit 1
           fi
           if [ "$V_PKG" != "${{ steps.ver.outputs.next }}" ]; then
