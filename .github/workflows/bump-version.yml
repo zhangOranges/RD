@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   bump:
-    name: Bump & Tag
+    name: Bump & Release (并行触发 CI + Release)
     runs-on: ubuntu-latest
     outputs:
       next: ${{ steps.ver.outputs.next }}
@@ -120,21 +120,47 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # [skip ci] 让 push commit 时跳过 CI 工作流，但不影响 tag push 触发 Release
-      - name: Commit to main & push tag（直接触发 Release，跳过 CI）
+      # 同时 push commit（触发 CI）和 tag（触发 Release），两个工作流并行执行
+      - name: Commit to main & push tag (CI + Release 并行触发)
         id: commit-and-tag
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
+          set -euo pipefail
           TAG="v${{ steps.ver.outputs.next }}"
           git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
-          git commit -m "chore(release): ${{ steps.ver.outputs.next }} [skip ci]
+          git commit -m "chore(release): ${{ steps.ver.outputs.next }}
 
           bump: ${{ inputs.bump }} (${{ steps.ver.outputs.current }} → ${{ steps.ver.outputs.next }})
           由 Bump Version 工作流自动生成。"
+
+          SHA=$(git rev-parse HEAD)
+          echo "新 commit: $SHA"
+
+          # 1) Push commit 到 main → 触发 CI 工作流（语法/lint 检查）
+          # commit push 用 checkout 自带的 token 即可（CI 不依赖 PAT）
           git push origin "$GITHUB_REF_NAME"
-          echo "已推送 commit 到 main（commit message 含 [skip ci]，CI 已跳过）"
-          git tag "$TAG"
-          git push origin "$TAG"
-          echo "已推送 tag $TAG → Release 工作流已触发"
+          echo "✅ commit 已推送至 main → CI 工作流已触发"
+
+          # 2) Push tag → 触发 Release 工作流
+          # ⚠️  必须使用 GH_PAT (Personal Access Token) 推送 tag！
+          #    如果使用 GITHUB_TOKEN，GitHub 出于安全规则不会触发新的 workflow，
+          #    导致 Release 工作流完全不启动。
+          if [ -z "${GH_PAT:-}" ]; then
+            echo "::warning::未检测到 GH_PAT secret，尝试使用 GITHUB_TOKEN 推送 tag"
+            echo "::warning::若 Release 未触发，请在仓库 Secrets 中配置 GH_PAT (PAT 需 repo 权限)"
+            git tag "$TAG"
+            git push origin "$TAG"
+          else
+            echo "检测到 GH_PAT，使用 PAT 推送 tag 以确保 Release 工作流触发"
+            # 使用 PAT 推送 tag：通过 gh api 创建引用，确保使用正确的 token
+            git tag "$TAG"
+            # 用 PAT 作为认证推送 tag
+            REMOTE_URL="https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+            git push "$REMOTE_URL" "refs/tags/$TAG"
+          fi
+
+          echo "✅ tag $TAG 已推送 → Release 工作流已触发"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Summary
@@ -147,4 +173,6 @@ jobs:
           echo "| 递增类型 | ${{ inputs.bump }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tag | \`v${{ steps.ver.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "CI 已通过 [skip ci] 跳过 ✅，**Release** 工作流正在构建 macOS ARM64 产物。" >> "$GITHUB_STEP_SUMMARY"
+          echo "**CI**（前端类型检查 + Rust lint）与 **Release**（macOS ARM64 构建）正在并行执行。" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "> ⚠️ 若 Release 未触发，请在仓库 Secrets 中配置 \`GH_PAT\`（Personal Access Token，需 repo 权限）。" >> "$GITHUB_STEP_SUMMARY"
