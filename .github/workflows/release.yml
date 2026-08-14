@@ -33,7 +33,7 @@ jobs:
             label: windows-x64
             updater-key: windows-x86_64
             artifact-dir: artifacts-windows-x64
-            bundles: msi,nsis
+            bundles: nsis
           # --- Linux x64 (glibc) ---
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -90,16 +90,6 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev \
             patchelf desktop-file-utils libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libgtk-3-dev libgdk-pixbuf2.0-dev
-
-      # ----------------------------
-      # Windows WiX Toolset (生成 .msi) — 缓存安装
-      # ----------------------------
-      - name: Cache Tauri Wix tools (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: ~/.tauri/WixTools
-          key: tauri-wixtools
 
       # ----------------------------
       # Tauri Build
@@ -193,7 +183,7 @@ jobs:
               Write-Host "=== Found bundle dir: $bd ==="
               Get-ChildItem -Path $bd -Recurse -File | ForEach-Object {
                 Write-Host ("  {0}" -f $_.FullName)
-                if ($_.Extension -in ".msi",".exe",".sig") {
+                if ($_.Extension -in ".exe",".sig") {
                   Copy-Item $_.FullName -Destination (Join-Path $out $_.Name)
                   Write-Host ("    Copied -> {0}" -f $_.Name)
                 }
@@ -202,10 +192,7 @@ jobs:
           }
           Write-Host "=== Artifacts ==="
           Get-ChildItem $out | Format-Table -AutoSize Name,Length
-          $updater = Get-ChildItem $out\*.msi 2>$null | Select-Object -First 1
-          if (-not $updater) {
-            $updater = Get-ChildItem $out\*.exe 2>$null | Select-Object -First 1
-          }
+          $updater = Get-ChildItem $out\*.exe 2>$null | Select-Object -First 1
           $updaterFile = if ($updater) { $updater.Name } else { "" }
           echo "UPDATER_FILE=$updaterFile" >> $env:GITHUB_OUTPUT
 
@@ -257,7 +244,6 @@ jobs:
           # 根据后缀推断 updater format
           case "$UPDATER_FILE" in
             *.dmg)          UPDATER_FORMAT="dmg" ;;
-            *.msi)          UPDATER_FORMAT="msi" ;;
             *.exe)          UPDATER_FORMAT="nsis" ;;
             *.deb)          UPDATER_FORMAT="deb" ;;
             *.AppImage)     UPDATER_FORMAT="appimage" ;;
@@ -444,7 +430,6 @@ jobs:
           files: |
             all-artifacts/*.dmg
             all-artifacts/*.tar.gz
-            all-artifacts/*.msi
             all-artifacts/*.exe
             all-artifacts/*.deb
             all-artifacts/*.AppImage
@@ -452,7 +437,6 @@ jobs:
             all-artifacts/latest.json
             all-artifacts/*/*.dmg
             all-artifacts/*/*.tar.gz
-            all-artifacts/*/*.msi
             all-artifacts/*/*.exe
             all-artifacts/*/*.deb
             all-artifacts/*/*.AppImage
