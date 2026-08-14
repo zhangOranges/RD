@@ -37,7 +37,7 @@ jobs:
   # ------------------------------------------------------------
   rust-lint:
     name: Rust · check + clippy + fmt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: src-tauri
@@ -67,13 +67,11 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 与 Release workflow 使用相同前缀，确保 CI 在 main 分支保存的缓存
-          # 能被 Release 的 restore-keys 前缀命中（跨 scope 共享默认分支）
-          key: rust-cache-ubuntu-latest-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
+          # 与 Release workflow 使用相同前缀（ubuntu-22.04），确保同平台编译产物兼容
+          key: rust-cache-ubuntu-22.04-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
-            rust-cache-ubuntu-latest-Linux-
             rust-cache-ubuntu-22.04-Linux-
-            rust-cache-ubuntu-22.04-
+            rust-cache-ubuntu-latest-Linux-
 
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
