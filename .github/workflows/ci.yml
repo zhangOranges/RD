@@ -115,7 +115,9 @@ jobs:
         shell: bash
         run: npm install --no-audit --no-fund
 
+      # 关键：使用 bash shell 执行，避免 PowerShell 解析 `--` 出错
       - name: Build release cache (tauri build --no-bundle)
+        shell: bash
         run: |
           npm run tauri -- build \
             --target x86_64-pc-windows-msvc \
@@ -154,6 +156,7 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Build release cache (tauri build --no-bundle)
+        shell: bash
         run: |
           npm run tauri -- build \
             --target aarch64-apple-darwin \
