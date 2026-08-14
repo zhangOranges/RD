@@ -85,17 +85,9 @@ jobs:
             file
 
       # ========== 4. Rust 增量缓存（手动管理，更可靠） ==========
-      # 使用 actions/cache@v4 直接管理，key 基于 Cargo.lock hash + 平台，
-      # restore-keys 允许在 Cargo.lock 变化时回退到上一份缓存（部分命中）。
-      #
-      # 缓存作用域说明（关键！）：GitHub Actions 的缓存按分支/tag 隔离：
-      #   - CI 工作流：push 到 main → 缓存归在 "main" scope
-      #   - Release 工作流：push tag v0.1.x → 缓存归在 "v0.1.x" tag scope
-      # tag scope 只能访问自己 scope + 默认分支(main) scope 下的缓存，
-      # 因此 Release 的 restore-keys 必须能命中 CI 在 main 上保存的 key。
-      #
-      # 必须缓存完整 target（含 .rustc_info.json 元数据），否则 Cargo 无法
-      # 识别缓存状态，会全量重新编译所有 crate。
+      # 只允许精确 key 匹配，不做 restore-keys 回退
+      # 原因：跨平台恢复缓存会导致 glibc 不兼容
+      # CI 和 Release 必须使用完全相同的 key 格式：rust-cache-{platform}-{os}-{Cargo.lock hash}
       - name: Cache Cargo registry & target
         uses: actions/cache@v4
         with:
@@ -103,16 +95,7 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # v2: 完整 target 缓存（含 .rustc_info.json），与 CI 对齐
-          key: rust-cache-v2-${{ matrix.platform }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            rust-cache-v2-${{ matrix.platform }}-${{ runner.os }}-
-            rust-cache-v2-ubuntu-22.04-Linux-
-            rust-cache-v2-ubuntu-latest-Linux-
-            rust-cache-v2-windows-latest-Windows-
-            rust-cache-v2-macos-latest-macOS-
-            rust-cache-${{ matrix.platform }}-${{ runner.os }}-
-            rust-cache-${{ matrix.platform }}-
+          key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
       # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
       - name: Cache Tauri Wix tools (Windows only)
         if: matrix.platform == 'windows-latest'

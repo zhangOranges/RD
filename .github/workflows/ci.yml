@@ -67,12 +67,9 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # v2: 完整 target 缓存（含 .rustc_info.json），强制重建
-          key: rust-cache-v2-ubuntu-22.04-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            rust-cache-v2-ubuntu-22.04-Linux-
-            rust-cache-ubuntu-22.04-Linux-
-            rust-cache-ubuntu-latest-Linux-
+          # 只允许精确 key 匹配，不做 restore-keys 回退
+          # 原因：跨平台恢复缓存会导致 glibc 不兼容（如 ubuntu-latest → ubuntu-22.04）
+          key: rust-cache-ubuntu-22.04-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
 
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
