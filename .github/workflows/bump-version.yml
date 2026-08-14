@@ -169,7 +169,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "等待 CI 工作流完成 (repo=$REPO)..."
-          MAX_WAIT=600
+          MAX_WAIT=1800  # 最长等待 30 分钟（三平台 release 首次构建约 15min，后续命中缓存约 5min）
           WAITED=0
           while [ "$WAITED" -lt "$MAX_WAIT" ]; do
             RUN=$(gh run list \
