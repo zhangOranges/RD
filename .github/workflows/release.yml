@@ -9,24 +9,39 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  # ------------------------------------------------------------
-  # macOS (Apple Silicon) 构建：
-  #   1) Tauri build（自动生成 .sig 签名文件）
-  #   2) 上传产物 artifact（附带 .sig 文件）
-  #   3) 输出平台 manifest.json（给汇总 job 生成 latest.json 用）
-  # ------------------------------------------------------------
+  # ============================================================
+  # 三平台构建（并行）：
+  #   macOS ARM64  -> .dmg / .app.tar.gz
+  #   Windows x64  -> .msi / .exe
+  #   Linux   x64  -> .deb / .AppImage
+  # ============================================================
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
+          # --- macOS ARM64 ---
           - platform: macos-latest
             target: aarch64-apple-darwin
             label: macos-arm64
             updater-key: darwin-aarch64
-            updater-format: app
             artifact-dir: artifacts-macos-arm64
             bundles: dmg,app
+          # --- Windows x64 ---
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x64
+            updater-key: windows-x86_64
+            artifact-dir: artifacts-windows-x64
+            bundles: msi,nsis
+          # --- Linux x64 (glibc) ---
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            label: linux-x64
+            updater-key: linux-x86_64
+            artifact-dir: artifacts-linux-x64
+            bundles: deb,appimage
+
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
     outputs:
@@ -34,6 +49,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ----------------------------
+      # 基础环境
+      # ----------------------------
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -59,13 +77,42 @@ jobs:
           fi
           echo "Key length: ${#KEY} chars"
 
+      # ----------------------------
+      # Linux 系统依赖（生成 .deb 必需）
+      # ----------------------------
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fakeroot dpkg file libwebkit2gtk-4.1-dev \
+            build-essential curl wget file libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            patchelf desktop-file-utils libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libgtk-3-dev libgdk-pixbuf2.0-dev
+
+      # ----------------------------
+      # Windows WiX Toolset (生成 .msi) — 缓存安装
+      # ----------------------------
+      - name: Cache Tauri Wix tools (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.tauri/WixTools
+          key: tauri-wixtools
+
+      # ----------------------------
+      # Tauri Build
+      # ----------------------------
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      # 诊断产物目录（仅在构建失败时执行）
+      # ----------------------------
+      # 构建失败诊断
+      # ----------------------------
       - name: Diagnose bundle output (on failure)
         if: failure()
         shell: bash
@@ -87,20 +134,23 @@ jobs:
             if [ -d "$bundle" ]; then
               echo "=== BUNDLE DIR: $bundle ==="
               ls "$bundle" 2>/dev/null
-              find "$bundle" -maxdepth 2 -type f 2>/dev/null | grep -E '\.(dmg|tar\.gz|sig|app)$' || echo "  (no installer files at depth<=2)"
+              find "$bundle" -maxdepth 3 -type f 2>/dev/null | head -60
               echo "--- END ---"
             fi
           done
           echo ""
           echo "=== Installer files anywhere ==="
-          find src-tauri/target -maxdepth 5 -type f 2>/dev/null | grep -E '\.(dmg|tar\.gz|sig|app)$' | head -30 || echo "(none found)"
-          echo ""
+          find src-tauri/target -maxdepth 6 -type f 2>/dev/null | grep -E '\.(dmg|tar\.gz|sig|app|msi|exe|deb|AppImage)$' | head -40 || echo "(none found)"
           echo "=== Diagnostic complete ==="
           true
 
-      # 收集产物（macOS ARM64）
+      # ----------------------------
+      # macOS 产物收集
+      # ----------------------------
       - name: Collect artifacts (macOS)
         id: collect-macos
+        if: runner.os == 'macOS'
+        shell: bash
         run: |
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
@@ -108,8 +158,6 @@ jobs:
             if [ -d "$bundle" ]; then
               echo "=== Found bundle dir: $bundle ==="
               find "$bundle" -type f
-              echo ""
-              echo "=== Copying dmg / tar.gz / sig files ==="
               while IFS= read -r -d '' file; do
                 fname=$(basename "$file")
                 echo "  Copying $fname"
@@ -120,22 +168,102 @@ jobs:
           echo "=== Artifacts ==="
           ls -lh "$out"
           UPDATER_FILE=$(ls "$out"/*.dmg 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
-          UPDATER_FORMAT="dmg"
           if [ -z "$UPDATER_FILE" ]; then
             UPDATER_FILE=$(ls "$out"/*.tar.gz 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
-            UPDATER_FORMAT="app"
           fi
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
-          echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
 
-      # 生成平台更新清单
+      # ----------------------------
+      # Windows 产物收集
+      # ----------------------------
+      - name: Collect artifacts (Windows)
+        id: collect-windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "${{ matrix.artifact-dir }}"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $target = "${{ matrix.target }}"
+          $bundleDirs = @(
+            "src-tauri\target\release\bundle",
+            "src-tauri\target\$target\release\bundle"
+          )
+          foreach ($bd in $bundleDirs) {
+            if (Test-Path $bd) {
+              Write-Host "=== Found bundle dir: $bd ==="
+              Get-ChildItem -Path $bd -Recurse -File | ForEach-Object {
+                Write-Host ("  {0}" -f $_.FullName)
+                if ($_.Extension -in ".msi",".exe",".sig") {
+                  Copy-Item $_.FullName -Destination (Join-Path $out $_.Name)
+                  Write-Host ("    Copied -> {0}" -f $_.Name)
+                }
+              }
+            }
+          }
+          Write-Host "=== Artifacts ==="
+          Get-ChildItem $out | Format-Table -AutoSize Name,Length
+          $updater = Get-ChildItem $out\*.msi 2>$null | Select-Object -First 1
+          if (-not $updater) {
+            $updater = Get-ChildItem $out\*.exe 2>$null | Select-Object -First 1
+          }
+          $updaterFile = if ($updater) { $updater.Name } else { "" }
+          echo "UPDATER_FILE=$updaterFile" >> $env:GITHUB_OUTPUT
+
+      # ----------------------------
+      # Linux 产物收集
+      # ----------------------------
+      - name: Collect artifacts (Linux)
+        id: collect-linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          out="${{ matrix.artifact-dir }}"
+          mkdir -p "$out"
+          for bundle in "src-tauri/target/release/bundle" "src-tauri/target/${{ matrix.target }}/release/bundle"; do
+            if [ -d "$bundle" ]; then
+              echo "=== Found bundle dir: $bundle ==="
+              find "$bundle" -type f
+              while IFS= read -r -d '' file; do
+                fname=$(basename "$file")
+                echo "  Copying $fname"
+                cp "$file" "$out/"
+              done < <(find "$bundle" -type f \( -name '*.deb' -o -name '*.AppImage' -o -name '*.sig' \) -print0)
+            fi
+          done
+          echo "=== Artifacts ==="
+          ls -lh "$out"
+          UPDATER_FILE=$(ls "$out"/*.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
+          if [ -z "$UPDATER_FILE" ]; then
+            UPDATER_FILE=$(ls "$out"/*.AppImage 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
+          fi
+          echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
+
+      # ----------------------------
+      # 生成平台 manifest（给 latest.json 汇总用）
+      # ----------------------------
       - name: Write platform manifest
         id: write-manifest
         shell: bash
         run: |
           OUTDIR="${{ matrix.artifact-dir }}"
-          UPDATER_FILE="${{ steps.collect-macos.outputs.UPDATER_FILE }}"
-          UPDATER_FORMAT="${{ steps.collect-macos.outputs.UPDATER_FORMAT }}"
+          # 从对应平台的 collect step 取输出
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            UPDATER_FILE="${{ steps.collect-macos.outputs.UPDATER_FILE }}"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            UPDATER_FILE="${{ steps.collect-windows.outputs.UPDATER_FILE }}"
+          else
+            UPDATER_FILE="${{ steps.collect-linux.outputs.UPDATER_FILE }}"
+          fi
+          # 根据后缀推断 updater format
+          case "$UPDATER_FILE" in
+            *.dmg)          UPDATER_FORMAT="dmg" ;;
+            *.msi)          UPDATER_FORMAT="msi" ;;
+            *.exe)          UPDATER_FORMAT="nsis" ;;
+            *.deb)          UPDATER_FORMAT="deb" ;;
+            *.AppImage)     UPDATER_FORMAT="appimage" ;;
+            *.tar.gz)       UPDATER_FORMAT="app" ;;
+            *)              UPDATER_FORMAT="" ;;
+          esac
           KEY="${{ matrix.updater-key }}"
           TAG="${GITHUB_REF_NAME}"
           REPO="${GITHUB_REPOSITORY}"
@@ -165,7 +293,9 @@ jobs:
           cat "$MANIFEST_FILE"
           echo "manifest=$(cat "$MANIFEST_FILE" | tr -d '\n' | sed 's/"/\\"/g')" >> "$GITHUB_OUTPUT"
 
-      # 上传产物
+      # ----------------------------
+      # 上传每平台的 artifact
+      # ----------------------------
       - uses: actions/upload-artifact@v4
         with:
           name: rd-app-${{ matrix.label }}
@@ -174,9 +304,9 @@ jobs:
             manifests/*.json
           retention-days: 30
 
-  # ------------------------------------------------------------
+  # ============================================================
   # 汇总发布 Job
-  # ------------------------------------------------------------
+  # ============================================================
   release:
     name: Publish Release
     needs: build
@@ -197,12 +327,12 @@ jobs:
           ls -lh all-artifacts/manifests/ 2>/dev/null || echo "(no manifests)"
           cat all-artifacts/manifests/*.json 2>/dev/null || true
           echo "=== Full tree ==="
-          find all-artifacts -type f 2>/dev/null | head -50
+          find all-artifacts -type f 2>/dev/null | head -80
       - name: Flatten all artifacts to root
         run: |
           cd all-artifacts
           echo "=== Before flatten ==="
-          find . -type f | head -30
+          find . -type f | head -60
           while IFS= read -r -d '' file; do
             fname=$(basename "$file")
             cp "$file" "./$fname"
@@ -283,14 +413,10 @@ jobs:
               if (!m.signature) {
                 console.error(`Warning: manifest ${f} has empty signature, including anyway`);
               }
-              const entry = {
-                url: m.url,
-              };
+              const entry = { url: m.url };
               if (m.signature) entry.signature = m.signature;
               if (m.format) entry.format = m.format;
-              if (typeof m.size === 'number' && m.size > 0) {
-                entry.size = m.size;
-              }
+              if (typeof m.size === 'number' && m.size > 0) entry.size = m.size;
               platforms[m.key] = entry;
             }
           }
@@ -298,12 +424,7 @@ jobs:
           if (!notes) {
             notes = `## 版本 ${version}\n\n- 更新至最新版 RD 应用。\n- 详细更新记录请前往 GitHub Release 页面查看。`;
           }
-          const manifest = {
-            version,
-            notes,
-            pub_date: pubDate,
-            platforms,
-          };
+          const manifest = { version, notes, pub_date: pubDate, platforms };
           process.stdout.write(JSON.stringify(manifest, null, 2));
           NODEEOF
           echo "=== latest.json ==="
@@ -312,8 +433,8 @@ jobs:
             const j = JSON.parse(require("fs").readFileSync("latest.json","utf8"));
             require("fs").writeFileSync("release_body.md", j.notes || "", "utf8");
           ' || true
-          echo "=== release_body.md (first 20 lines) ==="
-          head -20 release_body.md 2>/dev/null || true
+          echo "=== release_body.md (first 30 lines) ==="
+          head -30 release_body.md 2>/dev/null || true
       - name: Create GitHub Release
         id: gh_release
         uses: softprops/action-gh-release@v2
@@ -323,10 +444,18 @@ jobs:
           files: |
             all-artifacts/*.dmg
             all-artifacts/*.tar.gz
+            all-artifacts/*.msi
+            all-artifacts/*.exe
+            all-artifacts/*.deb
+            all-artifacts/*.AppImage
             all-artifacts/*.sig
             all-artifacts/latest.json
             all-artifacts/*/*.dmg
             all-artifacts/*/*.tar.gz
+            all-artifacts/*/*.msi
+            all-artifacts/*/*.exe
+            all-artifacts/*/*.deb
+            all-artifacts/*/*.AppImage
             all-artifacts/*/*.sig
             all-artifacts/*/latest.json
           generate_release_notes: false
