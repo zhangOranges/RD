@@ -87,7 +87,6 @@ jobs:
       # ========== 4. Rust 增量缓存（只恢复，不保存） ==========
       # 使用 actions/cache/restore 只读取 CI 在 main scope 保存的缓存，
       # 不产生 Post Cache 步骤，避免浪费 tag scope 的缓存配额。
-      # CI 和 Release 使用完全相同的 key 格式：rust-cache-{platform}-{os}-{Cargo.lock hash}
       - name: Restore Cargo cache
         uses: actions/cache/restore@v4
         with:
@@ -96,6 +95,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-latest
+
       # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
       - name: Cache Tauri Wix tools (Windows only)
         if: matrix.platform == 'windows-latest'
@@ -120,10 +120,6 @@ jobs:
           echo "Key length: ${#KEY} chars"
 
       # ========== 7. Tauri 构建（增量编译） ==========
-      # 注意：tauri-cli 不需要单独安装！因为 package.json devDeps 有 @tauri-apps/cli，
-      # 上面 npm ci 时已经装好 node_modules/.bin/tauri，直接走 npm run tauri 调用。
-
-      # 诊断：构建前检查缓存状态
       - name: Diagnose cache state
         shell: bash
         run: |
@@ -445,8 +441,6 @@ jobs:
             for (const f of fs.readdirSync(manifestsDir)) {
               if (!f.endsWith('.json')) continue;
               const m = JSON.parse(fs.readFileSync(path.join(manifestsDir, f), 'utf8'));
-              // signature 可选：客户端手动实现更新逻辑，不依赖 Tauri updater 签名校验
-              // 只要 key 和 url_filename 存在即可
               if (!m.key || !m.url_filename) {
                 console.error(`Skipping incomplete manifest: ${f}`, m);
                 continue;

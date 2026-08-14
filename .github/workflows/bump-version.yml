@@ -85,16 +85,12 @@ jobs:
           sed -i -E '0,/^version = ".*"/s/^version = ".*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.toml
           grep -m1 '^version' src-tauri/Cargo.toml
 
-      - name: Sync Cargo.lock version
+      - name: Sync Cargo.lock version (只修改 rd-app 的版本，保持其他依赖不变)
         run: |
-          # 只同步 rd-app 的 version 字段到 Cargo.lock，不重新解析依赖
-          # 这样 Cargo.lock hash 保持不变（只有 rd-app version 一行变化），
-          # CI 和 Release 的缓存 key 仍能命中。
-          cd src-tauri
-          cargo update -p rd-app --precise "${{ steps.ver.outputs.next }}" 2>/dev/null || true
-          # 兜底：直接用 sed 替换 Cargo.lock 中 rd-app 的 version
-          if grep -q 'name = "rd-app"' Cargo.lock; then
-            sed -i '/name = "rd-app"/,/version = /s/version = "[^"]*"/version = "${{ steps.ver.outputs.next }}"/' Cargo.lock
+          # 直接使用 sed 替换 Cargo.lock 中 rd-app 的 version，不执行 cargo update
+          # 避免因重新解析依赖而改变 lock 文件的其他部分，确保缓存 key 稳定
+          if grep -q 'name = "rd-app"' src-tauri/Cargo.lock; then
+            sed -i '/name = "rd-app"/,/version = /s/version = "[^"]*"/version = "${{ steps.ver.outputs.next }}"/' src-tauri/Cargo.lock
             echo "Cargo.lock rd-app version 已同步"
           fi
 

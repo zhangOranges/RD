@@ -32,11 +32,12 @@ jobs:
         run: npx tsc --noEmit
       - name: Build frontend (vite build)
         run: npm run build
+
   # ------------------------------------------------------------
-  # 2) Rust backend: cargo check / clippy / fmt (Ubuntu)
+  # 2) Rust backend: cargo check / clippy / fmt + release build (Ubuntu)
   # ------------------------------------------------------------
   rust-lint:
-    name: Rust · check + clippy + fmt
+    name: Rust (Ubuntu) · check + clippy + fmt + release cache
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -67,19 +68,8 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 使用固定 key，不依赖 Cargo.lock hash
-          # 原因：bump 版本号会改变 Cargo.lock 中 rd-app 的 version 字段，
-          # 但这不应导致缓存失效。固定 key 让每次 bump 都覆盖同一个缓存。
+          # 固定 key，不依赖 Cargo.lock hash，版本号变化不影响依赖缓存
           key: rust-cache-ubuntu-22.04-Linux-latest
-
-      # ------------------------------------------------------------------
-      # 关键：保存并恢复 Cargo.lock 原始状态
-      # 原因：cargo check / build 可能自动更新 Cargo.lock（即使 --locked），
-      # 导致 Post Cache 保存的缓存对应的 Cargo.lock hash 与 Release 查找时的
-      # 原始 Cargo.lock hash 不一致，从而无法命中。
-      # ------------------------------------------------------------------
-      - name: Save original Cargo.lock
-        run: cp Cargo.lock Cargo.lock.orig
 
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
@@ -87,9 +77,9 @@ jobs:
         run: cargo check --locked
       - name: cargo clippy linter
         run: cargo clippy --locked --all-targets -- -D warnings
+
       # ------------------------------------------------------------------
-      # Release 构建（用于缓存 target/release 供 Release workflow 命中）
-      # 注意：tauri build 需要前端 dist 目录，所以先构建前端
+      # 构建前端（Release 同样需要）
       # ------------------------------------------------------------------
       - name: Install frontend deps & build dist
         working-directory: ${{ github.workspace }}
@@ -97,21 +87,19 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
+      # ------------------------------------------------------------------
+      # 关键：使用与 Release 完全相同的构建命令，并带上 --locked
+      # 这样 Cargo.lock 不会改变，编译产物与 Release 完全兼容
+      # ------------------------------------------------------------------
       - name: cargo build --release (缓存 release 产物)
-        # 关键：必须与 Release 使用完全相同的命令，包括 --features, --bins, --target
-        # 否则 Cargo 增量编译会认为是不同构建，全部重编
-        run: cargo build --release --bins --target x86_64-unknown-linux-gnu --features tauri/custom-protocol
+        run: |
+          cargo build --release --locked --bins --target x86_64-unknown-linux-gnu --features tauri/custom-protocol
 
-      # 关键：恢复 Cargo.lock 原始状态
-      # cargo 操作可能修改 Cargo.lock，导致 Post Cache 保存时的 hash 与
-      # Release 查找时的 hash 不一致。这里在 Post Cache 之前恢复。
-      - name: Restore original Cargo.lock
-        run: cp Cargo.lock.orig Cargo.lock
   # ------------------------------------------------------------
   # 3) Rust backend: cargo check + release build on Windows
   # ------------------------------------------------------------
   rust-windows-check:
-    name: Rust (Windows) · check + release
+    name: Rust (Windows) · check + release cache
     runs-on: windows-latest
     defaults:
       run:
@@ -130,14 +118,9 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 使用固定 key，不依赖 Cargo.lock hash
           key: rust-cache-windows-latest-Windows-latest
 
-      - name: Save original Cargo.lock
-        shell: bash
-        run: cp Cargo.lock Cargo.lock.orig
-
-      - name: cargo check --target x86_64-pc-windows-msvc
+      - name: cargo check --locked --target x86_64-pc-windows-msvc
         run: cargo check --locked --target x86_64-pc-windows-msvc
 
       - name: Install frontend deps & build dist
@@ -148,18 +131,14 @@ jobs:
           npm run build
 
       - name: cargo build --release (缓存 release 产物)
-        # 关键：必须与 Release 使用完全相同的命令，包括 --features, --bins, --target
-        run: cargo build --release --bins --target x86_64-pc-windows-msvc --features tauri/custom-protocol
-
-      - name: Restore original Cargo.lock
-        shell: bash
-        run: cp Cargo.lock.orig Cargo.lock
+        run: |
+          cargo build --release --locked --bins --target x86_64-pc-windows-msvc --features tauri/custom-protocol
 
   # ------------------------------------------------------------
   # 4) Rust backend: cargo check + release build on macOS (Apple Silicon)
   # ------------------------------------------------------------
   rust-macos-check:
-    name: Rust (macOS) · check + release
+    name: Rust (macOS) · check + release cache
     runs-on: macos-latest
     defaults:
       run:
@@ -178,13 +157,9 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 使用固定 key，不依赖 Cargo.lock hash
           key: rust-cache-macos-latest-macOS-latest
 
-      - name: Save original Cargo.lock
-        run: cp Cargo.lock Cargo.lock.orig
-
-      - name: cargo check --target aarch64-apple-darwin
+      - name: cargo check --locked --target aarch64-apple-darwin
         run: cargo check --locked --target aarch64-apple-darwin
 
       - name: Install frontend deps & build dist
@@ -194,8 +169,5 @@ jobs:
           npm run build
 
       - name: cargo build --release (缓存 release 产物)
-        # 关键：必须与 Release 使用完全相同的命令，包括 --features, --bins, --target
-        run: cargo build --release --bins --target aarch64-apple-darwin --features tauri/custom-protocol
-
-      - name: Restore original Cargo.lock
-        run: cp Cargo.lock.orig Cargo.lock
+        run: |
+          cargo build --release --locked --bins --target aarch64-apple-darwin --features tauri/custom-protocol
