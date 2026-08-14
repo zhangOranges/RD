@@ -50,15 +50,24 @@ function typeLabel(fileType: 'dir' | 'file' | 'symlink'): string {
   return '文件';
 }
 
-/** 将 Windows 路径拆分为面包屑分段，每段带可跳转的完整路径。 */
+/** 将路径拆分为面包屑分段，每段带可跳转的完整路径。跨平台兼容。 */
 function buildBreadcrumbs(path: string): { name: string; path: string }[] {
   if (!path) return [];
-  const parts = path.split('\\').filter(Boolean);
+  const sep = path.includes('\\') ? '\\' : '/';
+  const parts = path.split(sep).filter(Boolean);
   const segments: { name: string; path: string }[] = [];
   parts.forEach((part, i) => {
     const subParts = parts.slice(0, i + 1);
-    // 盘符段需要补回尾部反斜杠：C: → C:\
-    const segPath = subParts.length === 1 ? `${subParts[0]}\\` : subParts.join('\\');
+    let segPath: string;
+    if (subParts.length === 1 && /^[A-Za-z]:$/.test(subParts[0])) {
+      // Windows 盘符段补回尾部反斜杠：C: → C:\
+      segPath = `${subParts[0]}\\`;
+    } else if (sep === '/') {
+      // macOS/Linux：每段前补 /，如 /Users → /Users/Admin
+      segPath = '/' + subParts.join('/');
+    } else {
+      segPath = subParts.join('\\');
+    }
     segments.push({ name: part, path: segPath });
   });
   return segments;
@@ -382,7 +391,7 @@ export default function LocalFilePane() {
               }
             }}
             onBlur={() => void commitPathEdit()}
-            placeholder="输入目录路径，例如 C:\Users\Administrator"
+            placeholder="输入目录路径，例如 /Users/username 或 C:\Users\Administrator"
           />
         ) : (
           <div
@@ -393,7 +402,7 @@ export default function LocalFilePane() {
           >
             {crumbs.map((c, i) => (
               <span key={`${c.path}-${i}`} className="local-breadcrumb-wrap">
-                {i > 0 && <span className="local-breadcrumb-sep">\</span>}
+                {i > 0 && <span className="local-breadcrumb-sep">{currentPath?.includes('\\') ? '\\' : '/'}</span>}
                 <button
                   type="button"
                   className={`local-breadcrumb-item ${i === crumbs.length - 1 ? 'is-current' : ''}`}

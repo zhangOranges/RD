@@ -111,31 +111,50 @@ interface LocalFileState {
   resetState: () => void;
 }
 
-// ---------- Windows 路径工具 ----------
-// 项目运行在 Windows，路径分隔符为 `\`。根目录形如 `C:\`。
+// ---------- 跨平台路径工具 ----------
+// Windows 分隔符为 `\`（根目录形如 `C:\`），macOS/Linux 分隔符为 `/`（根目录为 `/`）。
+// 通过检测路径中已存在的分隔符来判断当前平台，无需运行时判断 OS。
 
-/** 判断是否为盘根目录（如 `C:\`），根目录不再向上。 */
-function isDriveRoot(path: string): boolean {
-  return /^[A-Za-z]:\\$/.test(path);
+/** 获取路径使用的分隔符：Windows 路径含 `\` 则用 `\`，否则用 `/`。 */
+function pathSep(path: string): string {
+  return path.includes('\\') ? '\\' : '/';
 }
 
-/** 取上级目录；已在盘根或为空则原样返回。 */
+/** 判断是否为根目录（如 `C:\` 或 `/`），根目录不再向上。 */
+function isDriveRoot(path: string): boolean {
+  if (!path) return false;
+  // Windows 盘根：C:\
+  if (/^[A-Za-z]:\\$/.test(path)) return true;
+  // macOS/Linux 根目录：/
+  if (path === '/') return true;
+  return false;
+}
+
+/** 取上级目录；已在根目录或为空则原样返回。 */
 function parentPath(path: string): string {
   if (!path) return path;
   if (isDriveRoot(path)) return path;
-  const parts = path.split('\\').filter(Boolean); // ['C:', 'Users', 'Admin']
+  const sep = pathSep(path);
+  const parts = path.split(sep).filter(Boolean);
   if (parts.length <= 1) return path;
   parts.pop();
-  const drive = parts[0];
-  const rest = parts.slice(1);
-  return rest.length === 0 ? `${drive}\\` : [drive, ...rest].join('\\');
+  // Windows 盘根补回尾部反斜杠：C: → C:\
+  if (parts.length === 1 && /^[A-Za-z]:$/.test(parts[0])) {
+    return `${parts[0]}\\`;
+  }
+  // macOS/Linux 根目录：回到 /
+  if (parts.length === 0) {
+    return '/';
+  }
+  return parts.join(sep);
 }
 
-/** 拼接子路径：`C:\Users` + `Admin` → `C:\Users\Admin`；`C:\` + `Users` → `C:\Users`。 */
+/** 拼接子路径，自动使用与 base 一致的分隔符。 */
 export function joinLocalPath(base: string, name: string): string {
   if (!base) return name;
-  if (base.endsWith('\\')) return base + name;
-  return `${base}\\${name}`;
+  const sep = pathSep(base);
+  if (base.endsWith(sep)) return base + name;
+  return `${base}${sep}${name}`;
 }
 
 /** 把 {state} 写到指定 hostId 的持久化 map（失败静默），仅在路径非空时生效。
