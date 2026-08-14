@@ -8,27 +8,18 @@ permissions:
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
-
 jobs:
+  # ------------------------------------------------------------
+  # macOS (Apple Silicon) 构建：
+  #   1) Tauri build（自动生成 .sig 签名文件）
+  #   2) 上传产物 artifact（附带 .sig 文件）
+  #   3) 输出平台 manifest.json（给汇总 job 生成 latest.json 用）
+  # ------------------------------------------------------------
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: windows-x64
-            updater-key: windows-x86_64
-            updater-format: nsis
-            artifact-dir: artifacts-windows
-            bundles: nsis,msi
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            label: linux-x64
-            updater-key: linux-x86_64
-            updater-format: appimage
-            artifact-dir: artifacts-linux
-            bundles: deb,appimage
           - platform: macos-latest
             target: aarch64-apple-darwin
             label: macos-arm64
@@ -58,43 +49,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            fakeroot \
-            dpkg \
-            file
-
-      - name: Restore Cargo cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            src-tauri/target
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-latest
-
-      - name: Cache Tauri Wix tools (Windows only)
-        if: matrix.platform == 'windows-latest'
-        uses: actions/cache@v4
-        with:
-          path: src-tauri/.tauri-cache
-          key: ${{ matrix.platform }}-tauri-wix-v1
-      - name: Set Tauri cache dir env
-        if: matrix.platform == 'windows-latest'
-        shell: bash
-        run: echo "TAURI_CACHE_DIR=src-tauri/.tauri-cache" >> $GITHUB_ENV
-
       - name: Verify signing key secret
         shell: bash
         run: |
@@ -105,43 +59,18 @@ jobs:
           fi
           echo "Key length: ${#KEY} chars"
 
-      - name: Diagnose cache state
-        shell: bash
-        run: |
-          echo "=== 缓存状态诊断 ==="
-          if [ -d src-tauri/target/release ]; then
-            RLIB_COUNT=$(find src-tauri/target/release/deps -name "*.rlib" 2>/dev/null | wc -l)
-            FINGERPRINT_COUNT=$(find src-tauri/target/release/.fingerprint -type d 2>/dev/null | wc -l)
-            echo "target/release/deps/*.rlib 数量: $RLIB_COUNT"
-            echo "target/release/.fingerprint 目录数: $FINGERPRINT_COUNT"
-            if [ "$RLIB_COUNT" -gt 10 ]; then
-              echo "→ 缓存命中 ✅ 预期增量编译（只编译 rd-app）"
-            else
-              echo "→ 缓存未命中 ❌ 预期全量编译"
-            fi
-          else
-            echo "target/release 不存在 → 缓存未命中 ❌ 预期全量编译"
-          fi
-
-      # 关键修正：使用 bash shell 避免 PowerShell 解析 `--` 出错
       - name: Tauri build
-        shell: bash
-        run: |
-          npm run tauri -- build \
-            --target ${{ matrix.target }} \
-            -b ${{ matrix.bundles }} \
-            --verbose \
-            -- --locked
+        run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          CARGO_INCREMENTAL: 1
 
+      # 诊断产物目录（仅在构建失败时执行）
       - name: Diagnose bundle output (on failure)
         if: failure()
         shell: bash
         run: |
-          set +o pipefail
+          set +e
           echo "=== Environment ==="
           echo "matrix.target=${{ matrix.target }}"
           echo "matrix.bundles=${{ matrix.bundles }}"
@@ -149,9 +78,6 @@ jobs:
           echo ""
           echo "=== All bundle dirs ==="
           find src-tauri/target -name "bundle" -type d 2>/dev/null | head -20 || echo "(none)"
-          echo ""
-          echo "--- target/release contents ---"
-          ls src-tauri/target/release/ 2>/dev/null | head -20 || echo "(not found)"
           echo ""
           TRIPLE_DIR="src-tauri/target/${{ matrix.target }}/release"
           echo "--- $TRIPLE_DIR contents ---"
@@ -161,99 +87,20 @@ jobs:
             if [ -d "$bundle" ]; then
               echo "=== BUNDLE DIR: $bundle ==="
               ls "$bundle" 2>/dev/null
-              find "$bundle" -maxdepth 2 -type f 2>/dev/null | grep -E '\.(deb|AppImage|dmg|tar\.gz|sig|exe|msi)$' || echo "  (no installer files at depth<=2)"
+              find "$bundle" -maxdepth 2 -type f 2>/dev/null | grep -E '\.(dmg|tar\.gz|sig|app)$' || echo "  (no installer files at depth<=2)"
               echo "--- END ---"
             fi
           done
           echo ""
           echo "=== Installer files anywhere ==="
-          find src-tauri/target -maxdepth 5 -type f 2>/dev/null | grep -E '\.(deb|AppImage|dmg|tar\.gz|sig|exe|msi)$' | head -30 || echo "(none found)"
+          find src-tauri/target -maxdepth 5 -type f 2>/dev/null | grep -E '\.(dmg|tar\.gz|sig|app)$' | head -30 || echo "(none found)"
           echo ""
           echo "=== Diagnostic complete ==="
           true
 
-      - name: Collect artifacts (Windows)
-        id: collect-windows
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          $out = "${{ matrix.artifact-dir }}"
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          $bundlePaths = @(
-            "src-tauri/target/release/bundle",
-            "src-tauri/target/${{ matrix.target }}/release/bundle"
-          )
-          foreach ($bundle in $bundlePaths) {
-            if (Test-Path $bundle) {
-              Write-Host "=== Found bundle dir: $bundle ==="
-              Get-ChildItem $bundle -Recurse -Depth 3 2>$null | ForEach-Object { Write-Host $_.FullName }
-              Get-ChildItem -Path $bundle -Recurse -File -Include *.msi,*.exe,*.sig | ForEach-Object {
-                Write-Host "Copying $($_.Name)"
-                Copy-Item $_.FullName -Destination $out
-              }
-            }
-          }
-          $portablePaths = @(
-            "src-tauri/target/release/rd_app.exe",
-            "src-tauri/target/${{ matrix.target }}/release/rd_app.exe"
-          )
-          foreach ($p in $portablePaths) {
-            if (Test-Path $p) {
-              Copy-Item $p -Destination $out
-              break
-            }
-          }
-          $updaterFile = Get-ChildItem $out -Filter "*.exe" | Where-Object { $_.Name -notlike "*portable*" } | Select-Object -First 1
-          if (-not $updaterFile) { $updaterFile = Get-ChildItem $out -Filter "*.msi" | Select-Object -First 1 }
-          if ($updaterFile) {
-            echo "UPDATER_FILE=$($updaterFile.Name)" >> $env:GITHUB_OUTPUT
-            echo "UPDATER_FORMAT=nsis" >> $env:GITHUB_OUTPUT
-          }
-          Write-Host "=== Artifacts ==="
-          Get-ChildItem $out | ForEach-Object { Write-Host "  $($_.Name)" }
-
-      - name: Collect artifacts (Linux)
-        id: collect-linux
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          out="${{ matrix.artifact-dir }}"
-          mkdir -p "$out"
-          BUNDLE1="src-tauri/target/${{ matrix.target }}/release/bundle"
-          BUNDLE2="src-tauri/target/release/bundle"
-          bundle=""
-          if [ -d "$BUNDLE1" ]; then bundle="$BUNDLE1"; elif [ -d "$BUNDLE2" ]; then bundle="$BUNDLE2"; fi
-          if [ -n "$bundle" ]; then
-            echo "=== Bundle dir: $bundle ==="
-            find "$bundle" -type f
-            echo ""
-            echo "=== Copying installers and sig files ==="
-            while IFS= read -r -d '' file; do
-              fname=$(basename "$file")
-              if [ "$fname" = "control.tar.gz" ] || [ "$fname" = "data.tar.gz" ]; then
-                echo "  Skipping (internal deb file): $fname"
-                continue
-              fi
-              echo "  Copying $fname"
-              cp "$file" "$out/"
-            done < <(find "$bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.sig' \) -print0)
-          else
-            echo "ERROR: No bundle directory found!"
-            find src-tauri/target -maxdepth 4 -name "bundle" -type d 2>/dev/null
-          fi
-          echo "=== Artifacts ==="
-          ls -lh "$out"
-          UPDATER_FILE=$(ls "$out"/*.AppImage 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
-          UPDATER_FORMAT="appimage"
-          if [ -z "$UPDATER_FILE" ]; then
-            UPDATER_FILE=$(ls "$out"/*.deb 2>/dev/null | head -1 | xargs basename 2>/dev/null || true)
-            UPDATER_FORMAT="deb"
-          fi
-          echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
-          echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
-
+      # 收集产物（macOS ARM64）
       - name: Collect artifacts (macOS)
         id: collect-macos
-        if: startsWith(matrix.platform, 'macos-')
         run: |
           out="${{ matrix.artifact-dir }}"
           mkdir -p "$out"
@@ -281,13 +128,14 @@ jobs:
           echo "UPDATER_FILE=$UPDATER_FILE" >> "$GITHUB_OUTPUT"
           echo "UPDATER_FORMAT=$UPDATER_FORMAT" >> "$GITHUB_OUTPUT"
 
+      # 生成平台更新清单
       - name: Write platform manifest
         id: write-manifest
         shell: bash
         run: |
           OUTDIR="${{ matrix.artifact-dir }}"
-          UPDATER_FILE="${{ steps.collect-windows.outputs.UPDATER_FILE }}${{ steps.collect-linux.outputs.UPDATER_FILE }}${{ steps.collect-macos.outputs.UPDATER_FILE }}"
-          UPDATER_FORMAT="${{ steps.collect-windows.outputs.UPDATER_FORMAT }}${{ steps.collect-linux.outputs.UPDATER_FORMAT }}${{ steps.collect-macos.outputs.UPDATER_FORMAT }}"
+          UPDATER_FILE="${{ steps.collect-macos.outputs.UPDATER_FILE }}"
+          UPDATER_FORMAT="${{ steps.collect-macos.outputs.UPDATER_FORMAT }}"
           KEY="${{ matrix.updater-key }}"
           TAG="${GITHUB_REF_NAME}"
           REPO="${GITHUB_REPOSITORY}"
@@ -317,6 +165,7 @@ jobs:
           cat "$MANIFEST_FILE"
           echo "manifest=$(cat "$MANIFEST_FILE" | tr -d '\n' | sed 's/"/\\"/g')" >> "$GITHUB_OUTPUT"
 
+      # 上传产物
       - uses: actions/upload-artifact@v4
         with:
           name: rd-app-${{ matrix.label }}
@@ -325,6 +174,9 @@ jobs:
             manifests/*.json
           retention-days: 30
 
+  # ------------------------------------------------------------
+  # 汇总发布 Job
+  # ------------------------------------------------------------
   release:
     name: Publish Release
     needs: build
@@ -469,18 +321,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           body_path: all-artifacts/release_body.md
           files: |
-            all-artifacts/*.exe
-            all-artifacts/*.msi
-            all-artifacts/*.deb
-            all-artifacts/*.AppImage
             all-artifacts/*.dmg
             all-artifacts/*.tar.gz
             all-artifacts/*.sig
             all-artifacts/latest.json
-            all-artifacts/*/*.exe
-            all-artifacts/*/*.msi
-            all-artifacts/*/*.deb
-            all-artifacts/*/*.AppImage
             all-artifacts/*/*.dmg
             all-artifacts/*/*.tar.gz
             all-artifacts/*/*.sig
