@@ -58,7 +58,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install npm deps
-        run: npm ci --prefer-offline --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
       # ========== 2. Rust 工具链 ==========
       - name: Setup Rust toolchain

@@ -92,7 +92,7 @@ jobs:
       # 注意：tauri build 需要前端 dist 目录，所以先构建前端
       # ------------------------------------------------------------------
       - name: Install frontend deps & build dist
-        working-directory: ..
+        working-directory: ${{ github.workspace }}
         run: |
           npm install --no-audit --no-fund
           npm run build
@@ -141,7 +141,7 @@ jobs:
         run: cargo check --locked --target x86_64-pc-windows-msvc
 
       - name: Install frontend deps & build dist
-        working-directory: ..
+        working-directory: ${{ github.workspace }}
         shell: bash
         run: |
           npm install --no-audit --no-fund
@@ -188,7 +188,7 @@ jobs:
         run: cargo check --locked --target aarch64-apple-darwin
 
       - name: Install frontend deps & build dist
-        working-directory: ..
+        working-directory: ${{ github.workspace }}
         run: |
           npm install --no-audit --no-fund
           npm run build
