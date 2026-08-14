@@ -94,7 +94,9 @@ jobs:
       # 首次运行会慢（~8min），后续命中缓存后会快。
       # ------------------------------------------------------------------
       - name: cargo build --release (缓存 release 产物)
-        run: cargo build --release --locked
+        # 关键：必须与 Release 使用完全相同的命令，包括 --features
+        # 否则 Cargo 增量编译会认为是不同构建，全部重编
+        run: cargo build --release --locked --features tauri/custom-protocol
 
       # 关键：恢复 Cargo.lock 原始状态
       # cargo 操作可能修改 Cargo.lock，导致 Post Cache 保存时的 hash 与
@@ -135,7 +137,8 @@ jobs:
         run: cargo check --locked --target x86_64-pc-windows-msvc
 
       - name: cargo build --release (缓存 release 产物)
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+        # 关键：必须与 Release 使用完全相同的命令，包括 --features
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc --features tauri/custom-protocol
 
       - name: Restore original Cargo.lock
         shell: bash
@@ -174,7 +177,8 @@ jobs:
         run: cargo check --locked --target aarch64-apple-darwin
 
       - name: cargo build --release (缓存 release 产物)
-        run: cargo build --release --locked --target aarch64-apple-darwin
+        # 关键：必须与 Release 使用完全相同的命令，包括 --features
+        run: cargo build --release --locked --target aarch64-apple-darwin --features tauri/custom-protocol
 
       - name: Restore original Cargo.lock
         run: cp Cargo.lock.orig Cargo.lock
