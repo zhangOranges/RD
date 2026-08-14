@@ -120,90 +120,22 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit to main & 创建 tag（暂不推送）
+      # [skip ci] 让 push commit 时跳过 CI 工作流，但不影响 tag push 触发 Release
+      - name: Commit to main & push tag（直接触发 Release，跳过 CI）
         id: commit-and-tag
         run: |
           TAG="v${{ steps.ver.outputs.next }}"
           git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
-          git commit -m "chore(release): ${{ steps.ver.outputs.next }}
+          git commit -m "chore(release): ${{ steps.ver.outputs.next }} [skip ci]
 
           bump: ${{ inputs.bump }} (${{ steps.ver.outputs.current }} → ${{ steps.ver.outputs.next }})
           由 Bump Version 工作流自动生成。"
           git push origin "$GITHUB_REF_NAME"
+          echo "已推送 commit 到 main（commit message 含 [skip ci]，CI 已跳过）"
           git tag "$TAG"
+          git push origin "$TAG"
+          echo "已推送 tag $TAG → Release 工作流已触发"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "已推送 commit 到 main，CI 将被触发。等待 CI 完成后再推送 tag $TAG"
-
-  wait-for-ci:
-    name: Wait for CI
-    needs: bump
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for CI workflow to complete
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          echo "等待 CI 工作流完成 (repo=$REPO)..."
-          MAX_WAIT=1800
-          WAITED=0
-          while [ "$WAITED" -lt "$MAX_WAIT" ]; do
-            RUN=$(gh run list \
-              --repo "$REPO" \
-              --workflow=ci.yml \
-              --branch=main \
-              --limit=1 \
-              --json status,conclusion,databaseId,headSha \
-              --jq '.[0]')
-            STATUS=$(echo "$RUN" | jq -r '.status')
-            CONCLUSION=$(echo "$RUN" | jq -r '.conclusion')
-            RUN_ID=$(echo "$RUN" | jq -r '.databaseId')
-            SHA=$(echo "$RUN" | jq -r '.headSha')
-            echo "CI run #$RUN_ID: status=$STATUS conclusion=$CONCLUSION sha=$SHA (已等待 ${WAITED}s)"
-            if [ "$STATUS" = "completed" ]; then
-              if [ "$CONCLUSION" = "success" ]; then
-                echo "CI 成功完成！"
-                exit 0
-              else
-                echo "::error::CI 工作流失败 (conclusion=$CONCLUSION)，取消发布"
-                exit 1
-              fi
-            fi
-            sleep 15
-            WAITED=$((WAITED + 15))
-          done
-          echo "::error::等待 CI 超时（${MAX_WAIT}s）"
-          exit 1
-
-  push-tag:
-    name: Push Tag (Trigger Release)
-    needs: [bump, wait-for-ci]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-
-      - name: Push tag
-        run: |
-          TAG="${{ needs.bump.outputs.tag }}"
-          SHA=$(git rev-parse HEAD)
-          echo "在 commit $SHA 上创建并推送 tag: $TAG"
-          gh api \
-            --method POST \
-            /repos/${{ github.repository }}/git/refs \
-            -f ref="refs/tags/$TAG" \
-            -f sha="$SHA" || {
-              echo "tag 可能已存在，尝试直接 push"
-              git tag "$TAG" "$SHA" 2>/dev/null || true
-              git push origin "$TAG" 2>/dev/null || true
-            }
-          echo "已推送 tag $TAG，Release 工作流将被触发"
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
@@ -211,8 +143,8 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| 项目 | 值 |" >> "$GITHUB_STEP_SUMMARY"
           echo "|------|-----|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| 新版本 | ${{ needs.bump.outputs.next }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 新版本 | ${{ steps.ver.outputs.next }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| 递增类型 | ${{ inputs.bump }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Tag | \`v${{ needs.bump.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`v${{ steps.ver.outputs.next }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "CI 已通过 ✅，tag 已推送，**Release** 工作流正在构建三平台产物。" >> "$GITHUB_STEP_SUMMARY"
+          echo "CI 已通过 [skip ci] 跳过 ✅，**Release** 工作流正在构建 macOS ARM64 产物。" >> "$GITHUB_STEP_SUMMARY"
