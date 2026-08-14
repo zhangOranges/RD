@@ -12,37 +12,63 @@
 
 <!-- ========== 徽章 Badges ========== -->
 <p align="center">
-  <!-- 当前项目版本 -->
-  <img alt="version" src="https://img.shields.io/badge/version-v0.1.87-blue?style=for-the-badge" />
-  &nbsp;
-  <!-- 最新 GitHub Release -->
+  <!-- 最新 Release 版本（优先展示，官方动态数据） -->
   <a href="https://github.com/zhangOranges/RD/releases">
-    <img alt="release" src="https://img.shields.io/github/v/release/zhangOranges/RD?style=for-the-badge&label=Release&logo=github" />
+    <img
+      alt="Latest Release"
+      src="https://img.shields.io/github/v/release/zhangOranges/RD?display_name=tag&logo=github&logoColor=ffffff&labelColor=0b1020&color=5b8cff&style=flat-square"
+    />
   </a>
   &nbsp;
-  <!-- 仓库 Star -->
-  <a href="https://github.com/zhangOranges/RD/stargazers">
-    <img alt="stars" src="https://img.shields.io/github/stars/zhangOranges/RD?style=for-the-badge&color=yellowgreen&logo=github" />
-  </a>
+  <!-- 当前项目最小/推荐版本（静态，和 package.json 对齐） -->
+  <img
+    alt="Current Version"
+    src="https://img.shields.io/badge/version-v0.1.87-ffffff?labelColor=3c4658&color=1f2937&style=flat-square"
+  />
   &nbsp;
-  <!-- Forks -->
-  <a href="https://github.com/zhangOranges/RD/fork">
-    <img alt="forks" src="https://img.shields.io/github/forks/zhangOranges/RD?style=for-the-badge&color=lightgrey&logo=github" />
-  </a>
-  &nbsp;
-  <!-- 许可证 MIT -->
+  <!-- 许可证 -->
   <a href="#许可证">
-    <img alt="license" src="https://img.shields.io/github/license/zhangOranges/RD?style=for-the-badge&label=License&color=success" />
+    <img
+      alt="MIT License"
+      src="https://img.shields.io/github/license/zhangOranges/RD?logo=opensourceinitiative&logoColor=ffffff&labelColor=222&color=7b5cff&style=flat-square"
+    />
   </a>
+  &nbsp;
+  <!-- Star -->
+  <a href="https://github.com/zhangOranges/RD/stargazers">
+    <img
+      alt="GitHub Stars"
+      src="https://img.shields.io/github/stars/zhangOranges/RD?logo=github&logoColor=ffffff&labelColor=1f2937&color=ffb703&style=flat-square"
+    />
+  </a>
+  &nbsp;
+  <!-- Issues -->
+  <a href="https://github.com/zhangOranges/RD/issues">
+    <img
+      alt="GitHub Issues"
+      src="https://img.shields.io/github/issues/zhangOranges/RD?logo=github&logoColor=ffffff&labelColor=1f2937&color=ef476f&style=flat-square"
+    />
+  </a>
+  &nbsp;
+
 </p>
 
 <!-- ========== 平台支持 ========== -->
 <p align="center">
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" />
+  <img
+    alt="Windows x64"
+    src="https://img.shields.io/badge/Windows%20x64-0078D6?style=flat-square&logo=windows11&logoColor=white&labelColor=0b1020"
+  />
   &nbsp;
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" />
+  <img
+    alt="macOS ARM64"
+    src="https://img.shields.io/badge/macOS%20ARM64-000000?style=flat-square&logo=apple&logoColor=white&labelColor=0b1020"
+  />
   &nbsp;
-  <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" />
+  <img
+    alt="Linux x64 glibc"
+    src="https://img.shields.io/badge/Linux%20x64-FCC624?style=flat-square&logo=linux&logoColor=black&labelColor=0b1020"
+  />
 </p>
 
 <!-- ========== 目录 ========== -->
@@ -316,6 +342,42 @@ git push origin v0.1.88
 ## 📄 许可证
 
 本项目基于 **MIT License** 开源 — 详见 [LICENSE](LICENSE) 文件。
+
+---
+
+<!-- ====================================================================== -->
+<!-- 🙌 欢迎下载测试                                                          -->
+<!-- ====================================================================== -->
+## 🙌 欢迎下载测试
+
+<p align="center">
+  <strong>如果你是开发者 / 运维 / 重度 SSH 用户，</strong>
+  <br>
+  欢迎下载最新版本试用，你的反馈就是我们最宝贵的迭代动力 💪
+</p>
+
+<p align="center">
+  <a href="https://github.com/zhangOranges/RD/releases">
+    <img
+      alt="Download Latest Release"
+      src="https://img.shields.io/badge/GitHub-Download%20Latest%20Release-5b8cff?style=for-the-badge&logo=github&logoColor=ffffff&labelColor=0b1020"
+    />
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/zhangOranges/RD/issues/new?assignees=&labels=bug&template=bug_report.md&title=%5BBug%5D">🐞 报 Bug</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/zhangOranges/RD/issues/new?assignees=&labels=enhancement&template=feature_request.md&title=%5BFeature%5D">✨ 提功能建议</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/zhangOranges/RD/discussions">💬 参与讨论</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/zhangOranges/RD#%EF%B8%8F-%E8%AE%A2%E8%B4%AD%E6%B5%8B%E8%AF%95">⭐ 点个 Star 支持一下</a>
+</p>
+
+<p align="center">
+  <sub>如遇到终端、文件传输、跨平台构建、自动更新、主题等任何问题，欢迎提 Issue，我们会尽快响应。</sub>
+</p>
 
 <br>
 <p align="center">
