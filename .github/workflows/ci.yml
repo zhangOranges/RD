@@ -81,6 +81,15 @@ jobs:
         run: cargo check --locked
       - name: cargo clippy linter
         run: cargo clippy --locked --all-targets -- -D warnings
+      # ------------------------------------------------------------------
+      # Release 构建（用于缓存 target/release 供 Release workflow 命中）
+      # CI 用 debug 模式检查，但 Release 用 release 模式构建。
+      # 两者产物目录不同（target/debug vs target/release），
+      # 所以 CI 必须额外构建一次 release，让缓存里有 release 产物。
+      # 首次运行会慢（~8min），后续命中缓存后会快。
+      # ------------------------------------------------------------------
+      - name: cargo build --release (缓存 release 产物)
+        run: cargo build --release --locked
   # ------------------------------------------------------------
   # 3) Rust backend: cargo check on Windows (native target for Tauri)
   # ------------------------------------------------------------
