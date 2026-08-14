@@ -71,6 +71,15 @@ jobs:
           # 原因：跨平台恢复缓存会导致 glibc 不兼容（如 ubuntu-latest → ubuntu-22.04）
           key: rust-cache-ubuntu-22.04-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
 
+      # ------------------------------------------------------------------
+      # 关键：保存并恢复 Cargo.lock 原始状态
+      # 原因：cargo check / build 可能自动更新 Cargo.lock（即使 --locked），
+      # 导致 Post Cache 保存的缓存对应的 Cargo.lock hash 与 Release 查找时的
+      # 原始 Cargo.lock hash 不一致，从而无法命中。
+      # ------------------------------------------------------------------
+      - name: Save original Cargo.lock
+        run: cp src-tauri/Cargo.lock src-tauri/Cargo.lock.orig
+
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check
       - name: cargo check --locked
@@ -86,6 +95,12 @@ jobs:
       # ------------------------------------------------------------------
       - name: cargo build --release (缓存 release 产物)
         run: cargo build --release --locked
+
+      # 关键：恢复 Cargo.lock 原始状态
+      # cargo 操作可能修改 Cargo.lock，导致 Post Cache 保存时的 hash 与
+      # Release 查找时的 hash 不一致。这里在 Post Cache 之前恢复。
+      - name: Restore original Cargo.lock
+        run: cp src-tauri/Cargo.lock.orig src-tauri/Cargo.lock
   # ------------------------------------------------------------
   # 3) Rust backend: cargo check on Windows (native target for Tauri)
   # ------------------------------------------------------------
