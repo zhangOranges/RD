@@ -64,14 +64,28 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            src-tauri/target
+            src-tauri/target/release
             ~/.cargo/registry
             ~/.cargo/git
-          # 与 Release workflow 使用相同前缀（ubuntu-22.04），确保同平台编译产物兼容
-          key: rust-cache-ubuntu-22.04-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
+          # 只缓存 release 产物（与 Release 构建目录一致）
+          # 避免 debug 增量编译状态污染 Release，也减少缓存大小
+          key: rust-cache-release-ubuntu-22.04-Linux-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
+            rust-cache-release-ubuntu-22.04-Linux-
             rust-cache-ubuntu-22.04-Linux-
-            rust-cache-ubuntu-latest-Linux-
+            rust-cache-release-ubuntu-latest-Linux-
+
+      - name: Clean stale target artifacts (防止旧缓存残留干扰)
+        run: |
+          # 只保留 target/release，删除 debug/incremental 等可能有旧版本
+          # glibc/增量状态的目录，避免 can't find crate 类错误
+          if [ -d target ]; then
+            find target -mindepth 1 -maxdepth 1 \
+              ! -name release \
+              -exec rm -rf {} + 2>/dev/null || true
+          fi
+          echo "已清理 target/ 下非 release 目录"
+          ls -la target/ || echo "(target 目录为空或不存在)"
 
       - name: cargo fmt (check format)
         run: cargo fmt --all -- --check

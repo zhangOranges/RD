@@ -93,22 +93,48 @@ jobs:
       #   - Release 工作流：push tag v0.1.x → 缓存归在 "v0.1.x" tag scope
       # tag scope 只能访问自己 scope + 默认分支(main) scope 下的缓存，
       # 因此 Release 的 restore-keys 必须能命中 CI 在 main 上保存的 key。
-      # CI 的 label 是 ubuntu-latest / windows-latest，Release label 是 ubuntu-22.04 /
-      # windows-latest / macos-latest，所以这里把 ubuntu-latest 也放入 restore-keys。
+      #
+      # 只缓存 target/release（Release 只构建这个目录），避免 debug 增量编译状态
+      # 被错误恢复导致编译错误（如 can't find crate for `tauri`）。
       - name: Cache Cargo registry & target
         uses: actions/cache@v4
         with:
           path: |
-            src-tauri/target
+            src-tauri/target/release
             ~/.cargo/registry
             ~/.cargo/git
-          key: rust-cache-${{ matrix.platform }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: rust-cache-release-${{ matrix.platform }}-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
+            rust-cache-release-${{ matrix.platform }}-${{ runner.os }}-
+            rust-cache-release-ubuntu-22.04-Linux-
+            rust-cache-release-ubuntu-latest-${{ runner.os }}-
+            rust-cache-release-windows-latest-${{ runner.os }}-
+            rust-cache-release-macos-latest-${{ runner.os }}-
+            rust-cache-release-${{ matrix.platform }}-
             rust-cache-${{ matrix.platform }}-${{ runner.os }}-
-            rust-cache-ubuntu-latest-${{ runner.os }}-
-            rust-cache-windows-latest-${{ runner.os }}-
-            rust-cache-macos-latest-${{ runner.os }}-
-            rust-cache-${{ matrix.platform }}-
+
+      - name: Clean stale target artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        working-directory: src-tauri
+        run: |
+          if [ -d target ]; then
+            find target -mindepth 1 -maxdepth 1 \
+              ! -name release \
+              -exec rm -rf {} + 2>/dev/null || true
+          fi
+          echo "已清理 target/ 下非 release 目录"
+          ls -la target/ || echo "(target 目录为空或不存在)"
+
+      - name: Clean stale target artifacts (Windows)
+        if: runner.os == 'Windows'
+        working-directory: src-tauri
+        shell: pwsh
+        run: |
+          if (Test-Path target) {
+            Get-ChildItem target -Directory | Where-Object { $_.Name -ne "release" } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host "已清理 target/ 下非 release 目录"
+          Get-ChildItem target -ErrorAction SilentlyContinue | Select-Object Name
 
       # ========== 5. Windows 缓存 Wix 打包工具（避免每次重复下载 WiX / NSIS） ==========
       - name: Cache Tauri Wix tools (Windows only)
