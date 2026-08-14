@@ -102,10 +102,10 @@ jobs:
       - name: Restore original Cargo.lock
         run: cp Cargo.lock.orig Cargo.lock
   # ------------------------------------------------------------
-  # 3) Rust backend: cargo check on Windows (native target for Tauri)
+  # 3) Rust backend: cargo check + release build on Windows
   # ------------------------------------------------------------
   rust-windows-check:
-    name: Rust (Windows) · cargo check
+    name: Rust (Windows) · check + release
     runs-on: windows-latest
     defaults:
       run:
@@ -124,11 +124,57 @@ jobs:
             src-tauri/target
             ~/.cargo/registry
             ~/.cargo/git
-          # 与 Release workflow 使用相同前缀
+          # 只允许精确 key 匹配，与 Release workflow 一致
           key: rust-cache-windows-latest-Windows-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            rust-cache-windows-latest-Windows-
-            rust-cache-windows-latest-
+
+      - name: Save original Cargo.lock
+        shell: bash
+        run: cp Cargo.lock Cargo.lock.orig
 
       - name: cargo check --target x86_64-pc-windows-msvc
         run: cargo check --locked --target x86_64-pc-windows-msvc
+
+      - name: cargo build --release (缓存 release 产物)
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Restore original Cargo.lock
+        shell: bash
+        run: cp Cargo.lock.orig Cargo.lock
+
+  # ------------------------------------------------------------
+  # 4) Rust backend: cargo check + release build on macOS (Apple Silicon)
+  # ------------------------------------------------------------
+  rust-macos-check:
+    name: Rust (macOS) · check + release
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust toolchain (stable-aarch64-apple-darwin)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo registry & target
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          # 只允许精确 key 匹配，与 Release workflow 一致
+          key: rust-cache-macos-latest-macOS-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Save original Cargo.lock
+        run: cp Cargo.lock Cargo.lock.orig
+
+      - name: cargo check --target aarch64-apple-darwin
+        run: cargo check --locked --target aarch64-apple-darwin
+
+      - name: cargo build --release (缓存 release 产物)
+        run: cargo build --release --locked --target aarch64-apple-darwin
+
+      - name: Restore original Cargo.lock
+        run: cp Cargo.lock.orig Cargo.lock

@@ -84,12 +84,12 @@ jobs:
             dpkg \
             file
 
-      # ========== 4. Rust 增量缓存（手动管理，更可靠） ==========
-      # 只允许精确 key 匹配，不做 restore-keys 回退
-      # 原因：跨平台恢复缓存会导致 glibc 不兼容
-      # CI 和 Release 必须使用完全相同的 key 格式：rust-cache-{platform}-{os}-{Cargo.lock hash}
-      - name: Cache Cargo registry & target
-        uses: actions/cache@v4
+      # ========== 4. Rust 增量缓存（只恢复，不保存） ==========
+      # 使用 actions/cache/restore 只读取 CI 在 main scope 保存的缓存，
+      # 不产生 Post Cache 步骤，避免浪费 tag scope 的缓存配额。
+      # CI 和 Release 使用完全相同的 key 格式：rust-cache-{platform}-{os}-{Cargo.lock hash}
+      - name: Restore Cargo cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             src-tauri/target
@@ -122,6 +122,26 @@ jobs:
       # ========== 7. Tauri 构建（增量编译） ==========
       # 注意：tauri-cli 不需要单独安装！因为 package.json devDeps 有 @tauri-apps/cli，
       # 上面 npm ci 时已经装好 node_modules/.bin/tauri，直接走 npm run tauri 调用。
+
+      # 诊断：构建前检查缓存状态
+      - name: Diagnose cache state
+        shell: bash
+        run: |
+          echo "=== 缓存状态诊断 ==="
+          if [ -d src-tauri/target/release ]; then
+            RLIB_COUNT=$(find src-tauri/target/release/deps -name "*.rlib" 2>/dev/null | wc -l)
+            FINGERPRINT_COUNT=$(find src-tauri/target/release/.fingerprint -type d 2>/dev/null | wc -l)
+            echo "target/release/deps/*.rlib 数量: $RLIB_COUNT"
+            echo "target/release/.fingerprint 目录数: $FINGERPRINT_COUNT"
+            if [ "$RLIB_COUNT" -gt 10 ]; then
+              echo "→ 缓存命中 ✅ 预期增量编译（只编译 rd-app）"
+            else
+              echo "→ 缓存未命中 ❌ 预期全量编译"
+            fi
+          else
+            echo "target/release 不存在 → 缓存未命中 ❌ 预期全量编译"
+          fi
+
       - name: Tauri build
         run: npm run tauri -- build --target ${{ matrix.target }} -b ${{ matrix.bundles }} --verbose
         env:
