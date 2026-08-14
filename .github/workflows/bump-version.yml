@@ -158,24 +158,25 @@ jobs:
       - name: Wait for CI workflow to complete
         env:
           GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          echo "等待 CI 工作流完成..."
-          # CI 由 commit push 到 main 触发，需要轮询直到它完成
-          MAX_WAIT=600  # 最长等待 10 分钟
+          echo "等待 CI 工作流完成 (repo=$REPO)..."
+          MAX_WAIT=600
           WAITED=0
           while [ "$WAITED" -lt "$MAX_WAIT" ]; do
-            # 查询最近运行的 CI 工作流
             RUN=$(gh run list \
+              --repo "$REPO" \
               --workflow=ci.yml \
               --branch=main \
               --limit=1 \
-              --json status,conclusion,databaseId \
+              --json status,conclusion,databaseId,headSha \
               --jq '.[0]')
             STATUS=$(echo "$RUN" | jq -r '.status')
             CONCLUSION=$(echo "$RUN" | jq -r '.conclusion')
             RUN_ID=$(echo "$RUN" | jq -r '.databaseId')
-            echo "CI run #$RUN_ID: status=$STATUS conclusion=$CONCLUSION (已等待 ${WAITED}s)"
+            SHA=$(echo "$RUN" | jq -r '.headSha')
+            echo "CI run #$RUN_ID: status=$STATUS conclusion=$CONCLUSION sha=$SHA (已等待 ${WAITED}s)"
             if [ "$STATUS" = "completed" ]; then
               if [ "$CONCLUSION" = "success" ]; then
                 echo "CI 成功完成！"
