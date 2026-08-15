@@ -8,6 +8,126 @@
 
 ---
 
+## [0.1.94] - 2026-08-20
+
+### 新增
+- **端口转发专项（Phase 5，三种模式）**：新增 `src-tauri/src/tunnel/` 五模块（mod.rs + forward.rs + status.rs + model.rs + import_export.rs），实现 `tunnel_list_rules/add_rule/update_rule/remove_rule/start/stop/list_statuses/stop_all_for_host/export_rules/import_rules` 10 条 Tauri commands；三种转发模式骨架：local(-L) TcpListener bind → 双向拷贝通道，remote(-R) forward-tcpip，dynamic(-D) SOCKS5 RFC 1928 最小子集握手；listener bind 实际占用端口用于冲突检测，`russh` 通道层预留 `SSH_CHANNEL_ERROR` "RFC implementation pending" 等待后续细化
+- **11 项内核强制校验**：`validate_rule_impl()` 11 条覆盖 PORT_INVALID / ADDR_INVALID / LISTEN_ON_ALL_NEEDS_CONFIRM / REMOTE_FORBIDDEN / HOST_NOT_AVAILABLE / PORT_IN_USE / dynamic 不得带 remote / local&remote 必填 remote；`tunnel_add_rule` 持久化前 + `tunnel_start` 启动前双次调用确保万无一失
+- **会话绑定自动关闭**：`tunnel_stop_all_for_host(hostId, reason)` 遍历 TunnelState 按 host_id 匹配所有运行中隧道 → abort 全部 → emit `tunnel:stop` 事件带 reason；前端 eventBus 后续可在 connection:close / reconnecting 时调用
+- **前端 TunnelApi SDK 完整实现**：pluginSdk.ts 9 个基础方法 + exportRules / importRules 合计 11 个，均前置 `assertPermission('tunnel.manage')`；Rust DTO snake_case 与前端 camelCase 双向映射（mapRuleDto / mapStatusDto）；`exportRules` 输出 §11.8 标准格式 `RdTunnelsFile { $schema, specVersion, exportTime, exportedBy, rules }`；`importRules` 支持三种冲突策略（skip / overwrite / rename，重命名追加 "(冲突重命名)" 后缀）
+- **隧道事件 4 路分发**：Rust emit tunnel:start / tunnel:stop / tunnel:error / tunnel:connection → 前端 pluginStore listen 4 个 Tauri 事件 → 转发到 `kernelEventBus`；pluginSdk 后续可通过 `eventBus.on('tunnel:*')` 订阅
+- **autoStart 联动**：pluginStore 监听 `connection:success` + `connection:reconnect-success` → 扫描该 host 所有 `autoStart=true` 规则 → 并行 `tunnel_start`；2s 内进入 running（spec TR-5.2.2）
+- **全局开关新增 2 项**：uiStore 新增 `tunnelAllowRemoteForwarding`（默认 false，高危 R 模式默认拒绝，持久化到 Rust setting `tunnel.allowRemoteForwarding`）+ `tunnelConfirmListenAllLast`（记忆用户上次 0.0.0.0 确认选择）
+- **官方端口转发插件 UI**：`PortForwardManager.tsx` 弹窗组件（表格 6 列状态圆点/模式胶囊/绑定主机/本地→远程地址/自启 switch/操作列 + 新建向导步骤表单向导 remote + 0.0.0.0 高危红色二次确认 checkbox + remote 模式永久黄色横幅 + 导入导出 rd-tunnels.json 文件菜单）；`PortForwardPluginBootstrap.tsx` 在 App 启动时注册 Toolbar 按钮 `id=port-forward-open` 到 center 分组（图标 Network）；`src-tauri/assets/builtin-plugins/port-forward-manager@1.0.0/` 官方插件 manifest（risk_level=dangerous，permissions 5 项：tunnel.manage + storage.read/write + ui.inject-menu + ui.dialog）+ 占位 main.js
+- **types/plugin.ts 类型扩展**：`RdTunnelsFile` + `TunnelConflictStrategy` + `TunnelImportResult`；`TunnelApi` 接口追加 `exportRules()` + `importRules()` 2 个方法
+
+### 变更
+- **uiStore.ts 字段扩展**：现有插件 6 开关后追加 2 隧道开关 + setter + 初始值 + `loadPluginSettings` 持久化读取 + `setTunnelAllowRemoteForwarding` Rust setting 持久化写入
+- **lib.rs Tauri Builder**：`.manage(tunnel::new_state())` 注入 `TunnelState`；`generate_handler!` 注册 10 条 tunnel commands
+- **pluginStore.ts 事件注册扩展**：`initPluginEventListeners` 新增 4 个 tunnel 事件 unlisteners + autoStart 2 个 handlers + cleanup 时清理
+
+### 安全修复
+- **REMOTE_FORBIDDEN 全局禁用**：uiStore 默认 `tunnelAllowRemoteForwarding=false`，Rust 校验中 mode=remote 且 allow_remote=false 直接抛出 `REMOTE_FORBIDDEN` 阻断所有远程回连
+- **0.0.0.0 二次确认**：本地监听地址为 `0.0.0.0` / `::` 时 `LISTEN_ON_ALL_NEEDS_CONFIRM` 必须显式 `confirm_listen_all=true`（前端高危 checkbox 未勾选时按钮 disabled）
+- **PORT_IN_USE 双保险**：`tunnel_start` 时 `running_ports` 检测 + `bind_listener_only` 实际 bind 监听端口，双重确认端口冲突时抛错不残留 listener
+- **TunnelRule 端口范围硬限 1-65535**：local_port + remote_port 双字段，任何 >65535 / <1 的值都触发 PORT_INVALID
+
+---
+
+## [0.1.93] - 2026-08-19
+
+### 新增
+- **插件热重载（Phase 4）**：Rust 端使用 `notify` v7 crate 监听 `${appDataDir}/plugins/` 目录树，文件变更（manifest.json / main.js / index.html / config.schema.json / assets/**）后 500ms debounce，emit `plugin:hot-reload` Tauri 事件给前端；前端 `pluginStore.reloadPlugin(id)` 实现完整 8 步流程：disable 旧实例 → 销毁 iframe + 关闭 MessageChannel → 重新解析 manifest → 创建新 iframe → init → enable → 日志「插件 xxx 已热重载」；失败时保留旧实例 + 错误日志
+- **`.rdplugin` zip 安装**：Rust 新增 `plugin_install_from_file` command，使用 `zip` v2 crate 解压 `.rdplugin`（实为 zip）文件到临时目录，查找 manifest.json（支持根目录和一级子目录），校验 minRdVersion 兼容性，安装到 `${appDataDir}/plugins/${id}@${version}/`；前端 PluginDetail 新增「安装 .rdplugin 文件」按钮（`@tauri-apps/plugin-dialog` open）+ 拖拽安装支持（onDrop 处理 .rdplugin/.zip 文件）
+- **完全卸载**：Rust 新增 `plugin_uninstall_complete` command，在现有 `uninstall` 基础上额外递归删除 `${appDataDir}/plugin-data/${id}/`，确保零残留；emit `plugin:uninstalled` 事件通知前端刷新列表
+- **沙箱看门狗（5s Watchdog）**：PluginSandbox 新增 ping/pong 机制，每 2s 向 iframe 发送 `watchdog-ping`，5s 内无 `watchdog-pong` 返回 → 判定卡死 → 自动 `togglePlugin(id, false)` 禁用 + 错误日志「插件疑似卡死，已自动停止」；其他插件不受影响
+- **内存限制（200MB）**：PluginSandbox 每 5s 轮询 `performance.memory.usedJSHeapSize`（Chrome/WebView2 可用，WKWebView 降级跳过），单插件内存 > 200MB → 自动禁用 + 错误日志；非 Chromium 环境降级为静默跳过
+- **开发者控制台热重载开关**：PluginDevConsole 新增「监听插件目录（热重载）」switch 开关，启用时调用 `startHotReload` + `initPluginEventListeners` 注册 Tauri 事件监听器，禁用时调用 `stopHotReload`
+- **uiStore 新增 2 个开关**：`pluginDevMode`（开发者模式）+ `pluginHotReloadEnabled`（热重载监听激活），均持久化到 localStorage
+- **manifest hotReload: false 跳过**：签名插件 manifest 声明 `hotReload: false` 时，`reloadPlugin` 检查后直接跳过，日志输出 `skip hot reload for ${id}: hotReload=false`
+
+### 变更
+- **Cargo.toml 新增依赖**：`notify = "7"`（跨平台文件监听）、`zip = "2"`（zip 解压）
+- **pluginLifecycleManager 新增 public `destroyPlugin(id)`**：从 private `_disableAndDestroy` 提取为公开方法，供 `pluginStore.reloadPlugin` 调用实现热重载先销毁再重建
+- **pluginStore 新增 5 方法 + 2 导出函数**：`installFromFile` / `uninstallComplete` / `startHotReload` / `stopHotReload` / `reloadPlugin` 方法；`initPluginEventListeners` / `cleanupPluginEventListeners` 模块级导出函数监听 `plugin:hot-reload` + `plugin:uninstalled` Tauri 事件
+- **PluginSandbox demo src 更新**：`buildDemoSrc` 和 `pluginLifecycleManager` 内嵌 demo 均新增 `watchdog-ping`→`watchdog-pong` 响应 + `lifecycle:destroy` 消息处理
+- **PluginSandbox destroy 增强**：`destroy()` 新增 `stopWatchdog()` + `stopMemoryCheck()` 清理定时器 + 发送 `lifecycle:destroy` 消息给 iframe
+- **lib.rs invoke_handler**：注册 `plugin_start_hot_reload` / `plugin_stop_hot_reload` / `plugin_install_from_file` / `plugin_uninstall_complete` 4 条新 command
+
+### 安全修复
+- **zip 路径逃逸防护**：`plugin_install_from_file` 解压时跳过以 `/` 开头或包含 `..` 的路径，防止 zip slip 攻击写入到 plugins 目录外
+- **临时目录清理**：安装完成后（无论成功失败）递归删除 `.tmp_install` 临时目录，防止残留
+
+---
+
+## [0.1.92] - 2026-08-18
+
+### 新增
+- **业务 SDK 完整实现（Phase 3）**：rdContext 的 server/theme/http/ssh/sftp 五大分组从空骨架升级为真实 Rust 调用，贯穿权限校验、连接状态检查、人话说错、审计日志
+- **Server API（凭据脱敏 HostConfigSafe）**：`server.listAll/get/create/update/delete/category.*` 完整实现；代码级硬编码删除 password / private_key 字段（JSON.stringify + 深拷贝反射均为 undefined），新增 has_password / has_private_key 布尔标记；update 时从 hostStore 原始凭据回填避免被空字符串覆盖
+- **Theme API（主题切换 + 读取）**：`theme.getCurrent/listAll/get/apply` 全部可用；apply 调用 useThemeStore.setTheme 变更主窗口主题，pluginLifecycleManager 通过 postMessage `theme-sync` 广播到所有插件 iframe，PluginSandbox demo src 自动应用 CSS 变量和 data-theme 属性
+- **Http API（内网阻断白名单）**：Rust 新增 `plugin_http_request` command，纯 std 实现 `is_private_host` 检测 IPv4 127/10/172.16-31/192.168/localhost/0.0.0.0/multicast 与 IPv6 ::1/fe80::/10/fc00::/7；uiStore.pluginAllowInternalHttp=false 时命中内网返回 `NETWORK_FORBIDDEN`；协议限制 http/https，方法限制 GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS，超时默认 15s；前端 request/get/post/put/delete 五方法均先 `assertPermission('network.http')`
+- **SSH API（ssh.exec 人话说错）**：复用现有 `ssh_exec` Rust command；新增 cwd 拼接（`cd ${shellEscaped} && cmd`）、30s Promise.race 超时、classifyConnectFailure 翻译 Rust 错误堆栈为 FriendlyFailure 人话说错（headline + suggestion + 原始）；uiStore.pluginDisableAllSsh 全局禁用开关，hostStore.connectionStates 连接状态校验
+- **SFTP API（基础 7 操作）**：复用 `sftp_list_dir/stat/mkdir/remove/rename/read_file/write_file` Rust commands；返回字段适配到 `SftpFile`（name/path/isDir/size/modifiedAt/permissions）；readFile 返回 Uint8Array、writeFile 兼容 string / Uint8Array；upload/download 为占位（Phase 4）
+- **全局开关完整实现**：uiStore 新增 5 个开关（pluginEnablePluginSystem / pluginAllowInternalHttp / pluginDisableAllSsh / pluginAllowThirdPartyPlugins / pluginAutoUpdate），SettingsDialog PluginsTab 顶部 5 个 `.switch` UI 双向绑定；server/theme/http/ssh/sftp 所有 SDK 方法读取对应开关进行拦截
+- **Rust 单元测试**：permissions.rs 8 个单测（risk_level/perm_validation/assert_perm）、hostStore classifyConnectFailure 字符串断言覆盖 8 大类错误（AUTH_FAILED/TIMEOUT/DNS_FAIL/CONN_REFUSED/KEY_INVALID/SESSION_CLOSED/DISCONNECTED/UNKNOWN）、pluginSdk shellEscape 覆盖特殊字符、httpPrivate 覆盖 9 条内网 IP 断言
+
+### 变更
+- **types/plugin.ts HostConfigSafe 类型安全升级**：从 `Omit<HostConfig, 'password'|'private_key'>` 改为显式 interface，新增 `has_password/has_private_key: boolean` 双字段；RdTheme 扩展为 ThemeInfo（id/name/type/palette）
+- **pluginSdk.ts 新增辅助函数**：`shellEscape()` POSIX 单引号转义、`notImplementedAsync()` 占位、`toRecord()` 枚举转字符串
+- **pluginLifecycleManager 主题同步**：disable 时新增广播 `theme-sync` 到 iframe，保证重新启用后 CSS 变量正确；新增公共方法 `reSyncAllTheme()` 供 setTheme 订阅回调调用（避免访问 private mounted 映射）
+- **hostStore.ts 导出**：`export { classifyConnectFailure }` 供插件 SDK 复用错误分类逻辑
+- **Rust lib.rs invoke_handler**：注册 `plugin_assert_perm`、`plugin_permissions_meta`、`plugin_parse_manifest_from_dir`、`plugin_storage_set/get/remove/remove_all/list_files`、`plugin_http_request` 合计 9 条新 command
+
+### 安全修复
+- **凭据防泄漏（NFR-1 Critical）**：sanitizeHostConfig 双保险（代码级硬编码字段映射 + JSON 序列化 + 深拷贝反射），断言 password/private_key 在返回值中恒为 undefined 且 stringify 后不出现 key
+- **路径逃逸防泄漏（NFR-1 Critical）**：Rust storage 命令 validate_plugin_id 拒绝包含 `..` `/` `\` 控制字符的插件 ID，防止插件数据写到 appData 外
+- **内网 SSRF 防护（NFR-1 High）**：HTTP 请求 host 字面量命中 RFC1918 / localhost / ::1 / ULA 时，若 uiStore.pluginAllowInternalHttp=false 直接拦截并返回 `NETWORK_FORBIDDEN`
+
+---
+
+## [0.1.91] - 2026-08-17
+
+### 新增
+- **内核事件总线（Phase 2）**：新增 `src/utils/eventBus.ts` 单例 `kernelEventBus`，实现 `on/off/offAll/emit` 泛型接口，owner 机制绑定插件实例引用；支持 RdEventMap 全部 7 大类 43 事件的分发与隔离
+- **EventBus 桥接机制**：PluginSandbox 增强 `bus-on`/`bus-off` 消息处理，插件 iframe 通过 postMessage 订阅内核事件，内核 emit 时通过 forwarder 转发给对应 iframe；插件 disable 时 `kernelEventBus.offAll(owner)` 双路清理（lifecycleManager + sandbox.destroy）
+- **插件 Storage API**：Rust 端实现 `plugin_storage_set/get/remove/remove_all/list_files` 5 个命令，持久化到 `${appDataDir}/plugin-data/${pid}/store.json`；`validate_plugin_id` 路径校验拒绝 `..`/`/`/`\` 逃逸；前端 SDK `storage` 分组改为真实 invoke 调用
+- **config.schema.json 自动渲染**：新增 `PluginConfigForm` 组件，支持 6 种字段类型自动渲染（string input / password / textarea / number / boolean switch / enum 下拉 / object 分组），复用现有 SettingsDialog CSS 类
+- **UiApi 实现**：`notify` 调用 Toast 系统 + 限频（10s/3 条）；`confirm`/`prompt` 通过 createPortal 渲染模态对话框 + 限频（5s/2 条）；超限返回 false 并 console.warn
+- **Log API 实现**：`log.info/warn/error` 调用 `logInfo/logWarn/logError` 写入 update.log + `pluginUiStore.addLog` 写入内存缓冲区（最多 500 条 FIFO）；error 额外弹红色 Toast
+- **Toolbar 插件按钮注入**：Toolbar 左/中/右三栏支持插件注册的按钮，disable 时自动移除
+- **权限双层校验框架**：Rust `assert_perm(granted, perm)` 内核层校验 + 前端 `assertPermission(pluginId, perm)` 客户端层校验；17 项权限白名单 + 4 项高危（ssh.run/server.write/sftp.operate/tunnel.manage）+ 4 项中风险
+- **安装确认弹窗**：新增 `PluginInstallDialog` 组件，展示插件信息 + 权限清单（风险圆点+说明）+ 高危红色边框 + 后果说明 + 「我已阅读并理解以上风险」复选框（未勾选禁用确认按钮）
+- **开发者控制台日志视图**：新增 `PluginDevConsole` 组件，插件下拉筛选 + Info/Warn/Error 三色 toggle + 等宽日志列表 + 自动滚动 + 清空按钮
+- **插件详情面板**：新增 `PluginDetail` 组件，左侧列表（图标/名称/版本/开关）+ 右侧详情（元信息 + 权限卡 + 配置卡）；权限卡支持单条撤销/授予
+- **Rust 新增 3 个 Tauri Commands**：`plugin_assert_perm`（内核权限校验）、`plugin_permissions_meta`（权限元数据列表）、`plugin_parse_manifest_from_dir`（从目录解析 manifest 不安装）
+
+### 变更
+- **permissions.rs 扩展**：ALL_PERMISSIONS 补全至 17 项（新增 log.read / updater.manage），新增 HIGH_RISK_PERMISSIONS / MEDIUM_RISK_PERMISSIONS / risk_level / assert_perm / permission_description 函数 + 8 个单元测试
+- **pluginSdk.ts 升级**：createRDContext 中 storage/ui/log 分组从 NOT_IMPLEMENTED 改为真实实现；ssh/sftp/server/http/tunnel/theme 分组加 assertPermission 前置校验
+- **SettingsDialog 插件 Tab 完善**：「已安装」子 Tab 从占位文案替换为 PluginDetail 组件 + 「选择目录安装」按钮；「权限」子 Tab 替换为 PluginDevConsole 组件；settingsVisible 时自动调用 loadPlugins
+- **pluginLifecycleManager 增强**：disable 时新增 `usePluginUiStore.removeAllForPlugin(id)` 清理 Toolbar 按钮注册
+
+---
+
+## [0.1.90] - 2026-08-16
+
+### 新增
+- **插件系统基础骨架（Phase 1）**：按三层插件架构（内核层 / 调度层 / 扩展层）完成插件系统最小可行实现，对应 RD v0.1.90
+- **SDK 类型定义包**：新增 `src/types/plugin.ts`（约 1800 行），完整定义 PluginManifest / PluginPermission / HostConfigSafe / RdEventMap / EventBus / BasePlugin / RDContext 等核心类型；HostConfigSafe 自动脱敏 password / private_key，保留 has_* 布尔标记
+- **Rust 插件模块**：`src-tauri/src/plugin/`（7 个子模块）实现 manifest 校验（6 个单测覆盖）、插件目录扫描（plugins/${id}@${version}）、持久化 plugin-state.json、17 项权限白名单校验，并通过 16 个 Tauri Commands 暴露给前端（plugin_list / plugin_toggle / plugin_uninstall / plugin_install_from_dir / plugin_get_config / plugin_set_config / plugin_get_granted / plugin_set_granted 等）
+- **PluginSandbox iframe 沙箱**：新增 `PluginSandbox` React 组件（`src/components/plugin/`），采用 `sandbox="allow-scripts allow-popups"` 严格隔离（无 allow-same-origin → opaque origin），全部生命周期调用通过 MessageChannel 端口通道传输 + 3s 安全超时，防止 Promise 悬挂
+- **设置面板插件 Tab 框架**：SettingsDialog 左侧菜单新增「插件」一级 Tab（8 Tab），内置 3 个次级 Tab：已安装 / 市场 / 权限（Phase 1 为空框架占位，列表/详情/权限编辑功能在后续版本实现）
+- **插件生命周期 5 态串联**：新增 `pluginLifecycleManager` 单例调度器，动态挂载隐藏 PluginSandbox 到 `#__rd_plugin_sandboxes__`；togglePlugin(true) 时按顺序 mount → init → enable；togglePlugin(false) 时按顺序 disable → uninstall → destroy；所有异常 catch 打 warning 不阻塞主流程；`pluginStore.getPlugin(id)` 同步查询返回 PluginInfo | null
+- **前端 SDK 空骨架**：新增 `pluginSdk.ts`，提供 `SDK_API_VERSION` 常量、NOT_IMPLEMENTED / PERMISSION_DENIED 错误码、完整 `on/off/offAll/emit` EventBus 实现（支持按 owner 批量卸载）、`createRDContext()` 构造器（覆盖 ui/storage/ssh/sftp/server/http/tunnel/theme/log 全部分组 API，同步方法抛 NOT_IMPLEMENTED，异步方法 Promise.reject）
+
+### 变更
+- **SettingsDialog Tab 顺序调整**：由 6 Tab（通用 / 主题 / 更新 / 快捷键 / 调试 / 关于）扩展为 7 Tab（在「快捷键」与「调试」之间插入「插件」）
+- **运行时目录新增**：首次启动会自动创建 `${appDataDir}/plugins/` 用于存放插件目录（`${id}@${version}` 命名）、`${appDataDir}/plugin-state.json` 用于持久化插件启用状态/权限/配置
+- **Tauri lib.rs state/commands 扩展**：`PluginState` 通过 `.manage()` 注入到 Tauri App，`invoke_handler` 注册全部 16 条插件相关 commands
+
+---
+
 ## [0.1.89] - 2026-08-15
 
 ### 新增

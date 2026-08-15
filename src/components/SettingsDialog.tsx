@@ -1,10 +1,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3, Info, Code2, Sparkles, MessageCircle, Star, ExternalLink } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3, Info, Code2, Sparkles, MessageCircle, Star, ExternalLink, Puzzle } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { open } from '@tauri-apps/plugin-dialog';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
+import { usePluginStore } from '../store/pluginStore';
+import { PluginInstallDialog } from './plugin/PluginInstallDialog';
+import { PluginDevConsole } from './plugin/PluginDevConsole';
+import { PluginDetail } from './plugin/PluginDetail';
+import type { PluginManifest, PluginPermission } from '../types/plugin';
 import { useThemeStore, useThemeOptions, PRESET_OPTIONS } from '../store/themeStore';
 import type { PresetThemeId } from '../theme/palette';
 import { ThemeEditor } from './ThemeEditor';
@@ -25,7 +31,7 @@ import {
   type MirrorOption,
 } from '../hooks/useAppUpdater';
 
-type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'debug' | 'about';
+type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'plugin' | 'debug' | 'about';
 
 interface TabItem {
   id: SettingsTab;
@@ -38,8 +44,17 @@ const TABS: TabItem[] = [
   { id: 'theme', label: '主题', icon: Palette },
   { id: 'update', label: '更新', icon: DownloadCloud },
   { id: 'shortcuts', label: '快捷键', icon: Keyboard },
+  { id: 'plugin', label: '插件', icon: Puzzle },
   { id: 'debug', label: '调试', icon: Bug },
   { id: 'about', label: '关于', icon: Info },
+];
+
+type PluginSubTab = 'installed' | 'market' | 'permissions';
+interface PluginSubTabItem { id: PluginSubTab; label: string; }
+const PLUGIN_SUB_TABS: PluginSubTabItem[] = [
+  { id: 'installed', label: '已安装' },
+  { id: 'market', label: '市场' },
+  { id: 'permissions', label: '权限' },
 ];
 
 const GITHUB_REPO = 'https://github.com/zhangOranges/RD';
@@ -582,6 +597,42 @@ export function SettingsDialog() {
   const resetAllShortcuts = useShortcutStore((s) => s.resetAll);
   /** 正在录制的快捷键 id；null 表示未在录制 */
   const [recordingId, setRecordingId] = useState<string | null>(null);
+  const [pluginSubTab, setPluginSubTab] = useState<PluginSubTab>('installed');
+  const [installDialog, setInstallDialog] = useState<{ manifest: PluginManifest; dirPath: string } | null>(null);
+  const plugins = usePluginStore((s) => s.plugins);
+  const loadPlugins = usePluginStore((s) => s.loadPlugins);
+
+  /** 安装确认弹窗：用户确认权限后执行实际安装 */
+  const handleInstallConfirm = useCallback(
+    async (grantedPerms: PluginPermission[]) => {
+      if (!installDialog) return;
+      const { manifest, dirPath } = installDialog;
+      try {
+        await usePluginStore.getState().installFromDir(dirPath);
+        await usePluginStore.getState().setGranted(manifest.id, grantedPerms as string[]);
+        await usePluginStore.getState().loadPlugins();
+        pushToast('success', `插件「${manifest.name}」安装成功`);
+      } catch (e) {
+        pushToast('error', `安装失败：${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setInstallDialog(null);
+      }
+    },
+    [installDialog, pushToast],
+  );
+
+  /** 选择目录并解析 manifest，弹窗确认后安装 */
+  const handleSelectInstallDir = useCallback(async () => {
+    try {
+      const dir = await open({ directory: true, multiple: false });
+      if (typeof dir === 'string' && dir) {
+        const manifest = await invoke<PluginManifest>('plugin_parse_manifest_from_dir', { dirPath: dir });
+        setInstallDialog({ manifest, dirPath: dir });
+      }
+    } catch (e) {
+      pushToast('error', `读取插件信息失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [pushToast]);
 
   // 录制快捷键：监听按键，按下有效组合键即写入并结束录制
   useEffect(() => {
@@ -638,10 +689,11 @@ export function SettingsDialog() {
       }
     }
     void load();
+    void loadPlugins();
     return () => {
       cancelled = true;
     };
-  }, [settingsVisible, pushToast]);
+  }, [settingsVisible, pushToast, loadPlugins]);
 
   // 检查更新产生的延迟结果同步到本地
   useEffect(() => {
@@ -1093,6 +1145,62 @@ export function SettingsDialog() {
               </div>
             )}
 
+            {/* 插件 */}
+            {activeTab === 'plugin' && (
+              <div className="settings-pane">
+                <div className="settings-pane-title">插件管理</div>
+
+                <div style={{ display: 'flex', gap: 4, marginBottom: 20, flexWrap: 'wrap' }}>
+                  {PLUGIN_SUB_TABS.map((tab) => {
+                    const active = pluginSubTab === tab.id;
+                    const label =
+                      tab.id === 'installed' && plugins.length > 0
+                        ? `${tab.label} (${plugins.length})`
+                        : tab.label;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        className={`settings-nav-item ${active ? 'is-active' : ''}`}
+                        onClick={() => setPluginSubTab(tab.id)}
+                        aria-pressed={active}
+                        style={{ padding: '6px 14px' }}
+                      >
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {pluginSubTab === 'installed' && (
+                  <>
+                    <div className="settings-row">
+                      <div className="settings-row-main">
+                        <div className="settings-row-label">从目录安装插件</div>
+                        <div className="settings-row-desc">选择包含 manifest.json 的插件目录进行本地安装</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => void handleSelectInstallDir()}
+                      >
+                        选择目录安装
+                      </button>
+                    </div>
+                    <PluginDetail />
+                  </>
+                )}
+                {pluginSubTab === 'market' && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 16px', color: 'var(--color-text-muted)', fontSize: 13, textAlign: 'center', lineHeight: 1.7 }}>
+                    Phase 1 不接入插件市场，后续版本将开放插件下载与一键安装。
+                  </div>
+                )}
+                {pluginSubTab === 'permissions' && (
+                  <PluginDevConsole />
+                )}
+              </div>
+            )}
+
             {/* 调试 */}
             {activeTab === 'debug' && (
               <div className="settings-pane">
@@ -1280,6 +1388,13 @@ export function SettingsDialog() {
           </button>
         </div>
       </div>
+      {installDialog && (
+        <PluginInstallDialog
+          manifest={installDialog.manifest}
+          onConfirm={(perms) => void handleInstallConfirm(perms)}
+          onCancel={() => setInstallDialog(null)}
+        />
+      )}
     </div>,
     document.body,
   );

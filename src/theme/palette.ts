@@ -504,7 +504,7 @@ export const PRESET_PALETTES: Record<PresetThemeId, ThemePalette> = {
  * ============================================================ */
 
 /** ThemePalette 字段名 → CSS 变量名（camelCase → kebab-case） */
-const PALETTE_KEY_TO_CSS: Record<keyof ThemePalette, string> = {
+export const PALETTE_KEY_TO_CSS: Record<keyof ThemePalette, string> = {
   bgApp: '--bg-app', bgSidebar: '--bg-sidebar', bgSidebarSolid: '--bg-sidebar-solid',
   bgContent: '--bg-content', bgToolbar: '--bg-toolbar', bgToolbarSolid: '--bg-toolbar-solid',
   bgStatusbar: '--bg-statusbar', bgInput: '--bg-input', bgTerminal: '--bg-terminal',
@@ -719,4 +719,51 @@ export function paletteToCssText(palette: Partial<ThemePalette>, hasBgImageFlag?
    * 再借助 adoptedStyleSheets 在级联中更靠后 → 注入值胜出，
    * 玻璃化 alpha 才能真正覆盖预设的实心背景色。 */
   return `:root[data-theme] {\n${lines.join('\n')}\n}`;
+}
+
+export function resolveThemePalette(
+  themeId: string,
+  customThemes: CustomTheme[],
+): ThemePalette {
+  if (isCustomThemeId(themeId)) {
+    const ct = customThemes.find(t => t.id === themeId);
+    if (ct) return resolveCustomPalette(ct);
+    return PRESET_PALETTES['tech-dark'];
+  }
+  if (themeId === 'system') {
+    const isDark = typeof window !== 'undefined' && window.matchMedia
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : false;
+    return isDark ? PRESET_PALETTES['dark'] : PRESET_PALETTES['light'];
+  }
+  const key = themeId as PresetThemeId;
+  return PRESET_PALETTES[key] ?? PRESET_PALETTES['tech-dark'];
+}
+
+export function getThemeType(themeId: string, customThemes: CustomTheme[]): 'light' | 'dark' {
+  const palette = resolveThemePalette(themeId, customThemes);
+  const textPrimary = palette.textPrimary?.toLowerCase() ?? '';
+  const toHex = (s: string) => {
+    const m = s.match(/#([0-9a-f]{6})/);
+    if (!m) return null;
+    return parseInt(m[1], 16);
+  };
+  const hex = toHex(textPrimary);
+  if (hex == null) return 'dark';
+  const r = (hex >> 16) & 255;
+  const g = (hex >> 8) & 255;
+  const b = hex & 255;
+  const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+  return luma > 180 ? 'dark' : 'light';
+}
+
+export function paletteToCssVars(palette: Partial<ThemePalette>): Record<string, string> {
+  const vars: Record<string, string> = {};
+  const keys = Object.keys(PALETTE_KEY_TO_CSS) as (keyof ThemePalette)[];
+  for (const k of keys) {
+    const cssVar = PALETTE_KEY_TO_CSS[k];
+    const value = palette[k];
+    if (value != null) vars[cssVar] = String(value);
+  }
+  return vars;
 }

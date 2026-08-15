@@ -913,3 +913,5 @@ function formatErr(err: unknown): string {
     return String(err);
   }
 }
+
+export { classifyConnectFailure };

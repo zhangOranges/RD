@@ -1,10 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 pub mod fonts;
 pub mod local_fs;
+pub mod plugin;
 pub mod pty;
 pub mod sftp;
 pub mod ssh;
 mod storage;
+pub mod tunnel;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -635,6 +637,8 @@ pub fn run() {
         .manage(sftp::new_state())
         .manage(pty::new_state())
         .manage(storage::new_state())
+        .manage(plugin::new_state())
+        .manage(tunnel::new_state())
         .manage(DebugLogState::new(false))
         .setup(|app| {
             // 从 settings.json 读取调试日志开关初始值
@@ -712,6 +716,39 @@ pub fn run() {
             storage::delete_category,
             fonts::get_system_fonts,
             fonts::check_font_available,
+            plugin::plugin_list,
+            plugin::plugin_toggle,
+            plugin::plugin_uninstall,
+            plugin::plugin_uninstall_complete,
+            plugin::plugin_install_from_dir,
+            plugin::plugin_install_from_file,
+            plugin::plugin_start_hot_reload,
+            plugin::plugin_stop_hot_reload,
+            plugin::plugin_get_config,
+            plugin::plugin_set_config,
+            plugin::plugin_get_granted,
+            plugin::plugin_set_granted,
+            plugin::plugin_reload,
+            plugin::plugin_dev_watch,
+            plugin::plugin_storage_set,
+            plugin::plugin_storage_get,
+            plugin::plugin_storage_remove,
+            plugin::plugin_storage_remove_all,
+            plugin::plugin_storage_list_files,
+            plugin::plugin_assert_perm,
+            plugin::plugin_permissions_meta,
+            plugin::plugin_parse_manifest_from_dir,
+            plugin::plugin_http_request,
+            tunnel::tunnel_list_rules,
+            tunnel::tunnel_add_rule,
+            tunnel::tunnel_remove_rule,
+            tunnel::tunnel_update_rule,
+            tunnel::tunnel_start,
+            tunnel::tunnel_stop,
+            tunnel::tunnel_list_statuses,
+            tunnel::tunnel_stop_all_for_host,
+            tunnel::tunnel_export_rules,
+            tunnel::tunnel_import_rules,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

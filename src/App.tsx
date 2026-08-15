@@ -7,6 +7,7 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
 import { ToastContainer } from './components/Toast';
+import { PortForwardPluginBootstrap } from './components/plugin/PortForwardPluginBootstrap';
 import { RightPanel } from './components/RightPanel';
 import { useHostStore } from './store/hostStore';
 import { useUIStore } from './store/uiStore';
@@ -257,6 +258,7 @@ function App() {
       <ToastContainer />
       <SettingsDialog />
       <UpdateDialog />
+      <PortForwardPluginBootstrap />
 
       {/* 启动加载遮罩 */}
       {!appReady && (

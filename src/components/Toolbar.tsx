@@ -14,6 +14,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useUIStore } from '../store/uiStore';
 import { useHostStore } from '../store/hostStore';
 import { useFileStore } from '../store/fileStore';
+import { usePluginUiStore, type PluginToolbarButton } from '../store/pluginUiStore';
 import { AddressBar } from './AddressBar';
 import { TransferNotification } from './TransferNotification';
 import '../styles/filebrowser.css';
@@ -33,6 +34,12 @@ export function Toolbar() {
   const goUp = useFileStore((s) => s.goUp);
   const history = useFileStore((s) => s.history);
   const historyIndex = useFileStore((s) => s.historyIndex);
+
+  // 插件注册的 Toolbar 按钮，按 group 分组渲染
+  const pluginButtons = usePluginUiStore((s) => s.toolbarButtons);
+  const leftPluginButtons = pluginButtons.filter((b) => b.group === 'left');
+  const centerPluginButtons = pluginButtons.filter((b) => b.group === 'center');
+  const rightPluginButtons = pluginButtons.filter((b) => b.group === 'right');
 
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -116,6 +123,14 @@ export function Toolbar() {
         </button>
       </div>
 
+      {leftPluginButtons.length > 0 && (
+        <div className="toolbar-group toolbar-plugin-group">
+          {leftPluginButtons.map((btn) => (
+            <PluginButton key={btn.id} btn={btn} />
+          ))}
+        </div>
+      )}
+
       <div className="toolbar-group">
         <button
           className="toolbar-btn"
@@ -167,6 +182,14 @@ export function Toolbar() {
         </div>
       )}
 
+      {centerPluginButtons.length > 0 && (
+        <div className="toolbar-group toolbar-plugin-group">
+          {centerPluginButtons.map((btn) => (
+            <PluginButton key={btn.id} btn={btn} />
+          ))}
+        </div>
+      )}
+
       <div className="toolbar-group">
         <button
           className={`toolbar-btn ${terminalVisible ? 'toolbar-btn-active' : ''}`}
@@ -179,6 +202,33 @@ export function Toolbar() {
         </button>
         <TransferNotification />
       </div>
+
+      {rightPluginButtons.length > 0 && (
+        <div className="toolbar-group toolbar-plugin-group">
+          {rightPluginButtons.map((btn) => (
+            <PluginButton key={btn.id} btn={btn} />
+          ))}
+        </div>
+      )}
     </header>
+  );
+}
+
+function PluginButton({ btn }: { btn: PluginToolbarButton }) {
+  return (
+    <button
+      className="toolbar-btn"
+      type="button"
+      title={btn.tooltip ?? btn.label}
+      aria-label={btn.label}
+      disabled={btn.disabled}
+      onClick={() => { void btn.onClick(); }}
+    >
+      {btn.icon ? (
+        <span className="toolbar-plugin-icon">{btn.icon}</span>
+      ) : (
+        <span>{btn.label}</span>
+      )}
+    </button>
   );
 }

@@ -1,6 +1,27 @@
 import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
 
 export type ToolType = 'sftp' | 'port-forward' | 'keys' | 'plugins';
+
+// ---- 持久化：插件开发者模式 + 热重载开关（localStorage）----
+const PLUGIN_DEV_MODE_KEY = 'plugin_dev_mode';
+const PLUGIN_HOT_RELOAD_KEY = 'plugin_hot_reload_enabled';
+
+function loadPluginDevMode(): boolean {
+  try {
+    return localStorage.getItem(PLUGIN_DEV_MODE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function loadPluginHotReloadEnabled(): boolean {
+  try {
+    return localStorage.getItem(PLUGIN_HOT_RELOAD_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 // ---- 持久化：终端显示/隐藏状态按主机隔离 ----
 const TERMINAL_VISIBLE_KEY = 'terminal_visible_map';
@@ -92,6 +113,22 @@ interface UIState {
   activeTerminalTab: Record<string, string>;
   // 打码模式：开启后对敏感信息（IP、端口、用户名、密码等）进行模糊打码，便于截图
   maskMode: boolean;
+  // 禁止所有插件执行 SSH 命令
+  pluginDisableAllSsh: boolean;
+  // 禁止所有插件修改主机配置
+  pluginDisableAllServerWrite: boolean;
+  // 允许插件访问内网 HTTP API（默认 false）
+  pluginAllowInternalHttp: boolean;
+  // 隐藏插件日志（调试 Tab 过滤）
+  pluginHideLogs: boolean;
+  // 开发者模式（显示开发者控制台 + 启用热重载监听）
+  pluginDevMode: boolean;
+  // 热重载文件监听是否激活
+  pluginHotReloadEnabled: boolean;
+  // 隧道：允许远程转发模式（默认 false，安全默认拒绝 R 模式）
+  tunnelAllowRemoteForwarding: boolean;
+  // 隧道：用户上次勾选了"0.0.0.0 监听我确认"（辅助记忆，不跳过确认）
+  tunnelConfirmListenAllLast: boolean;
 
   setSidebarWidth: (w: number) => void;
   setSidebarResizing: (v: boolean) => void;
@@ -124,6 +161,16 @@ interface UIState {
   toggleMaskMode: () => void;
   // 显式设置打码模式
   setMaskMode: (v: boolean) => void;
+  // 加载插件相关全局开关（从 Rust setting 持久化读取）
+  loadPluginSettings: () => Promise<void>;
+  setPluginDisableAllSsh: (v: boolean) => Promise<void>;
+  setPluginDisableAllServerWrite: (v: boolean) => Promise<void>;
+  setPluginAllowInternalHttp: (v: boolean) => Promise<void>;
+  setPluginHideLogs: (v: boolean) => Promise<void>;
+  setPluginDevMode: (v: boolean) => void;
+  setPluginHotReloadEnabled: (v: boolean) => void;
+  setTunnelAllowRemoteForwarding: (v: boolean) => Promise<void>;
+  setTunnelConfirmListenAllLast: (v: boolean) => void;
 }
 
 const MIN_SIDEBAR = 160;
@@ -152,6 +199,14 @@ export const useUIStore = create<UIState>((set, get) => ({
   terminalTabs: _persistedTabs.tabs,
   activeTerminalTab: _persistedTabs.active,
   maskMode: false,
+  pluginDisableAllSsh: false,
+  pluginDisableAllServerWrite: false,
+  pluginAllowInternalHttp: false,
+  pluginHideLogs: false,
+  pluginDevMode: loadPluginDevMode(),
+  pluginHotReloadEnabled: loadPluginHotReloadEnabled(),
+  tunnelAllowRemoteForwarding: false,
+  tunnelConfirmListenAllLast: false,
 
   setSidebarWidth: (w) =>
     set({
@@ -253,6 +308,80 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   toggleMaskMode: () => set((s) => ({ maskMode: !s.maskMode })),
   setMaskMode: (v) => set({ maskMode: v }),
+
+  loadPluginSettings: async () => {
+    try {
+      const disableSsh = await invoke<boolean>('get_setting', { key: 'plugin.disableAllSsh' }).catch(() => false);
+      const disableServerWrite = await invoke<boolean>('get_setting', { key: 'plugin.disableAllServerWrite' }).catch(() => false);
+      const allowInternalHttp = await invoke<boolean>('get_setting', { key: 'plugin.allowInternalHttp' }).catch(() => false);
+      const hideLogs = await invoke<boolean>('get_setting', { key: 'plugin.hideLogs' }).catch(() => false);
+      const allowRemote = await invoke<boolean>('get_setting', { key: 'tunnel.allowRemoteForwarding' }).catch(() => false);
+      set({
+        pluginDisableAllSsh: disableSsh,
+        pluginDisableAllServerWrite: disableServerWrite,
+        pluginAllowInternalHttp: allowInternalHttp,
+        pluginHideLogs: hideLogs,
+        tunnelAllowRemoteForwarding: allowRemote,
+      });
+    } catch {
+      /* ignore: Tauri not available in dev */
+    }
+  },
+  setPluginDisableAllSsh: async (v: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'plugin.disableAllSsh', value: v });
+    } catch {
+      /* ignore */
+    }
+    set({ pluginDisableAllSsh: v });
+  },
+  setPluginDisableAllServerWrite: async (v: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'plugin.disableAllServerWrite', value: v });
+    } catch {
+      /* ignore */
+    }
+    set({ pluginDisableAllServerWrite: v });
+  },
+  setPluginAllowInternalHttp: async (v: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'plugin.allowInternalHttp', value: v });
+    } catch {
+      /* ignore */
+    }
+    set({ pluginAllowInternalHttp: v });
+  },
+  setPluginHideLogs: async (v: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'plugin.hideLogs', value: v });
+    } catch {
+      /* ignore */
+    }
+    set({ pluginHideLogs: v });
+  },
+  setPluginDevMode: (v) => {
+    try {
+      localStorage.setItem(PLUGIN_DEV_MODE_KEY, String(v));
+    } catch {
+      /* ignore */
+    }
+    set({ pluginDevMode: v });
+  },
+  setPluginHotReloadEnabled: (v) => {
+    try {
+      localStorage.setItem(PLUGIN_HOT_RELOAD_KEY, String(v));
+    } catch {
+      /* ignore */
+    }
+    set({ pluginHotReloadEnabled: v });
+  },
+  setTunnelAllowRemoteForwarding: async (v) => {
+    try {
+      await invoke('set_setting', { key: 'tunnel.allowRemoteForwarding', value: v });
+    } catch (_) { /* noop */ }
+    set({ tunnelAllowRemoteForwarding: v });
+  },
+  setTunnelConfirmListenAllLast: (v) => set({ tunnelConfirmListenAllLast: v }),
 }));
 
 export const SIDEBAR_LIMITS = { min: MIN_SIDEBAR, max: MAX_SIDEBAR };

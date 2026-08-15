@@ -9,6 +9,9 @@ import {
   resolveCustomPalette,
   paletteToCssText,
   generateCustomThemeId,
+  resolveThemePalette,
+  getThemeType,
+  paletteToCssVars,
 } from '../theme/palette';
 import { useToastStore } from '../components/Toast';
 
@@ -363,3 +366,42 @@ if (typeof window !== 'undefined' && window.matchMedia) {
 }
 
 export { PRESET_OPTIONS, PALETTE_GROUPS };
+
+export function getCurrentThemeInfo(): {
+  id: string;
+  name: string;
+  type: 'light' | 'dark';
+  palette: Record<string, string>;
+} {
+  const { theme, customThemes } = useThemeStore.getState();
+  const pal = resolveThemePalette(theme, customThemes);
+  const name =
+    [...PRESET_OPTIONS, ...customThemes.map(t => ({ id: t.id, name: t.name, desc: '', swatch: '' }))]
+      .find(o => o.id === theme)?.name ?? String(theme);
+  return {
+    id: theme,
+    name,
+    type: getThemeType(theme, customThemes),
+    palette: paletteToCssVars(pal),
+  };
+}
+
+export function listAllThemeInfos(): {
+  id: string;
+  name: string;
+  type: 'light' | 'dark';
+  palette: Record<string, string>;
+}[] {
+  const { customThemes } = useThemeStore.getState();
+  const all: { id: string; name: string }[] = [...PRESET_OPTIONS];
+  for (const ct of customThemes) all.push({ id: ct.id, name: ct.name });
+  return all.map(o => {
+    const pal = resolveThemePalette(o.id, customThemes);
+    return {
+      id: o.id,
+      name: o.name,
+      type: getThemeType(o.id, customThemes),
+      palette: paletteToCssVars(pal),
+    };
+  });
+}
