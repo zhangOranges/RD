@@ -4,11 +4,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use super::model::TunnelErrorCode;
-use crate::ssh::SharedHandle;
+use crate::debug_log;
+use crate::ssh::{RemoteForwardRegistry, RemoteForwardTarget, SharedHandle};
+use crate::LogLevel;
 
 type TunnelResult<T> = Result<T, (TunnelErrorCode, String)>;
 
 pub async fn run_local_forward(
+    app: &tauri::AppHandle,
     handle: SharedHandle,
     local_addr: String,
     local_port: u16,
@@ -31,20 +34,40 @@ pub async fn run_local_forward(
         )
     })?;
 
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward local 已监听: {}:{} -> 目标 {}:{} (direct-tcpip)",
+            local_addr, local_port, remote_addr, remote_port
+        ),
+    );
+
     loop {
-        let (mut incoming, _peer) = listener.accept().await.map_err(|e| {
+        let (incoming, peer) = listener.accept().await.map_err(|e| {
             (
                 TunnelErrorCode::SshChannelError,
                 format!("accept failed: {}", e),
             )
         })?;
 
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!(
+                "tunnel_forward local 收到连接: peer={}, 目标 {}:{}",
+                peer, remote_addr, remote_port
+            ),
+        );
+
         let handle_clone = handle.clone();
         let remote_addr_clone = remote_addr.clone();
+        let app_clone = app.clone();
         tokio::spawn(async move {
             let _ = handle_local_connection(
+                &app_clone,
                 handle_clone,
-                &mut incoming,
+                incoming,
                 &remote_addr_clone,
                 remote_port,
             )
@@ -54,48 +77,187 @@ pub async fn run_local_forward(
 }
 
 async fn handle_local_connection(
+    app: &tauri::AppHandle,
     handle: SharedHandle,
-    stream: &mut TcpStream,
-    _remote_addr: &str,
-    _remote_port: u16,
+    mut stream: TcpStream,
+    remote_addr: &str,
+    remote_port: u16,
 ) -> TunnelResult<()> {
-    let guard = handle.lock().await;
-    let channel_res = guard.channel_open_session().await;
-    let channel = match channel_res {
-        Ok(c) => c,
-        Err(_e) => {
-            let _ = stream.shutdown().await;
-            return Err((
-                TunnelErrorCode::SshChannelError,
-                "direct-tcpip channel open failed: RFC implementation pending".into(),
-            ));
-        }
+    let (origin, origin_port) = match stream.peer_addr() {
+        Ok(p) => (p.ip().to_string(), p.port() as u32),
+        Err(_) => ("127.0.0.1".to_string(), 0),
     };
+
+    // Open a direct-tcpip channel: the SSH server connects to the target on
+    // our behalf, and the channel streams the raw bytes both ways.
+    // 读锁：channel_open_* 是 &self 操作，可与 SFTP/PTY 的通道打开并发，
+    // 不会在服务器连接目标端口期间阻塞整个 SSH 会话。
+    let guard = handle.read().await;
+    let channel = guard
+        .channel_open_direct_tcpip(
+            remote_addr.to_string(),
+            remote_port as u32,
+            origin,
+            origin_port,
+        )
+        .await
+        .map_err(|e| {
+            debug_log(
+                app,
+                LogLevel::Error,
+                &format!(
+                    "tunnel_forward local direct-tcpip 通道打开失败: 目标 {}:{} - {}",
+                    remote_addr, remote_port, e
+                ),
+            );
+            (
+                TunnelErrorCode::SshChannelError,
+                format!("direct-tcpip channel open failed: {}", e),
+            )
+        })?;
     drop(guard);
 
-    drop(channel);
-    let _ = stream.shutdown().await;
-    Err((
-        TunnelErrorCode::SshChannelError,
-        "direct-tcpip: RFC implementation pending".into(),
-    ))
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward local 转发已建立: 目标 {}:{}",
+            remote_addr, remote_port
+        ),
+    );
+
+    let mut chan_stream = channel.into_stream();
+    let _ = tokio::io::copy_bidirectional(&mut stream, &mut chan_stream).await;
+
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward local 连接结束: 目标 {}:{}",
+            remote_addr, remote_port
+        ),
+    );
+
+    Ok(())
 }
 
 pub async fn run_remote_forward(
-    _handle: SharedHandle,
-    _remote_addr: String,
-    _remote_port: u16,
-    _local_target_addr: String,
-    _local_target_port: u16,
+    app: &tauri::AppHandle,
+    handle: SharedHandle,
+    registry: RemoteForwardRegistry,
+    remote_addr: String,
+    remote_port: u16,
+    local_target_addr: String,
+    local_target_port: u16,
 ) -> TunnelResult<()> {
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    Err((
-        TunnelErrorCode::SshChannelError,
-        "forward-tcpip: RFC implementation pending".into(),
-    ))
+    // Register the local target first so the handler can route forwarded
+    // connections the moment the server accepts the tcpip-forward request.
+    let key = (remote_addr.clone(), remote_port as u32);
+    {
+        let mut reg = registry.lock().expect("remote_forwards mutex poisoned");
+        reg.insert(
+            key.clone(),
+            RemoteForwardTarget {
+                local_addr: local_target_addr.clone(),
+                local_port: local_target_port,
+            },
+        );
+    }
+    // Removes the registry entry and best-effort cancels the server-side
+    // listener when this task ends (including on abort).
+    let _guard = RemoteForwardGuard {
+        registry: registry.clone(),
+        handle: handle.clone(),
+        key: key.clone(),
+    };
+
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward remote 已注册目标: 服务器 {}:{} -> 本地 {}:{}",
+            remote_addr, remote_port, local_target_addr, local_target_port
+        ),
+    );
+
+    // Ask the SSH server to listen on remote_addr:remote_port and forward
+    // accepted connections back to us over forwarded-tcpip channels.
+    // tcpip_forward 是 &mut self 操作 → 写锁（一次性、耗时短）。
+    let mut guard = handle.write().await;
+    let bound_port = guard
+        .tcpip_forward(remote_addr.clone(), remote_port as u32)
+        .await
+        .map_err(|e| {
+            // The server rejecting a tcpip-forward request is almost always a
+            // server-side condition, not a client bug — surface the likely
+            // causes so the user can fix the server instead of retrying blind.
+            let hint = if matches!(&e, russh::Error::RequestDenied) {
+                "；服务器拒绝了该请求：可能是 sshd_config 禁用了转发 (AllowTcpForwarding no / PermitOpen 限制)，或服务器端口已被其他会话/进程占用"
+            } else {
+                ""
+            };
+            debug_log(
+                app,
+                LogLevel::Error,
+                &format!(
+                    "tunnel_forward remote tcpip_forward 失败: {}:{} - {}{}",
+                    remote_addr, remote_port, e, hint
+                ),
+            );
+            (
+                TunnelErrorCode::SshChannelError,
+                format!("tcpip_forward failed: {}{}", e, hint),
+            )
+        })?;
+    drop(guard);
+
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward remote 已监听: 服务器 {}:{} (bound_port={}) -> 本地 {}:{}",
+            remote_addr, bound_port, bound_port, local_target_addr, local_target_port
+        ),
+    );
+
+    // Keep the task alive until it is aborted (tunnel stop / host close).
+    std::future::pending::<()>().await;
+
+    Ok(())
+}
+
+/// RAII guard that cleans up a remote forward when its task ends (including
+/// on abort): removes the registry entry and best-effort cancels the
+/// server-side listener.
+struct RemoteForwardGuard {
+    registry: RemoteForwardRegistry,
+    handle: SharedHandle,
+    key: (String, u32),
+}
+
+impl Drop for RemoteForwardGuard {
+    fn drop(&mut self) {
+        {
+            let mut reg = self
+                .registry
+                .lock()
+                .expect("remote_forwards mutex poisoned");
+            reg.remove(&self.key);
+        }
+        // Best-effort cancel of the server-side listener (ignored if the
+        // connection is already gone).
+        let handle = self.handle.clone();
+        let addr = self.key.0.clone();
+        let port = self.key.1;
+        tokio::spawn(async move {
+            let guard = handle.read().await;
+            let _ = guard.cancel_tcpip_forward(addr, port).await;
+        });
+    }
 }
 
 pub async fn run_dynamic_forward(
+    app: &tauri::AppHandle,
     handle: SharedHandle,
     local_addr: String,
     local_port: u16,
@@ -116,24 +278,41 @@ pub async fn run_dynamic_forward(
         )
     })?;
 
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward dynamic 已监听: {}:{} (SOCKS5)",
+            local_addr, local_port
+        ),
+    );
+
     loop {
-        let (mut incoming, _peer) = listener.accept().await.map_err(|e| {
+        let (incoming, peer) = listener.accept().await.map_err(|e| {
             (
                 TunnelErrorCode::SshChannelError,
                 format!("accept failed: {}", e),
             )
         })?;
 
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!("tunnel_forward dynamic 收到连接: peer={}", peer),
+        );
+
         let handle_clone = handle.clone();
+        let app_clone = app.clone();
         tokio::spawn(async move {
-            let _ = handle_dynamic_connection(handle_clone, &mut incoming).await;
+            let _ = handle_dynamic_connection(&app_clone, handle_clone, incoming).await;
         });
     }
 }
 
 async fn handle_dynamic_connection(
+    app: &tauri::AppHandle,
     handle: SharedHandle,
-    stream: &mut TcpStream,
+    mut stream: TcpStream,
 ) -> TunnelResult<()> {
     let mut buf = [0u8; 2];
     stream.read_exact(&mut buf).await.map_err(|e| {
@@ -185,7 +364,7 @@ async fn handle_dynamic_connection(
         ));
     }
 
-    let dst_addr = match atyp {
+    let (dst_addr, dst_port) = match atyp {
         1 => {
             let mut addr = [0u8; 4];
             stream.read_exact(&mut addr).await.map_err(|e| {
@@ -201,7 +380,10 @@ async fn handle_dynamic_connection(
                     format!("socks5 read port failed: {}", e),
                 )
             })?;
-            format!("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3])
+            (
+                format!("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]),
+                u16::from_be_bytes(port),
+            )
         }
         3 => {
             let mut len = [0u8; 1];
@@ -225,7 +407,10 @@ async fn handle_dynamic_connection(
                     format!("socks5 read port failed: {}", e),
                 )
             })?;
-            String::from_utf8_lossy(&domain).to_string()
+            (
+                String::from_utf8_lossy(&domain).to_string(),
+                u16::from_be_bytes(port),
+            )
         }
         4 => {
             let mut addr = [0u8; 16];
@@ -245,7 +430,7 @@ async fn handle_dynamic_connection(
             let segs: Vec<String> = (0..8)
                 .map(|i| format!("{:x}", u16::from_be_bytes([addr[i * 2], addr[i * 2 + 1]])))
                 .collect();
-            segs.join(":")
+            (segs.join(":"), u16::from_be_bytes(port))
         }
         _ => {
             stream
@@ -256,34 +441,80 @@ async fn handle_dynamic_connection(
         }
     };
 
-    let guard = handle.lock().await;
-    let channel_res = guard.channel_open_session().await;
-    let channel = match channel_res {
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward dynamic SOCKS5 握手完成: 目标 {}:{}",
+            dst_addr, dst_port
+        ),
+    );
+
+    let (origin, origin_port) = match stream.peer_addr() {
+        Ok(p) => (p.ip().to_string(), p.port() as u32),
+        Err(_) => ("127.0.0.1".to_string(), 0),
+    };
+
+    let guard = handle.read().await;
+    let channel = match guard
+        .channel_open_direct_tcpip(dst_addr.clone(), dst_port as u32, origin, origin_port)
+        .await
+    {
         Ok(c) => c,
-        Err(_e) => {
+        Err(e) => {
+            debug_log(
+                app,
+                LogLevel::Error,
+                &format!(
+                    "tunnel_forward dynamic direct-tcpip 通道打开失败: 目标 {}:{} - {}",
+                    dst_addr, dst_port, e
+                ),
+            );
             stream
                 .write_all(&[5u8, 1u8, 0u8, 1u8, 0, 0, 0, 0, 0, 0])
                 .await
                 .ok();
             return Err((
                 TunnelErrorCode::SshChannelError,
-                "direct-tcpip channel open failed: RFC implementation pending".into(),
+                format!("direct-tcpip channel open failed: {}", e),
             ));
         }
     };
     drop(guard);
 
-    drop(channel);
-    let _ = dst_addr;
+    // SOCKS5 success reply (BND.ADDR/BND.PORT unused).
     stream
-        .write_all(&[5u8, 1u8, 0u8, 1u8, 0, 0, 0, 0, 0, 0])
+        .write_all(&[5u8, 0u8, 0u8, 1u8, 0, 0, 0, 0, 0, 0])
         .await
-        .ok();
-    let _ = stream.shutdown().await;
-    Err((
-        TunnelErrorCode::SshChannelError,
-        "dynamic/direct-tcpip: RFC implementation pending".into(),
-    ))
+        .map_err(|e| {
+            (
+                TunnelErrorCode::SshChannelError,
+                format!("socks5 reply failed: {}", e),
+            )
+        })?;
+
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward dynamic 转发已建立: 目标 {}:{}",
+            dst_addr, dst_port
+        ),
+    );
+
+    let mut chan_stream = channel.into_stream();
+    let _ = tokio::io::copy_bidirectional(&mut stream, &mut chan_stream).await;
+
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_forward dynamic 连接结束: 目标 {}:{}",
+            dst_addr, dst_port
+        ),
+    );
+
+    Ok(())
 }
 
 pub async fn bind_listener_only(local_addr: String, local_port: u16) -> TunnelResult<TcpListener> {

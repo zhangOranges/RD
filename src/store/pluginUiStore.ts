@@ -27,6 +27,8 @@ interface PluginUiState {
   toolbarButtons: PluginToolbarButton[];
   /** 插件日志缓冲区（最多保留 500 条，超出 FIFO 丢弃） */
   logs: PluginLogEntry[];
+  /** 当前打开的插件视图（插件 id），null 表示未打开 */
+  activePluginView: string | null;
 }
 
 interface PluginUiActions {
@@ -38,6 +40,9 @@ interface PluginUiActions {
   ) => void;
   removeToolbarButton: (id: string) => void;
   removeAllForPlugin: (pluginId: string) => void; // disable 时调用
+  // 插件视图宿主
+  openPluginView: (pluginId: string) => void;
+  closePluginView: () => void;
   // 日志
   addLog: (pluginId: string, level: 'info' | 'warn' | 'error', message: string) => void;
   clearLogs: (pluginId?: string) => void;
@@ -61,6 +66,7 @@ const _rateLimitMap = new Map<string, RateLimitEntry>();
 export const usePluginUiStore = create<PluginUiStore>((set) => ({
   toolbarButtons: [],
   logs: [],
+  activePluginView: null,
 
   registerToolbarButton: (pluginId, opt, group = 'right') => {
     set((s) => {
@@ -80,6 +86,14 @@ export const usePluginUiStore = create<PluginUiStore>((set) => ({
     set((s) => ({
       toolbarButtons: s.toolbarButtons.filter((b) => b.pluginId !== pluginId),
     }));
+  },
+
+  openPluginView: (pluginId) => {
+    set({ activePluginView: pluginId });
+  },
+
+  closePluginView: () => {
+    set({ activePluginView: null });
   },
 
   addLog: (pluginId, level, message) => {

@@ -758,12 +758,38 @@ export function getThemeType(themeId: string, customThemes: CustomTheme[]): 'lig
 }
 
 export function paletteToCssVars(palette: Partial<ThemePalette>): Record<string, string> {
+  // 与 paletteToCssText 保持同一套玻璃化逻辑：有背景图且 bgGlassAlpha < 1 时，
+  // GLASSIFIED_KEYS 中的面板底色乘以透明度因子 → 插件 theme-sync / SDK 拿到的
+  // 颜色与主程序实际面板一致（面板透明度设置对插件 UI 同样生效）。
+  const hasBgImage = !!palette.bgImage;
+  let glassFactor = 1;
+  if (hasBgImage && palette.bgGlassAlpha != null) {
+    const v = parseFloat(String(palette.bgGlassAlpha));
+    if (!Number.isNaN(v)) glassFactor = v;
+  }
+  const doGlass = hasBgImage && glassFactor < 0.999;
+
   const vars: Record<string, string> = {};
   const keys = Object.keys(PALETTE_KEY_TO_CSS) as (keyof ThemePalette)[];
   for (const k of keys) {
     const cssVar = PALETTE_KEY_TO_CSS[k];
     const value = palette[k];
-    if (value != null) vars[cssVar] = String(value);
+    if (value == null) continue;
+    // 背景图/位置/透明度数值键对插件 iframe 无意义（插件没有主程序的底图层），跳过
+    if (
+      k === 'bgImage' ||
+      k === 'bgPositionX' ||
+      k === 'bgPositionY' ||
+      k === 'bgOverlayAlpha' ||
+      k === 'bgGlassAlpha'
+    ) {
+      continue;
+    }
+    let out = String(value);
+    if (doGlass && GLASSIFIED_KEYS.includes(k)) {
+      out = multiplyAlpha(String(value), glassFactor);
+    }
+    vars[cssVar] = out;
   }
   return vars;
 }

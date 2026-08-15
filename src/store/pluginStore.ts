@@ -5,7 +5,7 @@ import type { PluginManifest, PluginCategory, TunnelErrorCode, TunnelStatus } fr
 import { pluginLifecycleManager } from '../utils/pluginLifecycleManager';
 import { kernelEventBus } from '../utils/eventBus';
 import { mapStatusDto } from '../utils/pluginSdk';
-import { useUIStore } from './uiStore';
+import { logWarn } from '../utils/log';
 import { usePluginUiStore } from './pluginUiStore';
 
 export interface PluginInfo {
@@ -154,6 +154,14 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
       const raw = await invoke<Record<string, unknown>[]>('plugin_list');
       const plugins: PluginInfo[] = raw.map((r) => mapPluginInfo(r));
       set({ plugins });
+      // 对齐生命周期：启动/刷新后，把已启用的插件挂载到沙箱（init/enable）。
+      // 此前仅安装/切换时同步，导致应用启动时内置插件（端口转发）从不挂载。
+      const enabledList = plugins
+        .filter((p) => p.enabled)
+        .map((p) => ({ id: p.id, manifest: p.manifest }));
+      pluginLifecycleManager
+        .setDesiredPlugins(enabledList)
+        .catch((e) => console.warn('[pluginStore] lifecycle 同步失败', e));
     } catch (e) {
       set({ error: formatErr(e) });
     } finally {
@@ -338,40 +346,21 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   },
 }));
 
-// ---- 模块级 Tauri 事件监听（热重载 + 卸载 + 隧道事件 + autoStart）----
+// ---- 模块级 Tauri 事件监听（热重载 + 卸载 + 隧道事件）----
 let hotReloadUnlisten: (() => void) | null = null;
 let uninstalledUnlisten: (() => void) | null = null;
 let tunnelEventRegistered = false;
 let _tunnelUnlisteners: Array<() => void> = [];
-let autoStartEventRegistered = false;
-let _autoStartUnlisteners: Array<() => void> = [];
-
-async function autoStartTunnelsForHost(hostId: string) {
-  try {
-    const rules = await invoke<Record<string, unknown>[]>('tunnel_list_rules', { hostId });
-    const autoRules = rules.filter(r => Boolean(r.auto_start ?? r.autoStart));
-    const allowRemote = useUIStore.getState().tunnelAllowRemoteForwarding;
-    const confirmAll = useUIStore.getState().tunnelConfirmListenAllLast;
-    await Promise.allSettled(autoRules.map(async (r) => {
-      try {
-        const tid = String(r.id ?? '');
-        await invoke('tunnel_start', { tunnelId: tid, confirmListenAll: confirmAll, allowRemote });
-      } catch (e) {
-        console.warn(`[pluginStore] autoStart 失败 host=${hostId}: ${e}`);
-      }
-    }));
-  } catch (e) {
-    console.warn('[pluginStore] autoStartTunnelsForHost 异常', e);
-  }
-}
 
 /**
  * 初始化插件相关的 Tauri 事件监听器。
  * - `plugin:hot-reload`：收到后延迟 300ms 再执行 reloadPlugin（等文件写入完成）
  * - `plugin:uninstalled`：收到后刷新插件列表
- * - tunnel:* 4 事件：转发到 kernelEventBus
- * - autoStart：监听 connection:success / reconnect-success → 启动 autoStart=true 的规则
+ * - tunnel:* 4 事件：转发到 kernelEventBus（插件经 onBus 订阅）
  * 重复调用安全（已注册则跳过）。
+ *
+ * 注：autoStart（连接成功/重连成功 → 启动 autoStart=true 隧道）已迁入内置
+ * 端口转发插件（rd-native-port-forward），主程序不再负责。
  */
 export async function initPluginEventListeners(): Promise<void> {
   if (!hotReloadUnlisten) {
@@ -404,6 +393,7 @@ export async function initPluginEventListeners(): Promise<void> {
       const tid = String(event.payload.tunnelId ?? event.payload.tunnel_id ?? '');
       const code = String(event.payload.code ?? 'SSH_CHANNEL_ERROR') as TunnelErrorCode;
       const msg = String(event.payload.message ?? event.payload.msg ?? '');
+      logWarn(`[pluginStore] 收到隧道错误事件: tunnel=${tid}, code=${code}, msg=${msg}`);
       kernelEventBus.emit('tunnel:error', tid, code, msg);
     });
     const unlistenConn = await listen<Record<string, unknown>>('tunnel:connection', (event) => {
@@ -414,22 +404,6 @@ export async function initPluginEventListeners(): Promise<void> {
     });
     _tunnelUnlisteners = [unlistenStart, unlistenStop, unlistenError, unlistenConn];
     tunnelEventRegistered = true;
-  }
-
-  if (!autoStartEventRegistered) {
-    const connHandler = async (hostId: string) => {
-      await autoStartTunnelsForHost(hostId);
-    };
-    const reconnHandler = async (hostId: string) => {
-      await autoStartTunnelsForHost(hostId);
-    };
-    kernelEventBus.on('connection:success', connHandler);
-    kernelEventBus.on('connection:reconnect-success', reconnHandler);
-    _autoStartUnlisteners = [
-      () => kernelEventBus.off('connection:success', connHandler),
-      () => kernelEventBus.off('connection:reconnect-success', reconnHandler),
-    ];
-    autoStartEventRegistered = true;
   }
 }
 
@@ -444,7 +418,4 @@ export function cleanupPluginEventListeners(): void {
   _tunnelUnlisteners.forEach(u => u && u());
   _tunnelUnlisteners = [];
   tunnelEventRegistered = false;
-  _autoStartUnlisteners.forEach(u => u && u());
-  _autoStartUnlisteners = [];
-  autoStartEventRegistered = false;
 }

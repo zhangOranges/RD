@@ -11,12 +11,15 @@ import {
   Power,
   Palette,
   Check,
+  Puzzle,
 } from 'lucide-react';
 import { useThemeStore, useThemeOptions } from '../store/themeStore';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
+import { usePluginStore } from '../store/pluginStore';
+import { usePluginUiStore } from '../store/pluginUiStore';
 import { useToastStore } from './Toast';
 import { HostDialog } from './HostDialog';
 import type { HostConfig } from '../types';
@@ -42,6 +45,23 @@ export function TabBar() {
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
   const terminalVisibleMap = useUIStore((s) => s.terminalVisible);
   const maskMode = useUIStore((s) => s.maskMode);
+  // 已安装插件列表（菜单内容）：随 pluginStore 异步加载，内置插件常驻可见。
+  const plugins = usePluginStore((s) => s.plugins);
+  const pluginsLoading = usePluginStore((s) => s.loading);
+  const [pluginMenuOpen, setPluginMenuOpen] = useState(false);
+  const pluginMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // 点击插件菜单外部时关闭
+  useEffect(() => {
+    if (!pluginMenuOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (pluginMenuRef.current && !pluginMenuRef.current.contains(e.target as Node)) {
+        setPluginMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [pluginMenuOpen]);
 
   const pushToast = useToastStore((s) => s.push);
 
@@ -364,6 +384,74 @@ export function TabBar() {
 
       {/* 右上角功能按钮 */}
       <div className="tabbar-actions">
+        {/* 插件工具入口：常驻显示，菜单列出已安装插件（异步加载） */}
+        <div className="tabbar-plugin-anchor" ref={pluginMenuRef}>
+          <button
+            type="button"
+            className={`tabbar-plugin-trigger ${
+              pluginMenuOpen ? 'tabbar-plugin-trigger-active' : ''
+            }`}
+            title="插件"
+            aria-label="插件"
+            aria-haspopup="menu"
+            aria-expanded={pluginMenuOpen}
+            onClick={() => setPluginMenuOpen((v) => !v)}
+          >
+            <Puzzle size={15} />
+            {plugins.length > 0 && (
+              <span className="tabbar-plugin-badge">{plugins.length}</span>
+            )}
+          </button>
+          {pluginMenuOpen && (
+            <div className="tabbar-plugin-menu" role="menu">
+              {plugins.length > 0 ? (
+                plugins.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="tabbar-plugin-menu-item"
+                    onClick={() => {
+                      setPluginMenuOpen(false);
+                      if (p.enabled) {
+                        // 统一走 store 的 openPluginView：PluginViewHost 会据此
+                        // 渲染遮罩并调用 lifecycleManager.openView，关闭按钮才能生效
+                        usePluginUiStore.getState().openPluginView(p.id);
+                      } else {
+                        // 已停用：跳转设置去启用
+                        useUIStore.getState().setSettingsVisible(true);
+                      }
+                    }}
+                  >
+                    <span
+                      className="tabbar-plugin-menu-dot"
+                      style={{
+                        background: p.enabled ? 'var(--accent)' : 'var(--text-tertiary)',
+                      }}
+                    />
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {p.name}
+                    </span>
+                    {!p.enabled && (
+                      <span className="tabbar-plugin-menu-tag">已停用</span>
+                    )}
+                  </button>
+                ))
+              ) : pluginsLoading ? (
+                <div className="tabbar-plugin-menu-hint">插件加载中…</div>
+              ) : (
+                <div className="tabbar-plugin-menu-hint">尚未安装插件</div>
+              )}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           className={`tabbar-action-btn ${

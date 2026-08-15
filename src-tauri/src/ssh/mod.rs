@@ -25,7 +25,10 @@ use std::collections::HashMap;
 pub use connection::{ConnectParams, ConnectResult, ConnectionHandle, SharedHandle};
 pub use error::SshError;
 pub use exec::{get_server_stats, ServerStats};
-pub use handler::{ClientHandler, HandlerSharedState, DISCONNECTED_EVENT};
+pub use handler::{
+    ClientHandler, HandlerSharedState, RemoteForwardRegistry, RemoteForwardTarget,
+    DISCONNECTED_EVENT,
+};
 
 use crate::{debug_log, LogLevel};
 
@@ -48,6 +51,18 @@ impl SshState {
         let map = self.connections.lock().await;
         let conn = map.get(host_id).ok_or(SshError::NotConnected)?;
         conn.get_handle().ok_or(SshError::NotConnected)
+    }
+
+    /// Return the remote-forward registry shared with this connection's russh
+    /// handler. The tunnel module registers/removes `-R` targets through it so
+    /// `server_channel_open_forwarded_tcpip` can route incoming connections.
+    pub async fn get_forward_registry(
+        &self,
+        host_id: &str,
+    ) -> Result<RemoteForwardRegistry, SshError> {
+        let map = self.connections.lock().await;
+        let conn = map.get(host_id).ok_or(SshError::NotConnected)?;
+        Ok(conn.forward_registry())
     }
 
     /// Return the home directory for a connected host (if known). Useful for
@@ -194,7 +209,7 @@ pub async fn connection_state(
             drop(map);
             match handle_clone {
                 Some(h) => {
-                    let guard = h.lock().await;
+                    let guard = h.read().await;
                     if guard.is_closed() {
                         Ok("disconnected".to_string())
                     } else {

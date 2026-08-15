@@ -2,26 +2,30 @@
 //!
 //! A [`ConnectionHandle`] wraps a [`russh::client::Handle`] together with the
 //! metadata that the rest of the app needs (host id, fingerprint, home dir).
-//! The russh handle is shared via `Arc<tokio::sync::Mutex<…>>` so that future
+//! The russh handle is shared via `Arc<tokio::sync::RwLock<…>>` so that future
 //! SFTP / PTY modules can open channels on the same underlying SSH session
 //! without having to reconnect.
+//!
+//! `RwLock`（而非 `Mutex`）是关键：`channel_open_*` / `is_closed` 等 `&self`
+//! 操作用读锁并发执行，互不阻塞。若用互斥锁，隧道转发的
+//! `channel_open_direct_tcpip` 在等待服务器确认（目标端口慢/不可达时可能长达
+//! 数十秒）期间会阻塞整个 SSH 会话，导致远程目录列表卡在"加载中"。
 
 use std::sync::Arc;
 
 use russh::client::{self, Handle};
 use russh::Disconnect;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use super::error::SshError;
-use super::handler::{ClientHandler, HandlerSharedState};
+use super::handler::{ClientHandler, HandlerSharedState, RemoteForwardRegistry};
 use crate::{debug_log, LogLevel};
 
 /// Shared, lockable handle to a russh client session.
 ///
-/// Other modules (SFTP in Task 4, PTY in Task 5) obtain one of these via
-/// [`SshState::get_connection`] and lock it to call `channel_open_session`
-/// etc.
-pub type SharedHandle = Arc<Mutex<Handle<ClientHandler>>>;
+/// Other modules (SFTP / PTY / tunnel) obtain one of these via
+/// [`SshState::get_connection`] and lock it (read) to call `channel_open_*`.
+pub type SharedHandle = Arc<RwLock<Handle<ClientHandler>>>;
 
 /// Connection parameters supplied by the frontend for `connect_host`.
 #[derive(serde::Deserialize, Clone, Debug)]
@@ -310,7 +314,7 @@ impl ConnectionHandle {
             .ok()
             .and_then(|guard| guard.clone());
 
-        let handle_arc: SharedHandle = Arc::new(Mutex::new(handle));
+        let handle_arc: SharedHandle = Arc::new(RwLock::new(handle));
 
         if let Some(app) = &app_handle {
             debug_log(
@@ -343,7 +347,7 @@ impl ConnectionHandle {
         // (We keep it armed: the spec wants the frontend notified on *any*
         // disconnect, including explicit ones.)
         if let Some(handle) = &self.handle {
-            let guard = handle.lock().await;
+            let guard = handle.read().await;
             let _ = guard
                 .disconnect(Disconnect::ByApplication, "client closed", "en")
                 .await;
@@ -355,7 +359,7 @@ impl ConnectionHandle {
     pub async fn is_connected(&self) -> bool {
         match &self.handle {
             Some(h) => {
-                let guard = h.lock().await;
+                let guard = h.read().await;
                 !guard.is_closed()
             }
             None => false,
@@ -366,6 +370,12 @@ impl ConnectionHandle {
     /// call `channel_open_session` / `channel_open_direct_tcpip` etc.
     pub fn get_handle(&self) -> Option<SharedHandle> {
         self.handle.clone()
+    }
+
+    /// Return the remote-forward registry shared with the russh handler, so
+    /// the tunnel module can register/remove `-R` forwarding targets.
+    pub fn forward_registry(&self) -> RemoteForwardRegistry {
+        self.shared.remote_forwards.clone()
     }
 
     /// `true` while the placeholder is in place but the real russh handle has

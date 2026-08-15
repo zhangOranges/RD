@@ -120,7 +120,7 @@ impl SftpState {
             );
         }
         let shared_handle = ssh_state.get_connection(host_id).await?;
-        let handle = shared_handle.lock().await;
+        let handle = shared_handle.read().await;
 
         let channel = handle.channel_open_session().await.map_err(|e| {
             let err = SftpError::Sftp(format!("open session: {e}"));

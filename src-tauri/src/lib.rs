@@ -649,6 +649,17 @@ pub fn run() {
                     }
                 }
             }
+            // 首次启动注册内置插件（幂等）：端口转发插件随应用打包自动安装
+            if let Some(state) = app.try_state::<plugin::PluginState>() {
+                let handle = app.handle();
+                if let Err(e) = plugin::plugin_ensure_builtin(handle, &state) {
+                    debug_log(
+                        handle,
+                        LogLevel::Warn,
+                        &format!("内置插件注册失败（不阻塞启动）: {}", e),
+                    );
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -738,6 +749,7 @@ pub fn run() {
             plugin::plugin_assert_perm,
             plugin::plugin_permissions_meta,
             plugin::plugin_parse_manifest_from_dir,
+            plugin::plugin_resolve_src,
             plugin::plugin_http_request,
             tunnel::tunnel_list_rules,
             tunnel::tunnel_add_rule,

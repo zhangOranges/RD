@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   ServerCog,
   FolderTree,
-  Network,
   KeyRound,
   Puzzle,
   RefreshCw,
@@ -336,6 +335,9 @@ export function ContentArea() {
     [pushToast, createTransferTask],
   );
 
+  // 端口转发已迁为内置插件（rd-native-port-forward）：界面/逻辑在插件目录内，
+  // 经工具栏"端口转发"按钮打开插件视图宿主，主程序不再渲染。
+
   if (!selectedHost) {
     return (
       <div className="content-placeholder">
@@ -410,10 +412,6 @@ export function ContentArea() {
   let placeholderIcon: React.ReactNode = <FolderTree size={48} className="content-placeholder-icon" />;
   let placeholderTitle = '未知工具';
   switch (activeTool) {
-    case 'port-forward':
-      placeholderIcon = <Network size={48} className="content-placeholder-icon" />;
-      placeholderTitle = '端口转发（开发中）';
-      break;
     case 'keys':
       placeholderIcon = <KeyRound size={48} className="content-placeholder-icon" />;
       placeholderTitle = '密钥管理（开发中）';

@@ -149,7 +149,7 @@ export function createRDContext(opts: {
       registerToolbarButton: (option: ToolbarButtonOption) => {
         void assertPermission(opts.pluginId, 'ui.inject-menu')
           .then(() => {
-            usePluginUiStore.getState().registerToolbarButton(pluginId, option, 'right');
+            usePluginUiStore.getState().registerToolbarButton(pluginId, option, option.group ?? 'right');
           })
           .catch((e) => {
             console.warn(
@@ -263,6 +263,12 @@ export function createRDContext(opts: {
       focusTerminal: () => notImplemented(),
       openRightPanel: () => notImplemented(),
       closeRightPanel: () => notImplemented(),
+      openPluginView: (pluginId?: string) => {
+        usePluginUiStore.getState().openPluginView(pluginId ?? opts.pluginId);
+      },
+      closePluginView: () => {
+        usePluginUiStore.getState().closePluginView();
+      },
     },
     storage: {
       get: async <T = unknown>(key: string): Promise<T | null> => {
@@ -787,23 +793,24 @@ export function createRDContext(opts: {
         const found = all.find(r => String(r.id ?? r.tunnel_id) === tunnelId);
         return found ? mapRuleDto(found) : null;
       },
-      addRule: async (rule) => {
+      addRule: async (rule, options) => {
         await assertPermission(opts.pluginId, 'tunnel.manage');
-        const allowRemote = useUIStore.getState().tunnelAllowRemoteForwarding;
-        const confirmListenAll = useUIStore.getState().tunnelConfirmListenAllLast;
+        const allowRemote = options?.allowRemote ?? useUIStore.getState().tunnelAllowRemoteForwarding;
+        const confirmListenAll = options?.confirmListenAll ?? useUIStore.getState().tunnelConfirmListenAllLast;
+        // Rust TunnelRuleDto 为 serde camelCase，直接传 camelCase 键
         const dto = {
           id: `tunnel_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
-          host_id: rule.hostId,
+          hostId: rule.hostId,
           mode: rule.mode,
-          local_addr: rule.localAddr,
-          local_port: rule.localPort,
-          remote_addr: rule.remoteAddr,
-          remote_port: rule.remotePort,
-          auto_start: rule.autoStart,
+          localAddr: rule.localAddr,
+          localPort: rule.localPort,
+          remoteAddr: rule.remoteAddr,
+          remotePort: rule.remotePort,
+          autoStart: rule.autoStart,
           tags: rule.tags,
           comment: rule.comment,
-          created_at: Date.now(),
-        } as unknown as Record<string, unknown>;
+          createdAt: Date.now(),
+        };
         const saved = await invoke<Record<string, unknown>>('tunnel_add_rule', {
           rule: dto,
           confirmListenAll,
@@ -812,18 +819,21 @@ export function createRDContext(opts: {
         logInfo(`[plugin:${opts.pluginId}] tunnel.addRule ${saved.id} mode=${rule.mode}`);
         return mapRuleDto(saved);
       },
-      updateRule: async (tunnelId, patch) => {
+      updateRule: async (tunnelId, patch, options) => {
         await assertPermission(opts.pluginId, 'tunnel.manage');
-        const patchDto: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(patch)) {
-          const s = k.replace(/[A-Z]/g, m => `_${m.toLowerCase()}`);
-          patchDto[s] = v;
+        // Rust tunnel_update_rule 接收完整规则对象（camelCase），先拉取原规则合并 patch
+        const all = await invoke<Record<string, unknown>[]>('tunnel_list_rules', { hostId: undefined });
+        const found = all.find(r => String(r.id ?? '') === tunnelId);
+        if (!found) {
+          throw new Error(`RULE_NOT_FOUND: ${tunnelId}`);
         }
-        const allowRemote = useUIStore.getState().tunnelAllowRemoteForwarding;
-        const confirmListenAll = useUIStore.getState().tunnelConfirmListenAllLast;
+        const merged = { ...found, ...patch };
+        const allowRemote = options?.allowRemote ?? useUIStore.getState().tunnelAllowRemoteForwarding;
+        const confirmListenAll = options?.confirmListenAll ?? useUIStore.getState().tunnelConfirmListenAllLast;
         const saved = await invoke<Record<string, unknown>>('tunnel_update_rule', {
-          tunnelId, patch: patchDto,
-          confirmListenAll, allowRemote,
+          rule: merged,
+          confirmListenAll,
+          allowRemote,
         });
         logInfo(`[plugin:${opts.pluginId}] tunnel.updateRule ${tunnelId}`);
         return mapRuleDto(saved);
@@ -831,25 +841,33 @@ export function createRDContext(opts: {
       removeRule: async (tunnelId) => {
         await assertPermission(opts.pluginId, 'tunnel.manage');
         try {
-          await invoke('tunnel_stop', { tunnelId });
+          await invoke('tunnel_stop', { ruleId: tunnelId });
         } catch (_) { /* 没在运行忽略 */ }
-        await invoke('tunnel_remove_rule', { tunnelId });
+        await invoke('tunnel_remove_rule', { ruleId: tunnelId });
         logInfo(`[plugin:${opts.pluginId}] tunnel.removeRule ${tunnelId}`);
       },
-      start: async (tunnelId) => {
+      start: async (tunnelId, options) => {
         await assertPermission(opts.pluginId, 'tunnel.manage');
-        const allowRemote = useUIStore.getState().tunnelAllowRemoteForwarding;
-        const confirmListenAll = useUIStore.getState().tunnelConfirmListenAllLast;
+        const allowRemote = options?.allowRemote ?? useUIStore.getState().tunnelAllowRemoteForwarding;
+        const confirmListenAll = options?.confirmListenAll ?? useUIStore.getState().tunnelConfirmListenAllLast;
         const dto = await invoke<Record<string, unknown>>('tunnel_start', {
-          tunnelId, confirmListenAll, allowRemote,
+          ruleId: tunnelId,
+          confirmListenAll,
+          allowRemote,
         });
         logInfo(`[plugin:${opts.pluginId}] tunnel.start ${tunnelId} -> running=${dto.running}`);
         return mapStatusDto(dto);
       },
       stop: async (tunnelId) => {
         await assertPermission(opts.pluginId, 'tunnel.manage');
-        await invoke('tunnel_stop', { tunnelId });
+        await invoke('tunnel_stop', { ruleId: tunnelId });
         logInfo(`[plugin:${opts.pluginId}] tunnel.stop ${tunnelId}`);
+      },
+      stopAllForHost: async (hostId, reason = 'host-reconnecting') => {
+        await assertPermission(opts.pluginId, 'tunnel.manage');
+        const stopped = await invoke<string[]>('tunnel_stop_all_for_host', { hostId, reason });
+        logInfo(`[plugin:${opts.pluginId}] tunnel.stopAllForHost ${hostId} count=${stopped.length}`);
+        return stopped;
       },
       getStatus: async (tunnelId) => {
         await assertPermission(opts.pluginId, 'tunnel.manage');
@@ -876,20 +894,11 @@ export function createRDContext(opts: {
       },
       importRules: async (file: RdTunnelsFile, onConflict: TunnelConflictStrategy = 'skip'): Promise<TunnelImportResult> => {
         await assertPermission(opts.pluginId, 'tunnel.manage');
-        const snakeRules = file.rules.map(r => ({
-          id: r.id, host_id: r.hostId, mode: r.mode,
-          local_addr: r.localAddr, local_port: r.localPort,
-          remote_addr: r.remoteAddr, remote_port: r.remotePort,
-          auto_start: r.autoStart, tags: r.tags, comment: r.comment,
-          created_at: r.createdAt,
-        }));
-        const payload = JSON.stringify({
-          $schema: file.$schema, specVersion: file.specVersion,
-          exportTime: file.exportTime, exportedBy: file.exportedBy,
-          rules: snakeRules,
-        });
+        // RdTunnelsFile 为 serde camelCase，字段保持 camelCase 序列化
+        const payload = JSON.stringify(file);
         const dto = await invoke<Record<string, unknown>>('tunnel_import_rules', {
-          content: payload, onConflict,
+          jsonContent: payload,
+          onConflict,
         });
         const rules = (dto.rules as unknown[]).map(r => mapRuleDto(r as Record<string, unknown>));
         logInfo(`[plugin:${opts.pluginId}] tunnel.importRules imported=${dto.imported} skipped=${dto.skipped} overwritten=${dto.overwritten} renamed=${dto.renamed}`);

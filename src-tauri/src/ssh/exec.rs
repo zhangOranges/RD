@@ -17,7 +17,7 @@ pub async fn ssh_exec_raw(
     let handle = state.get_connection(host_id).await?;
 
     let mut channel = {
-        let h = handle.lock().await;
+        let h = handle.read().await;
         h.channel_open_session().await.map_err(|e| {
             let err = SshError::ChannelError(format!("open exec channel: {e}"));
             if let Some(app) = app_handle {

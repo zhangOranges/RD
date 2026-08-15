@@ -16,7 +16,6 @@ import {
   PowerOff,
   Copy,
   FolderTree,
-  Network,
   KeyRound,
   Puzzle,
   Search,
@@ -171,7 +170,6 @@ export function Sidebar() {
   // ========== 工具菜单配置 ==========
   const tools: { id: ToolType; label: string; icon: typeof FolderTree }[] = [
     { id: 'sftp', label: 'SFTP', icon: FolderTree },
-    { id: 'port-forward', label: '端口转发', icon: Network },
     { id: 'keys', label: '密钥管理', icon: KeyRound },
     { id: 'plugins', label: '插件中心', icon: Puzzle },
   ];

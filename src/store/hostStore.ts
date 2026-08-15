@@ -14,6 +14,7 @@ import { useToastStore } from '../components/Toast';
 import { logInfo, logWarn, logError, type LogLevel } from '../utils/log';
 // 用动态 getState 避免 zustand 循环依赖
 import { useUIStore } from './uiStore';
+import { kernelEventBus } from '../utils/eventBus';
 
 /**
  * 统一日志桥：
@@ -443,6 +444,13 @@ export const useHostStore = create<HostState>((set, get) => ({
     const tag = `reconnect:${hostName}`;
     get()._clearReconnectTimer(hostId);
 
+    // 被动断开进入重连的唯一入口（ssh://disconnected、health-check 失配、
+    // 2s 离线轮询、window offline 都会汇聚到这里）：立即停掉该主机所有
+    // 端口转发，避免旧隧道残留"运行中"状态（重连期间用户会看到状态一直
+    // 不变化）。该命令幂等，重复调用无害。
+    void invoke('tunnel_stop_all_for_host', { hostId, reason: 'host-reconnecting' })
+      .catch((e) => writeLog('warn', tag, `stop tunnels failed: ${formatErr(e)}`));
+
     const cancelFlag = { cancelled: false };
     const startedAt = Date.now();
     let attempt = 0;
@@ -642,6 +650,11 @@ export const useHostStore = create<HostState>((set, get) => ({
         fingerprints: { ...s.fingerprints, [id]: result.fingerprint },
         connectionStates: { ...s.connectionStates, [id]: CONNECTED },
       }));
+      // 通知插件内核连接成功：autoStart 隧道（port-forward 等）据此自动启动。
+      // connectHost 是所有连接路径的唯一入口（手动 / 自动重连 / 恢复联网重连）。
+      const connEvent = fromAutoReconnect ? 'connection:reconnect-success' : 'connection:success';
+      kernelEventBus.emit(connEvent, id, result);
+      writeLog('info', 'connectHost', `host=${host.name} connected → emit ${connEvent}`);
       const ui = useUIStore.getState();
       if (!ui.terminalTabs[id] || ui.terminalTabs[id].length === 0) {
         ui.addTerminalTab(id);
@@ -795,9 +808,14 @@ export const useHostStore = create<HostState>((set, get) => ({
             return { _voluntaryDisconnects: voluntary };
           });
           state.setConnectionState(hostId, DISCONNECTED);
+          // 手动断开：SSH 会话已不存在，隧道必然失效，立即清理避免 UI 残留运行态
+          void invoke('tunnel_stop_all_for_host', { hostId, reason: 'host-close' })
+            .catch((e) => writeLog('warn', TAG, `voluntary disconnect: stop tunnels failed: ${formatErr(e)}`));
           return;
         }
         state.setConnectionState(hostId, DISCONNECTED);
+        // 被动断线会进入 _startAutoReconnect，停隧道已在其内部统一处理
+        // （覆盖 ssh://disconnected、health-check、轮询等所有检测路径）
         state._startAutoReconnect(hostId);
       });
       set({ _unlistenFn: unlisten });

@@ -72,3 +72,5 @@ src-tauri/**/.tauri-cache
 !.env.example
 tauri.conf.local.json
 *.local.json
+
+.soloncode/

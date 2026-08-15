@@ -13,6 +13,8 @@ use tauri::{Emitter, Manager};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::{debug_log, LogLevel};
+
 pub struct PluginState {
     base_dir: Mutex<PathBuf>,
 }
@@ -426,10 +428,152 @@ pub fn plugin_parse_manifest_from_dir(
     manager::parse_manifest(&manifest_path)
 }
 
+/// 读取插件的 index.html（manifest.indexHtml 指向的界面入口）原始内容。
+/// 插件视图宿主注入 SDK 桥脚本后转为 data URL 作为 iframe 的 src。
+/// 插件文件位于 `app_data_dir/plugins/<id>@<version>/<indexHtml>`。
+#[tauri::command]
+pub fn plugin_resolve_src(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PluginState>,
+    plugin_id: String,
+) -> Result<String, String> {
+    let app_dir = resolve_app_data_dir(Some(&app), Some(&state))?;
+    let plugins_dir = app_dir.join("plugins");
+    let entries =
+        std::fs::read_dir(&plugins_dir).map_err(|e| format!("读取插件目录失败: {}", e))?;
+
+    for entry in entries.flatten() {
+        let dir_path = entry.path();
+        if !dir_path.is_dir() {
+            continue;
+        }
+        let dir_name = dir_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if dir_name != plugin_id && !dir_name.starts_with(&format!("{}@", plugin_id)) {
+            continue;
+        }
+        let manifest_path = dir_path.join("manifest.json");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let manifest = manager::parse_manifest(&manifest_path)?;
+        let index_file = manifest
+            .index_html
+            .unwrap_or_else(|| manifest.entry.clone());
+        let html_path = dir_path.join(&index_file);
+        let bytes = std::fs::read(&html_path)
+            .map_err(|e| format!("读取插件界面失败 {}: {}", html_path.display(), e))?;
+        let html =
+            String::from_utf8(bytes).map_err(|e| format!("插件界面不是合法 UTF-8 文本: {}", e))?;
+        return Ok(html);
+    }
+    Err(format!("PLUGIN_NOT_FOUND: {}", plugin_id))
+}
+
+/// 内置端口转发插件 ID（随应用打包，首次启动自动注册）。
+pub const BUILTIN_PLUGIN_ID: &str = "rd-native-port-forward";
+
+/// 定位内置插件的资源源目录（打包后 → 开发调试）：
+/// 1. `resource_dir/plugins/<id>`（tauri bundle.resources 映射的目标）
+/// 2. `resource_dir/resources/plugins/<id>`（部分环境未映射时的兜底）
+/// 3. 开发模式：`src-tauri/resources/plugins/<id>`（源码目录）
+fn resolve_builtin_src_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join("plugins").join(BUILTIN_PLUGIN_ID));
+        candidates.push(
+            res.join("resources")
+                .join("plugins")
+                .join(BUILTIN_PLUGIN_ID),
+        );
+    }
+    #[cfg(debug_assertions)]
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        candidates.push(
+            PathBuf::from(manifest_dir)
+                .join("resources")
+                .join("plugins")
+                .join(BUILTIN_PLUGIN_ID),
+        );
+    }
+    candidates
+        .into_iter()
+        .find(|c| c.join("manifest.json").exists())
+}
+
+/// 首次启动注册内置插件（幂等 + 自愈）：
+/// - 未安装 → 从应用资源目录复制内置插件目录并安装
+/// - 已安装但界面入口缺失、或版本与随包资源不一致 → 卸载后重新安装
+///   （覆盖早期资源 glob 未拷贝嵌套目录导致的安装不完整，以及插件随版本升级）
+pub fn plugin_ensure_builtin(
+    app: &tauri::AppHandle,
+    state: &tauri::State<'_, PluginState>,
+) -> Result<(), String> {
+    let app_dir = resolve_app_data_dir(Some(app), Some(state))?;
+
+    let src_dir = resolve_builtin_src_dir(app).ok_or_else(|| {
+        format!("内置插件目录未找到: {}", BUILTIN_PLUGIN_ID)
+    })?;
+    // 随包资源里的目标版本（用于判断已安装版本是否需要升级/修复）
+    let src_version = manager::parse_manifest(&src_dir.join("manifest.json"))
+        .ok()
+        .map(|m| m.version.clone());
+
+    let existing = manager::scan(&app_dir)?;
+    if let Some(p) = existing.iter().find(|p| p.manifest.id == BUILTIN_PLUGIN_ID) {
+        let entry = p
+            .manifest
+            .index_html
+            .clone()
+            .unwrap_or_else(|| p.manifest.entry.clone());
+        let dir = app_dir
+            .join("plugins")
+            .join(format!("{}@{}", p.manifest.id, p.manifest.version));
+        let entry_ok = dir.join(&entry).exists();
+        let version_ok = src_version
+            .as_ref()
+            .map(|v| v == &p.manifest.version)
+            .unwrap_or(true);
+        if entry_ok && version_ok {
+            return Ok(());
+        }
+        debug_log(
+            app,
+            LogLevel::Warn,
+            &format!(
+                "内置插件需更新/修复（entry_ok={}, installed_v={}, src_v={:?}），重新安装",
+                entry_ok, p.manifest.version, src_version
+            ),
+        );
+        manager::uninstall(&app_dir, BUILTIN_PLUGIN_ID)?;
+    }
+
+    let manifest = manager::install_from_dir(&app_dir, &src_dir)?;
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "内置插件已注册: {} v{} (来源 {})",
+            manifest.id,
+            manifest.version,
+            src_dir.display()
+        ),
+    );
+    Ok(())
+}
+
 // ===== Plugin Storage Helpers =====
 
 fn validate_plugin_id(pid: &str) -> Result<(), String> {
-    if pid.is_empty() || pid.contains("..") || pid.contains('/') || pid.contains('\\') {
+    // 冒号是 Windows NTFS 保留字符（ADS 分隔符），目录名含冒号会导致 os error 123
+    if pid.is_empty()
+        || pid.contains("..")
+        || pid.contains('/')
+        || pid.contains('\\')
+        || pid.contains(':')
+    {
         return Err("INVALID_PLUGIN_ID".to_string());
     }
     Ok(())

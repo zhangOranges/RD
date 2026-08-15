@@ -63,7 +63,7 @@ impl PtySession {
 
         // --- Open channel + request PTY + shell -------------------------------
         let channel = {
-            let handle = shared_handle.lock().await;
+            let handle = shared_handle.read().await;
             handle.channel_open_session().await.map_err(|e| {
                 let msg = format!("open session channel: {e}");
                 debug_log(

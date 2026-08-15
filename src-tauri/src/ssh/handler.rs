@@ -17,13 +17,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use russh::client::{DisconnectReason, Handler};
+use russh::client::{DisconnectReason, Handler, Msg, Session};
 use russh::keys::key::PublicKey;
 use russh::keys::PublicKeyBase64;
+use russh::Channel;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
 use super::error::SshError;
+use crate::{debug_log, LogLevel};
 
 /// Name of the Tauri event emitted when an established connection drops.
 pub const DISCONNECTED_EVENT: &str = "ssh://disconnected";
@@ -32,6 +34,24 @@ pub const DISCONNECTED_EVENT: &str = "ssh://disconnected";
 const APP_DATA_SUBDIR: &str = "ssh-sftp-finder";
 /// File holding the trusted host fingerprints.
 const KNOWN_HOSTS_FILE: &str = "known_hosts.json";
+
+/// Local target of a remote (`-R`) port-forward.
+///
+/// When an SSH server with an active `tcpip-forward` accepts a TCP
+/// connection, it opens a channel back to the client and russh calls
+/// [`Handler::server_channel_open_forwarded_tcpip`]. The handler looks up the
+/// local target registered by the tunnel task and bridges the two ends.
+#[derive(Clone, Debug)]
+pub struct RemoteForwardTarget {
+    pub local_addr: String,
+    pub local_port: u16,
+}
+
+/// Registry shared between the tunnel module (which registers/removes
+/// targets) and the [`ClientHandler`] (which consumes them in
+/// `server_channel_open_forwarded_tcpip`). Keyed by `(remote_addr,
+/// remote_port)` as requested by the tunnel rule.
+pub type RemoteForwardRegistry = Arc<Mutex<HashMap<(String, u32), RemoteForwardTarget>>>;
 
 /// russh client handler.
 ///
@@ -58,6 +78,9 @@ pub struct ClientHandler {
     /// established and registered. Set to `true` by the caller *after* a
     /// successful connect.
     pub emit_disconnect: Arc<AtomicBool>,
+    /// Active remote port-forwards for this connection. Written by the tunnel
+    /// module, read by `server_channel_open_forwarded_tcpip`.
+    pub remote_forwards: RemoteForwardRegistry,
 }
 
 impl ClientHandler {
@@ -70,6 +93,7 @@ impl ClientHandler {
             fingerprint: Arc::new(Mutex::new(None)),
             connect_error: Arc::new(Mutex::new(None)),
             emit_disconnect: Arc::new(AtomicBool::new(false)),
+            remote_forwards: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -80,6 +104,7 @@ impl ClientHandler {
             fingerprint: self.fingerprint.clone(),
             connect_error: self.connect_error.clone(),
             emit_disconnect: self.emit_disconnect.clone(),
+            remote_forwards: self.remote_forwards.clone(),
         }
     }
 }
@@ -90,6 +115,7 @@ pub struct HandlerSharedState {
     pub fingerprint: Arc<Mutex<Option<String>>>,
     pub connect_error: Arc<Mutex<Option<SshError>>>,
     pub emit_disconnect: Arc<AtomicBool>,
+    pub remote_forwards: RemoteForwardRegistry,
 }
 
 impl HandlerSharedState {
@@ -100,6 +126,7 @@ impl HandlerSharedState {
             fingerprint: Arc::new(Mutex::new(None)),
             connect_error: Arc::new(Mutex::new(None)),
             emit_disconnect: Arc::new(AtomicBool::new(false)),
+            remote_forwards: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -184,6 +211,71 @@ impl Handler for ClientHandler {
             DisconnectReason::ReceivedDisconnect(_) => Ok(()),
             DisconnectReason::Error(e) => Err(e),
         }
+    }
+
+    /// Called by russh when the SSH server opens a channel for a remote
+    /// (`-R`) port-forward connection.
+    ///
+    /// Looks up the local target registered by the tunnel task and bridges the
+    /// two ends with a bidirectional copy. Channels with no matching forward
+    /// are dropped (the server-side connection then sees EOF).
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let target = {
+            let reg = self
+                .remote_forwards
+                .lock()
+                .expect("remote_forwards mutex poisoned");
+            // Prefer an exact (address, port) match; fall back to port-only
+            // because servers may report "localhost" / "127.0.0.1" / "::1"
+            // interchangeably for the same bound address.
+            reg.get(&(connected_address.to_string(), connected_port))
+                .cloned()
+                .or_else(|| {
+                    reg.iter()
+                        .find(|((_, p), _)| *p == connected_port)
+                        .map(|(_, t)| t.clone())
+                })
+        };
+
+        let Some(target) = target else {
+            return Ok(());
+        };
+
+        let app = self.app_handle.clone();
+        let local_addr = target.local_addr.clone();
+        let local_port = target.local_port;
+        let origin = format!("{}:{}", originator_address, originator_port);
+
+        tokio::spawn(async move {
+            match tokio::net::TcpStream::connect((local_addr.as_str(), local_port)).await {
+                Ok(mut tcp) => {
+                    let mut chan_stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut chan_stream).await;
+                }
+                Err(e) => {
+                    if let Some(app) = &app {
+                        debug_log(
+                            app,
+                            LogLevel::Error,
+                            &format!(
+                                "tunnel_forward remote 连接本地目标失败: {}:{} (origin {}) - {}",
+                                local_addr, local_port, origin, e
+                            ),
+                        );
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 }
 

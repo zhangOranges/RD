@@ -15,9 +15,10 @@ use crate::ssh::SshState;
 use crate::LogLevel;
 
 fn rules_path(app_data_dir: &std::path::Path) -> std::path::PathBuf {
+    // Windows 目录名不允许冒号（NTFS 保留字符），官方插件数据目录用点号代替冒号
     let dir = app_data_dir
         .join("plugin-data")
-        .join("rd-native:port-forward");
+        .join("rd-native.port-forward");
     let _ = std::fs::create_dir_all(&dir);
     dir.join("rules.json")
 }
@@ -181,10 +182,21 @@ pub async fn tunnel_list_rules(
 ) -> Result<Vec<TunnelRuleDto>, String> {
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
     let rules = load_rules(&rules_path(&dir))?;
-    Ok(match host_id {
-        Some(id) => rules.into_iter().filter(|r| r.host_id == id).collect(),
+    let result = match &host_id {
+        Some(id) => rules.into_iter().filter(|r| r.host_id == *id).collect(),
         None => rules,
-    })
+    };
+
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_list_rules: count={}, host_filter={:?}",
+            result.len(),
+            host_id
+        ),
+    );
+    Ok(result)
 }
 
 #[tauri::command]
@@ -215,6 +227,14 @@ pub async fn tunnel_add_rule(
         host_ok,
         &running_ports,
     ) {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!(
+                "tunnel_add_rule 校验失败: id={}, host={}, err={}: {}",
+                rule.id, rule.host_id, code, msg
+            ),
+        );
         return Err(format_validate_err(code, msg));
     }
 
@@ -223,6 +243,11 @@ pub async fn tunnel_add_rule(
     let mut rules = load_rules(&path)?;
 
     if rules.iter().any(|r| r.id == rule.id) {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!("tunnel_add_rule 冲突: id={} already exists", rule.id),
+        );
         return Err(format!(
             "{}: rule id {} already exists",
             TunnelErrorCode::PermissionDenied,
@@ -261,6 +286,11 @@ pub async fn tunnel_remove_rule(
     let before = rules.len();
     rules.retain(|r| r.id != rule_id);
     if rules.len() == before {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!("tunnel_remove_rule 未找到: id={}", rule_id),
+        );
         return Err(format!(
             "{}: rule id {} not found",
             TunnelErrorCode::RuleNotFound,
@@ -277,7 +307,11 @@ pub async fn tunnel_remove_rule(
     debug_log(
         &app,
         LogLevel::Info,
-        &format!("tunnel_remove_rule: id={}", rule_id),
+        &format!(
+            "tunnel_remove_rule: id={}, remaining={}",
+            rule_id,
+            rules.len()
+        ),
     );
     Ok(())
 }
@@ -289,10 +323,10 @@ pub async fn tunnel_update_rule(
     allow_remote: Option<bool>,
     app: tauri::AppHandle,
     state: tauri::State<'_, PluginState>,
-    ssh_state: tauri::State<'_, SshState>,
+    _ssh_state: tauri::State<'_, SshState>,
 ) -> Result<TunnelRuleDto, String> {
-    let host_ok = host_exists(&ssh_state, &rule.host_id).await;
-
+    // 更新规则是纯配置修改（改端口/自启等），不要求主机在线；
+    // 主机连通性校验留给 tunnel_start（启动时才需要真实连接）。
     let tunnel_state = app.state::<TunnelState>();
     let running_ports: Vec<(String, u16)> = {
         let running = tunnel_state.running.lock().await;
@@ -307,9 +341,17 @@ pub async fn tunnel_update_rule(
         &rule,
         confirm_listen_all.unwrap_or(false),
         allow_remote.unwrap_or(false),
-        host_ok,
+        true, // 配置更新不校验主机在线
         &running_ports,
     ) {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!(
+                "tunnel_update_rule 校验失败: id={}, host={}, err={}: {}",
+                rule.id, rule.host_id, code, msg
+            ),
+        );
         return Err(format_validate_err(code, msg));
     }
 
@@ -318,6 +360,11 @@ pub async fn tunnel_update_rule(
     let mut rules = load_rules(&path)?;
 
     let idx = rules.iter().position(|r| r.id == rule.id).ok_or_else(|| {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!("tunnel_update_rule 未找到: id={}", rule.id),
+        );
         format!(
             "{}: rule id {} not found",
             TunnelErrorCode::RuleNotFound,
@@ -393,16 +440,47 @@ pub async fn tunnel_start(
         host_ok,
         &running_ports,
     ) {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!(
+                "tunnel_start 校验失败: id={}, host={}, err={}: {}",
+                rule_id, rule.host_id, code, msg
+            ),
+        );
         return Err(format_validate_err(code, msg));
     }
 
-    let ssh_handle = ssh_state
-        .get_connection(&rule.host_id)
+    let ssh_handle = ssh_state.get_connection(&rule.host_id).await.map_err(|e| {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!(
+                "tunnel_start 获取连接失败: id={}, host={}, err={}",
+                rule_id, rule.host_id, e
+            ),
+        );
+        format!("{}: {}", TunnelErrorCode::HostNotAvailable, String::from(e))
+    })?;
+
+    let forward_registry = ssh_state
+        .get_forward_registry(&rule.host_id)
         .await
-        .map_err(|e| format!("{}: {}", TunnelErrorCode::HostNotAvailable, String::from(e)))?;
+        .map_err(|e| {
+            debug_log(
+                &app,
+                LogLevel::Warn,
+                &format!(
+                    "tunnel_start 获取转发注册表失败: id={}, host={}, err={}",
+                    rule_id, rule.host_id, e
+                ),
+            );
+            format!("{}: {}", TunnelErrorCode::HostNotAvailable, String::from(e))
+        })?;
 
     let rule_clone = rule.clone();
     let handle_clone = ssh_handle;
+    let app_clone = app.clone();
 
     let abortable = async move {
         let mode = rule_clone.mode.clone();
@@ -415,14 +493,23 @@ pub async fn tunnel_start(
             "local" => {
                 let ra_str = ra.unwrap_or_default();
                 let rp_int = rp.unwrap_or(0);
-                forward::run_local_forward(handle_clone, la, lp, ra_str, rp_int).await
+                forward::run_local_forward(&app_clone, handle_clone, la, lp, ra_str, rp_int).await
             }
             "remote" => {
                 let ra_str = ra.unwrap_or_default();
                 let rp_int = rp.unwrap_or(0);
-                forward::run_remote_forward(handle_clone, ra_str, rp_int, la, lp).await
+                forward::run_remote_forward(
+                    &app_clone,
+                    handle_clone,
+                    forward_registry,
+                    ra_str,
+                    rp_int,
+                    la,
+                    lp,
+                )
+                .await
             }
-            "dynamic" => forward::run_dynamic_forward(handle_clone, la, lp).await,
+            "dynamic" => forward::run_dynamic_forward(&app_clone, handle_clone, la, lp).await,
             _ => Err((
                 TunnelErrorCode::PermissionDenied,
                 format!("unknown mode {}", mode),
@@ -430,7 +517,51 @@ pub async fn tunnel_start(
         };
 
         if let Err((code, msg)) = result {
-            eprintln!("[tunnel] forward error: {:?}: {}", code, msg);
+            debug_log(
+                &app_clone,
+                LogLevel::Error,
+                &format!(
+                    "tunnel_forward 运行失败: rule_id={}, mode={}, err={}: {}",
+                    rule_clone.id, mode, code, msg
+                ),
+            );
+            let _ = app_clone.emit(
+                "tunnel:error",
+                serde_json::json!({
+                    "tunnelId": rule_clone.id,
+                    "code": code.to_string(),
+                    "message": msg,
+                }),
+            );
+        } else {
+            debug_log(
+                &app_clone,
+                LogLevel::Info,
+                &format!(
+                    "tunnel_forward 已退出: rule_id={}, mode={}",
+                    rule_clone.id, mode
+                ),
+            );
+        }
+
+        // The forward task ended on its own (e.g. the server rejected the
+        // tcpip-forward request). Clear the "running" entry so the tunnel
+        // doesn't stay stuck in the running state and can be restarted
+        // immediately. A manual stop aborts this task, so this cleanup does
+        // not run in that case (tunnel_stop already removed the entry).
+        let tid = rule_clone.id.clone();
+        let hid = rule_clone.host_id.clone();
+        let ts = app_clone.state::<TunnelState>();
+        let removed = ts.running.lock().await.remove(&tid);
+        if removed.is_some() {
+            let _ = app_clone.emit(
+                "tunnel:stop",
+                serde_json::json!({
+                    "tunnelId": tid,
+                    "hostId": hid,
+                    "reason": "error",
+                }),
+            );
         }
     };
 
@@ -438,14 +569,21 @@ pub async fn tunnel_start(
     let abort_handle = join_handle.abort_handle();
     let start_time = Utc::now().timestamp_millis();
 
-    let listen_check = forward::bind_listener_only(rule.local_addr.clone(), rule.local_port).await;
-    match listen_check {
-        Ok(listener) => {
-            drop(listener);
-        }
-        Err((code, msg)) => {
-            abort_handle.abort();
-            return Err(format_validate_err(code, msg));
+    // Remote forwards listen on the *server* side; the local port is the
+    // target, which must stay available for the server's connections (e.g. a
+    // locally running web server). Only pre-check bindability for
+    // local/dynamic modes where we listen locally.
+    if rule.mode != "remote" {
+        let listen_check =
+            forward::bind_listener_only(rule.local_addr.clone(), rule.local_port).await;
+        match listen_check {
+            Ok(listener) => {
+                drop(listener);
+            }
+            Err((code, msg)) => {
+                abort_handle.abort();
+                return Err(format_validate_err(code, msg));
+            }
         }
     }
 
@@ -506,19 +644,26 @@ pub async fn tunnel_stop(
     };
 
     if let Some(t) = removed {
+        let reason_str = reason.unwrap_or_else(|| "manual".to_string());
         t.abort.abort();
         let _ = app.emit(
             "tunnel:stop",
             serde_json::json!({
                 "tunnelId": rule_id,
                 "hostId": t.host_id,
-                "reason": reason.unwrap_or_else(|| "manual".to_string()),
+                "reason": reason_str,
             }),
         );
         debug_log(
             &app,
             LogLevel::Info,
-            &format!("tunnel_stop: id={}", rule_id),
+            &format!("tunnel_stop: id={}, reason={}", rule_id, reason_str),
+        );
+    } else {
+        debug_log(
+            &app,
+            LogLevel::Info,
+            &format!("tunnel_stop 未在运行: id={}", rule_id),
         );
     }
 
@@ -567,6 +712,17 @@ pub async fn tunnel_list_statuses(
             });
         }
     }
+
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_list_statuses: count={}, running={}, host_filter={:?}",
+            result.len(),
+            result.iter().filter(|s| s.running).count(),
+            host_id
+        ),
+    );
 
     Ok(result)
 }
@@ -630,13 +786,25 @@ pub async fn tunnel_export_rules(
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
     let rules = load_rules(&rules_path(&dir))?;
 
-    let filtered: Vec<TunnelRuleDto> = match rule_ids {
+    let filtered: Vec<TunnelRuleDto> = match &rule_ids {
         Some(ids) => rules.into_iter().filter(|r| ids.contains(&r.id)).collect(),
         None => rules,
     };
 
     let file = import_export::export_rules(filtered);
-    serde_json::to_string_pretty(&file).map_err(|e| e.to_string())
+    let json = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "tunnel_export_rules: count={}, rule_ids={:?}",
+            file.rules.len(),
+            rule_ids
+        ),
+    );
+
+    Ok(json)
 }
 
 #[tauri::command]
@@ -648,11 +816,27 @@ pub async fn tunnel_import_rules(
 ) -> Result<Vec<TunnelRuleDto>, String> {
     let conflict_mode = match on_conflict.as_str() {
         "skip" | "overwrite" | "rename" => on_conflict.as_str(),
-        _ => "skip",
+        _ => {
+            debug_log(
+                &app,
+                LogLevel::Warn,
+                &format!(
+                    "tunnel_import_rules 未知冲突策略: {:?}, 回退 skip",
+                    on_conflict
+                ),
+            );
+            "skip"
+        }
     };
 
-    let file: import_export::RdTunnelsFile =
-        serde_json::from_str(&json_content).map_err(|e| format!("IMPORT_PARSE_FAILED: {}", e))?;
+    let file: import_export::RdTunnelsFile = serde_json::from_str(&json_content).map_err(|e| {
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("tunnel_import_rules JSON 解析失败: {}", e),
+        );
+        format!("IMPORT_PARSE_FAILED: {}", e)
+    })?;
 
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
     let path = rules_path(&dir);

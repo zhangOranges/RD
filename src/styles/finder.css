@@ -5264,3 +5264,141 @@ html[data-bg-image="1"] .context-menu-item {
   background: var(--bg-input);
   border: 1px solid var(--divider-soft);
 }
+
+/* ==========================================================================
+ * 插件视图宿主（PluginViewHost + pluginLifecycleManager）
+ *
+ * 结构：
+ *   #__rd_plugin_views__（.rd-view-host，fixed 全屏，默认 hidden）
+ *     └─ .rd-view-window × N（常驻的插件视图窗口，默认隐藏，is-open 显示）
+ *          ├─ .rd-view-titlebar（标题 + 关闭按钮）
+ *          └─ .rd-view-body
+ *               └─ .rd-plugin-sandbox-root（React 挂载点，内含 iframe 全尺寸）
+ *   .rd-view-mask（React 渲染的半透明遮罩，点击关闭，位于窗口之下）
+ *
+ * 说明：插件 iframe 常驻不销毁（避免移动 iframe 导致插件状态丢失），
+ *       开/关视图只切换 .rd-view-window 的 is-open 与 .rd-view-host 的 has-open。
+ * ========================================================================== */
+
+/* 全屏宿主容器：默认隐藏且不拦截事件，打开视图时显示 */
+.rd-view-host {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0.18s;
+}
+.rd-view-host.has-open {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* 半透明遮罩（点击关闭）：位于窗口之下、应用之上 */
+.rd-view-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1290;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: saturate(115%) blur(2px);
+  -webkit-backdrop-filter: saturate(115%) blur(2px);
+  animation: rd-view-mask-in 0.18s ease;
+}
+@keyframes rd-view-mask-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 插件视图窗口：居中弹窗，默认隐藏，is-open 时淡入 */
+.rd-view-window {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: min(980px, 92vw);
+  height: min(760px, 88vh);
+  background: var(--bg-content, #14161a);
+  border: 1px solid var(--divider);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(-50%, -46%);
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s;
+}
+/* 有背景图时：窗口底色交给插件自己（theme-sync 已按 bgGlassAlpha 玻璃化），
+   这里透明避免双层叠色；插件面板用玻璃化后的 --bg-content 透出下层 */
+html[data-bg-image="1"] .rd-view-window {
+  background: transparent;
+}
+.rd-view-window.is-open {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+
+/* 标题栏 */
+.rd-view-titlebar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 42px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--divider-soft);
+  background: color-mix(in srgb, var(--bg-content, #14161a) 96%, transparent);
+  user-select: none;
+}
+.rd-view-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 关闭按钮 */
+.rd-view-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.rd-view-close:hover {
+  background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
+  color: var(--danger, #ef4444);
+}
+.rd-view-close:active {
+  transform: scale(0.94);
+}
+
+/* 内容区：iframe 全尺寸铺满 */
+.rd-view-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.rd-plugin-sandbox-root {
+  position: absolute;
+  inset: 0;
+}
+.rd-plugin-sandbox-root iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  display: block;
+}

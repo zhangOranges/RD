@@ -483,7 +483,7 @@
 - **Depends On**: Task 5.1
 - **Description**:
   - 前端 SDK TunnelApi 实现：
-    - 规则 CRUD：createRule / removeRule / listRules / updateRule → 持久化到 `${appDataDir}/plugin-data/rd-native:port-forward/rules.json`
+    - 规则 CRUD：createRule / removeRule / listRules / updateRule → 持久化到 `${appDataDir}/plugin-data/rd-native.port-forward/rules.json`（Windows 目录名不允许冒号，用点号代替）
     - 运行控制：startTunnel / stopTunnel / listStatus
     - 导入导出：exportRules → `.rd-tunnels.json` 格式 §11.8；importRules → onConflict: skip/overwrite/rename
   - 隧道事件 emit：tunnel:start / tunnel:stop / tunnel:error / tunnel:connection 触发对应 RdEventMap 分发

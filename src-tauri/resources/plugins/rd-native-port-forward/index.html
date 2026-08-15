@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>端口转发</title>
+<style>
+  /* ============================================================
+   * RD 内置插件：端口转发（rd-native-port-forward）
+   * 界面与逻辑完全声明在本插件目录内，不依赖主程序。
+   * 颜色全部使用主题 CSS 变量（由主程序 theme-sync 同步），
+   * 因此能自动适配深浅色 / 自定义主题。
+   * ============================================================ */
+  :root {
+    color-scheme: dark;
+  }
+  /* 主题明暗类型由主程序 theme-sync 同步（data-theme-type） */
+  :root[data-theme-type="light"] {
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Microsoft YaHei', sans-serif;
+    font-size: 13px;
+    color: var(--text-primary, #e4e4e7);
+    background: var(--bg-content, #14161a);
+    overflow: hidden;
+    user-select: none;
+  }
+  input, select, textarea, button { font-family: inherit; }
+
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ---------- 顶栏 ---------- */
+  .pf-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--divider-soft, rgba(127,127,127,0.18));
+  }
+  .pf-sub {
+    font-size: 11px;
+    color: var(--text-tertiary, #9a9aa2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pf-actions { display: flex; align-items: center; gap: 8px; }
+
+  /* ---------- 通用控件 ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--divider, rgba(127,127,127,0.25));
+    background: var(--bg-input, rgba(127,127,127,0.12));
+    color: var(--text-primary, #e4e4e7);
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--hover, rgba(127,127,127,0.2)); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary {
+    background: var(--accent, #3b82f6);
+    border-color: var(--accent, #3b82f6);
+    color: var(--text-on-accent, #fff);
+  }
+  .btn-primary:hover { filter: brightness(1.08); background: var(--accent, #3b82f6); }
+  .btn-danger { color: var(--danger, #ef4444); }
+  .btn-danger:hover {
+    background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
+  }
+  .btn-ghost { background: transparent; }
+
+  .form-input, .form-select, .form-textarea {
+    background: var(--bg-input, rgba(127,127,127,0.12));
+    border: 1px solid var(--divider, rgba(127,127,127,0.25));
+    border-radius: 6px;
+    color: var(--text-primary, #e4e4e7);
+    font-size: 12.5px;
+    padding: 5px 9px;
+    outline: none;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus {
+    border-color: var(--accent, #3b82f6);
+  }
+  .form-textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
+
+  /* 开关 */
+  .pf-switch-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary, #b0b0b8);
+    cursor: pointer;
+    user-select: none;
+  }
+  .pf-switch { position: relative; width: 30px; height: 16px; flex: 0 0 auto; }
+  .pf-switch input { opacity: 0; width: 0; height: 0; }
+  .pf-switch-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 8px;
+    background: var(--divider, rgba(127,127,127,0.3));
+    transition: background 0.15s ease;
+  }
+  .pf-switch-track::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s ease;
+  }
+  .pf-switch.on .pf-switch-track,
+  .pf-switch:has(input:checked) .pf-switch-track,
+  .pf-switch input:checked + .pf-switch-track { background: var(--accent, #3b82f6); }
+  .pf-switch.on .pf-switch-track::after,
+  .pf-switch:has(input:checked) .pf-switch-track::after,
+  .pf-switch input:checked + .pf-switch-track::after { transform: translateX(14px); }
+  .pf-switch input:disabled + .pf-switch-track { opacity: 0.5; }
+
+  /* ---------- 下拉菜单 ---------- */
+  .pf-menu-wrap { position: relative; }
+  .pf-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    min-width: 168px;
+    background: var(--bg-content, #14161a);
+    border: 1px solid var(--divider, rgba(127,127,127,0.25));
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 20;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  .pf-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 12px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary, #e4e4e7);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .pf-menu-item:hover { background: var(--hover, rgba(127,127,127,0.2)); }
+
+  /* ---------- 警告条 ---------- */
+  .pf-warn {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 16px 0;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #f59e0b;
+  }
+  .pf-warn.danger {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: var(--danger, #ef4444);
+  }
+  .pf-warn svg { flex: 0 0 auto; }
+
+  /* ---------- 规则表格 ---------- */
+  .pf-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 16px 16px; }
+  .pf-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  .pf-table th {
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-tertiary, #9a9aa2);
+    border-bottom: 1px solid var(--divider, rgba(127,127,127,0.25));
+    white-space: nowrap;
+  }
+  .pf-table td {
+    padding: 9px 10px;
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--divider-soft, rgba(127,127,127,0.1));
+    vertical-align: middle;
+  }
+  .pf-table tr:hover td { background: var(--hover, rgba(127,127,127,0.08)); }
+  .pf-empty {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--text-tertiary, #9a9aa2);
+    font-size: 13px;
+  }
+  .pf-mono { font-family: 'SF Mono', 'Consolas', 'Monaco', monospace; font-size: 12px; }
+  .pf-mode-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .pf-dot { display: inline-flex; align-items: center; gap: 6px; }
+  .pf-dot i {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+    background: var(--text-tertiary, #9a9aa2); opacity: 0.4;
+  }
+  .pf-dot i.running { background: #22c55e; opacity: 1; box-shadow: 0 0 0 2px rgba(34,197,94,0.15); }
+  .pf-dot i.error   { background: #ef4444; opacity: 1; }
+  .pf-dot i.starting{ background: #f59e0b; opacity: 1; }
+  .pf-status { font-size: 11px; color: var(--text-tertiary, #9a9aa2); }
+  .pf-ops { display: flex; gap: 4px; }
+  .pf-ops .btn { height: 22px; padding: 0 7px; font-size: 11px; }
+
+  /* ---------- 表单 ---------- */
+  .pf-form {
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 10px;
+    background: var(--bg-input, rgba(127,127,127,0.06));
+    border: 1px solid var(--divider, rgba(127,127,127,0.25));
+  }
+  .pf-form-title { font-size: 13.5px; font-weight: 600; margin-bottom: 14px; }
+  .pf-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .pf-row-main { min-width: 0; }
+  .pf-row-label { font-size: 12.5px; font-weight: 500; }
+  .pf-row-desc { font-size: 11px; color: var(--text-tertiary, #9a9aa2); margin-top: 2px; line-height: 1.5; }
+  .pf-mode-group { display: flex; gap: 10px; }
+  .pf-mode-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .pf-mode-opt.selected {
+    background: var(--hover, rgba(127,127,127,0.15));
+    border-color: var(--divider, rgba(127,127,127,0.3));
+  }
+  .pf-mode-opt input { accent-color: var(--accent, #3b82f6); }
+  .pf-form-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .pf-risk {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+  }
+  .pf-risk label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--danger, #ef4444);
+    cursor: pointer;
+  }
+  .pf-risk input { accent-color: var(--danger, #ef4444); }
+  .pf-loading { text-align: center; padding: 40px 0; color: var(--text-tertiary, #9a9aa2); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="pf-header">
+    <div class="pf-sub">SSH 本地 / 远程 / 动态转发 · 内置插件最佳实践示例</div>
+    <div class="pf-actions">
+      <label class="pf-switch-label" title="开启后允许远程转发（R 模式），远端服务器将可回连本机端口">
+        <span class="pf-switch">
+          <input type="checkbox" id="allowRemote" />
+          <span class="pf-switch-track"></span>
+        </span>
+        允许远程转发
+      </label>
+      <button type="button" class="btn btn-primary" id="btnNew">＋ 新建</button>
+      <div class="pf-menu-wrap">
+        <button type="button" class="btn" id="btnMenu">导入 / 导出 ▾</button>
+        <div class="pf-menu" id="pfMenu" hidden>
+          <button type="button" class="pf-menu-item" id="btnImport">↥ 从文件导入</button>
+          <button type="button" class="pf-menu-item" id="btnExport">↧ 导出所有规则</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="pf-warn" id="warnRemote" hidden>⚠ 远程转发模式已开启，远端服务器将可回连本机端口</div>
+  <div class="pf-warn danger" id="warnFormRemote" hidden>⚠ 远程转发 (R 模式) 属于高危操作，请确认服务器权限安全</div>
+
+  <div class="pf-body">
+    <div class="pf-loading" id="loading">正在加载…</div>
+    <table class="pf-table" id="table" hidden>
+      <thead>
+        <tr>
+          <th>状态</th><th>模式</th><th>绑定主机</th><th>本地 → 远程</th><th>自启</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <div class="pf-form" id="form" hidden>
+      <div class="pf-form-title" id="formTitle">新建规则</div>
+
+      <div class="pf-row">
+        <div class="pf-row-main">
+          <div class="pf-row-label">步骤一：绑定主机</div>
+          <div class="pf-row-desc">选择一条已连接的 SSH 主机</div>
+        </div>
+        <select class="form-select" id="fHost" style="min-width: 220px"></select>
+      </div>
+
+      <div class="pf-row">
+        <div class="pf-row-main">
+          <div class="pf-row-label">步骤二：转发模式</div>
+          <div class="pf-row-desc">local：本机监听 → 远程访问；remote：远程监听 → 回连本机；dynamic：SOCKS5 代理</div>
+        </div>
+        <div class="pf-mode-group" id="fModeGroup"></div>
+      </div>
+
+      <div class="pf-row">
+        <div class="pf-row-main">
+          <div class="pf-row-label">步骤三：本地监听地址</div>
+          <div class="pf-row-desc">0.0.0.0 / :: 表示对外网卡开放（高危）</div>
+        </div>
+        <div style="display:flex; gap:8px">
+          <select class="form-select" id="fLocalAddr" style="min-width: 140px"></select>
+          <input type="text" class="form-input" id="fLocalAddrCustom" placeholder="例如 192.168.1.10" style="width: 170px" hidden />
+        </div>
+      </div>
+
+      <div class="pf-row">
+        <div class="pf-row-main">
+          <div class="pf-row-label">步骤四：本地端口</div>
+          <div class="pf-row-desc">1 - 65535</div>
+        </div>
+        <input type="number" min="1" max="65535" class="form-input" id="fLocalPort" style="width: 120px" />
+      </div>
+
+      <div id="remoteGroup">
+        <div class="pf-row">
+          <div class="pf-row-main">
+            <div class="pf-row-label">步骤五：远程地址</div>
+            <div class="pf-row-desc">目标主机/IP（local 模式下是对端可达地址，remote 模式下是本机可达地址）</div>
+          </div>
+          <input type="text" class="form-input" id="fRemoteAddr" placeholder="例如 10.0.0.1 或 127.0.0.1" style="width: 200px" />
+        </div>
+        <div class="pf-row">
+          <div class="pf-row-main">
+            <div class="pf-row-label">远程端口</div>
+            <div class="pf-row-desc">1 - 65535</div>
+          </div>
+          <input type="number" min="1" max="65535" class="form-input" id="fRemotePort" style="width: 120px" />
+        </div>
+      </div>
+
+      <div class="pf-row">
+        <div class="pf-row-main">
+          <div class="pf-row-label">步骤六：标签与备注</div>
+          <div class="pf-row-desc">标签用逗号分隔；备注可选</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px">
+          <input type="text" class="form-input" id="fTags" placeholder="tags, comma separated" style="width: 260px" />
+          <textarea class="form-textarea" id="fComment" placeholder="备注（可选）" style="width: 260px"></textarea>
+        </div>
+      </div>
+
+      <div class="pf-row">
+        <div class="pf-row-main">
+          <div class="pf-row-label">自启</div>
+          <div class="pf-row-desc">保存后或主机重连后自动启动此隧道</div>
+        </div>
+        <label class="pf-switch">
+          <input type="checkbox" id="fAutoStart" />
+          <span class="pf-switch-track"></span>
+        </label>
+      </div>
+
+      <div class="pf-risk" id="riskBox" hidden>
+        <label>
+          <input type="checkbox" id="fRiskConfirmed" />
+          <span id="riskText">我已了解风险并确认开启</span>
+        </label>
+      </div>
+
+      <div class="pf-form-footer">
+        <button type="button" class="btn" id="btnCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="btnSave">创建规则</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var R = window.__rdPlugin;
+  var ctx = R.ctx;
+  var PLUGIN_ID = R.getPluginId();
+
+  var LISTEN_PRESETS = ['127.0.0.1', '0.0.0.0', '::1', '::'];
+  var MODES = ['local', 'remote', 'dynamic'];
+  var MODE_COLOR = { local: '#3b82f6', remote: '#f59e0b', dynamic: '#8b5cf6' };
+  var MODE_LABEL = { local: 'local', remote: 'remote', dynamic: 'dynamic' };
+
+  var state = {
+    rules: [],
+    statuses: {},
+    hosts: [],            // 全部主机（HostConfigSafe[]），连接状态见 hostStates
+    hostStates: {},       // hostId -> ConnectionState
+    allowRemote: false,
+    editingId: null,
+    mode: 'local',
+    localAddr: '127.0.0.1',
+    localAddrCustom: '',
+    importMenuOpen: false,
+    ready: false,
+  };
+
+  var el = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  var errMsg = function (e) { return (e && e.message) || String(e); };
+  function log(level, msg) {
+    try { ctx.log[level]('[' + PLUGIN_ID + '] ' + msg); } catch (e) { /* ignore */ }
+  }
+  function notify(kind, msg) {
+    try { ctx.ui.notify(kind, msg); } catch (e) { /* ignore */ }
+  }
+
+  // ---------------- 数据加载 ----------------
+  async function loadRules() {
+    try {
+      state.rules = await ctx.tunnel.listRules(undefined);
+      state.rules.forEach(function (r) {
+        log('info', '规则加载: id=' + r.id + ', autoStart=' + r.autoStart + ', port=' + r.localPort + ', mode=' + r.mode);
+      });
+    }
+    catch (e) {
+      log('warn', '加载规则列表失败: ' + errMsg(e));
+      notify('error', '加载规则失败：' + errMsg(e));
+    }
+  }
+  async function loadStatuses() {
+    try {
+      var list = await ctx.tunnel.listStatuses(undefined);
+      var map = {};
+      list.forEach(function (s) { map[s.tunnelId] = s; });
+      state.statuses = map;
+    } catch (e) {
+      log('warn', '加载隧道状态失败: ' + errMsg(e));
+    }
+  }
+  async function loadHosts() {
+    try {
+      var all = await ctx.server.listAll();
+      var states = await Promise.all(all.map(function (h) {
+        return ctx.server.getConnectionState(h.id).catch(function () { return 'disconnected'; });
+      }));
+      state.hosts = all; // 列出全部主机（未连接的在下拉中禁用并标注）
+      state.hostStates = {};
+      all.forEach(function (h, i) { state.hostStates[h.id] = states[i] || 'disconnected'; });
+    } catch (e) {
+      log('warn', '加载主机列表失败: ' + errMsg(e));
+      state.hosts = [];
+      state.hostStates = {};
+    }
+  }
+  // 仅刷新主机列表并重渲染下拉（连接成功/重连成功时调用，避免表单里看不到刚连接的主机）
+  async function refreshHostsOnly() {
+    await loadHosts();
+    renderHostSelect();
+  }
+  async function refreshAll() {
+    await Promise.all([loadRules(), loadStatuses(), loadHosts()]);
+    render();
+  }
+  async function refreshStatuses() {
+    await loadStatuses();
+    render();
+  }
+
+  // ---------------- 渲染 ----------------
+  function statusOf(rule) {
+    return state.statuses[rule.id] || null;
+  }
+  function hostName(rule) {
+    var h = state.hosts.concat(getAllHostsCache()).filter(function (x) { return x.id === rule.hostId; })[0];
+    if (h) return h.name + ' (' + h.host + ':' + h.port + ')';
+    return 'host:' + rule.hostId.slice(0, 8);
+  }
+  var _allHostsCache = [];
+  function getAllHostsCache() { return _allHostsCache; }
+  async function loadAllHostsCache() {
+    try { _allHostsCache = await ctx.server.listAll(); } catch (e) { _allHostsCache = []; }
+  }
+
+  function modePill(mode) {
+    return '<span class="pf-mode-pill" style="background:' + MODE_COLOR[mode] + '">' + MODE_LABEL[mode] + '</span>';
+  }
+  function statusCell(rule) {
+    var st = statusOf(rule);
+    if (!st) {
+      return '<span class="pf-dot"><i></i><span class="pf-status">stopped</span></span>';
+    }
+    if (st.running) {
+      return '<span class="pf-dot"><i class="running"></i><span class="pf-status">running</span></span>';
+    }
+    if (st.error) {
+      return '<span class="pf-dot"><i class="error"></i><span class="pf-status" title="' + esc(st.error) + '">error</span></span>';
+    }
+    return '<span class="pf-dot"><i class="starting"></i><span class="pf-status">starting</span></span>';
+  }
+  function targetCell(rule) {
+    if (rule.mode === 'dynamic') {
+      return '<span class="pf-mono">SOCKS5 ' + esc(rule.localAddr) + ':' + rule.localPort + '</span>';
+    }
+    return '<span class="pf-mono">' + esc(rule.localAddr) + ':' + rule.localPort +
+      ' → ' + esc(rule.remoteAddr || '?') + ':' + (rule.remotePort || '?') + '</span>';
+  }
+
+  function render() {
+    document.getElementById('loading').hidden = state.ready;
+    var table = document.getElementById('table');
+    table.hidden = !state.ready;
+    document.getElementById('warnRemote').hidden = !state.allowRemote;
+
+    var tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+    if (!state.rules.length) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="6"><div class="pf-empty">暂无转发规则，点击右上角「新建」添加</div></td>';
+      tbody.appendChild(tr);
+    } else {
+      state.rules.forEach(function (rule) {
+        var st = statusOf(rule);
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + statusCell(rule) + '</td>' +
+          '<td>' + modePill(rule.mode) + '</td>' +
+          '<td style="font-size:12px">' + esc(hostName(rule)) + '</td>' +
+          '<td>' + targetCell(rule) + '</td>' +
+          '<td><label class="pf-switch-label" title="点击切换自启"><span class="pf-switch' + (rule.autoStart ? ' on' : '') + '"><input type="checkbox" ' + (rule.autoStart ? 'checked' : '') + ' data-act="autostart" data-id="' + esc(rule.id) + '" /><span class="pf-switch-track"></span></span></label></td>' +
+          '<td><div class="pf-ops">' +
+            (st && st.running
+              ? '<button type="button" class="btn" data-act="stop" data-id="' + esc(rule.id) + '" title="停止">⏸</button>'
+              : '<button type="button" class="btn" data-act="start" data-id="' + esc(rule.id) + '" title="启动">▶</button>') +
+            '<button type="button" class="btn" data-act="edit" data-id="' + esc(rule.id) + '" title="编辑">✎</button>' +
+            '<button type="button" class="btn btn-danger" data-act="remove" data-id="' + esc(rule.id) + '" title="删除">🗑</button>' +
+          '</div></td>';
+        tbody.appendChild(tr);
+      });
+    }
+
+    renderHostSelect();
+    renderForm();
+  }
+
+  function renderHostSelect() {
+    var sel = el('fHost');
+    var prev = sel.value;
+    var html = '<option value="">请选择主机…</option>';
+    state.hosts.forEach(function (h) {
+      var st = state.hostStates[h.id] || 'disconnected';
+      var connected = st === 'connected';
+      var label = esc(h.name) + ' (' + esc(h.host) + ':' + h.port + ')';
+      if (!connected) label += ' — ' + (st === 'connecting' ? '连接中' : st === 'reconnecting' ? '重连中' : '未连接');
+      html += '<option value="' + esc(h.id) + '"' + (connected ? '' : ' disabled') + '>' + label + '</option>';
+    });
+    if (!state.hosts.length) {
+      html += '<option value="" disabled>暂无主机，请先在左侧添加并连接</option>';
+    }
+    sel.innerHTML = html;
+    // 保持用户当前选择（表格刷新时不应重置表单）
+    var keep = Array.prototype.some.call(sel.options, function (o) {
+      return o.value === prev && !o.disabled;
+    });
+    if (keep) sel.value = prev;
+  }
+
+  function renderModeGroup() {
+    var g = el('fModeGroup');
+    var html = '';
+    MODES.forEach(function (m) {
+      html += '<label class="pf-mode-opt' + (state.mode === m ? ' selected' : '') + '">' +
+        '<input type="radio" name="fMode" value="' + m + '"' + (state.mode === m ? ' checked' : '') + ' />' +
+        modePill(m) + '</label>';
+    });
+    g.innerHTML = html;
+    g.querySelectorAll('input').forEach(function (inp) {
+      inp.addEventListener('change', function () { state.mode = inp.value; renderForm(); });
+    });
+  }
+
+  function renderLocalAddr() {
+    var sel = el('fLocalAddr');
+    var html = LISTEN_PRESETS.map(function (a) {
+      return '<option value="' + a + '"' + (state.localAddr === a ? ' selected' : '') + '>' + a + '</option>';
+    }).join('');
+    if (LISTEN_PRESETS.indexOf(state.localAddr) === -1) {
+      html += '<option value="custom" selected>自定义…</option>';
+    } else {
+      html += '<option value="custom">自定义…</option>';
+    }
+    sel.innerHTML = html;
+    var custom = el('fLocalAddrCustom');
+    custom.hidden = state.localAddr !== 'custom';
+    if (state.localAddr === 'custom') {
+      custom.value = state.localAddrCustom || '';
+    }
+  }
+
+  function finalLocalAddr() {
+    return state.localAddr === 'custom' ? (state.localAddrCustom || '').trim() : state.localAddr;
+  }
+  function isDangerous() {
+    return state.mode === 'remote' || finalLocalAddr() === '0.0.0.0' || finalLocalAddr() === '::';
+  }
+
+  function renderForm() {
+    renderModeGroup();
+    renderLocalAddr();
+    el('remoteGroup').hidden = state.mode === 'dynamic';
+    el('warnFormRemote').hidden = !(state.editingId === null && state.mode === 'remote');
+    document.getElementById('formTitle').textContent = state.editingId ? '编辑规则' : '新建规则';
+    var saveBtn = el('btnSave');
+    saveBtn.textContent = state.editingId ? '保存修改' : '创建规则';
+
+    var risk = isDangerous();
+    el('riskBox').hidden = !risk;
+    if (risk) {
+      var riskText = '我已了解风险并确认开启';
+      if (state.mode === 'remote') riskText += '（远程转发模式）';
+      if (finalLocalAddr() === '0.0.0.0' || finalLocalAddr() === '::') riskText += '（监听所有网卡）';
+      el('riskText').textContent = riskText;
+    }
+
+    var portOk = /^[0-9]{1,5}$/.test(el('fLocalPort').value.trim()) &&
+      Number(el('fLocalPort').value) >= 1 && Number(el('fLocalPort').value) <= 65535;
+    var remoteOk = state.mode === 'dynamic' ||
+      (/^[0-9]{1,5}$/.test(el('fRemotePort').value.trim()) &&
+        Number(el('fRemotePort').value) >= 1 && Number(el('fRemotePort').value) <= 65535 &&
+        el('fRemoteAddr').value.trim() !== '');
+    var canSave = !!el('fHost').value && portOk && remoteOk && (!risk || el('fRiskConfirmed').checked);
+    saveBtn.disabled = !canSave;
+  }
+
+  // ---------------- 操作 ----------------
+  // 列表自启开关：点击切换规则的 autoStart（不影响正在运行的隧道）
+  // 视觉不依赖 :checked 伪类（WebView2 下可能不匹配），直接用 class 控制开关样式
+  function syncSwitch(inp) {
+    var l = inp && inp.closest ? inp.closest('.pf-switch') : null;
+    if (l) l.classList.toggle('on', !!inp.checked);
+  }
+  async function toggleAutoStart(id, next, el) {
+    var label = el.closest('.pf-switch');
+    if (label) label.classList.toggle('on', next);
+    try {
+      await ctx.tunnel.updateRule(id, { autoStart: next }, { allowRemote: state.allowRemote, confirmListenAll: true });
+      var rule = state.rules.filter(function (r) { return r.id === id; })[0];
+      if (rule) rule.autoStart = next;
+      log('info', '切换自启: id=' + id + ' -> ' + next);
+      notify('success', next ? '已开启自启' : '已关闭自启');
+    } catch (e) {
+      // 失败回滚开关
+      if (label) label.classList.toggle('on', !next);
+      if (el) el.checked = !next;
+      log('warn', '切换自启失败: id=' + id + ', err=' + errMsg(e));
+      notify('error', '切换自启失败：' + errMsg(e));
+    }
+  }
+
+  async function handleStart(id) {
+    try {
+      await ctx.tunnel.start(id, { allowRemote: state.allowRemote, confirmListenAll: true });
+      log('info', '启动隧道成功: id=' + id);
+      notify('success', '隧道已启动');
+      await refreshStatuses();
+    } catch (e) {
+      log('error', '启动隧道失败: id=' + id + ', err=' + errMsg(e));
+      notify('error', '启动失败：' + errMsg(e));
+    }
+  }
+  async function handleStop(id) {
+    try {
+      await ctx.tunnel.stop(id);
+      log('info', '停止隧道成功: id=' + id);
+      notify('success', '隧道已停止');
+      await refreshStatuses();
+    } catch (e) {
+      log('error', '停止隧道失败: id=' + id + ', err=' + errMsg(e));
+      notify('error', '停止失败：' + errMsg(e));
+    }
+  }
+  async function handleRemove(id) {
+    var ok = await ctx.ui.confirm('删除隧道', '确定删除此隧道？运行中的隧道会被先停止。');
+    if (!ok) return;
+    try {
+      await ctx.tunnel.removeRule(id);
+      log('info', '删除隧道规则成功: id=' + id);
+      notify('success', '隧道已删除');
+      await refreshAll();
+    } catch (e) {
+      log('error', '删除隧道规则失败: id=' + id + ', err=' + errMsg(e));
+      notify('error', '删除失败：' + errMsg(e));
+    }
+  }
+  function openEdit(rule) {
+    state.editingId = rule.id;
+    state.mode = rule.mode;
+    state.localAddr = LISTEN_PRESETS.indexOf(rule.localAddr) !== -1 ? rule.localAddr : 'custom';
+    state.localAddrCustom = LISTEN_PRESETS.indexOf(rule.localAddr) !== -1 ? '' : rule.localAddr;
+    el('fHost').value = rule.hostId;
+    el('fLocalPort').value = rule.localPort;
+    el('fRemoteAddr').value = rule.remoteAddr || '';
+    el('fRemotePort').value = rule.remotePort ? String(rule.remotePort) : '';
+    el('fTags').value = (rule.tags || []).join(', ');
+    el('fComment').value = rule.comment || '';
+    el('fAutoStart').checked = rule.autoStart;
+    syncSwitch(el('fAutoStart'));
+    el('fRiskConfirmed').checked = false;
+    el('form').hidden = false;
+    log('info', '编辑隧道规则: id=' + rule.id + ', mode=' + rule.mode);
+    renderForm();
+  }
+  function openNew() {
+    state.editingId = null;
+    state.mode = 'local';
+    state.localAddr = '127.0.0.1';
+    state.localAddrCustom = '';
+    // 默认选中第一个已连接的主机（未连接的主机在下拉中已禁用，不能作为默认值）
+    var firstConnected = null;
+    for (var i = 0; i < state.hosts.length; i++) {
+      if ((state.hostStates[state.hosts[i].id] || 'disconnected') === 'connected') {
+        firstConnected = state.hosts[i].id;
+        break;
+      }
+    }
+    el('fHost').value = firstConnected || '';
+    el('fLocalPort').value = '';
+    el('fRemoteAddr').value = '';
+    el('fRemotePort').value = '';
+    el('fTags').value = '';
+    el('fComment').value = '';
+    el('fAutoStart').checked = false;
+    syncSwitch(el('fAutoStart'));
+    el('fRiskConfirmed').checked = false;
+    el('form').hidden = false;
+    renderForm();
+  }
+  function closeForm() {
+    el('form').hidden = true;
+    state.editingId = null;
+  }
+
+  function patchFromForm() {
+    return {
+      hostId: el('fHost').value,
+      mode: state.mode,
+      localAddr: finalLocalAddr(),
+      localPort: Number(el('fLocalPort').value),
+      remoteAddr: state.mode === 'dynamic' ? undefined : el('fRemoteAddr').value.trim(),
+      remotePort: state.mode === 'dynamic' ? undefined : Number(el('fRemotePort').value),
+      autoStart: el('fAutoStart').checked,
+      tags: el('fTags').value.split(',').map(function (t) { return t.trim(); }).filter(Boolean),
+      comment: el('fComment').value.trim() || undefined,
+    };
+  }
+
+  async function handleSave() {
+    var patch = patchFromForm();
+    try {
+      if (state.editingId) {
+        var tid = state.editingId;
+        await ctx.tunnel.updateRule(tid, patch, { allowRemote: state.allowRemote, confirmListenAll: true });
+        log('info', '更新隧道规则成功: id=' + tid + ', mode=' + patch.mode);
+        // 若该隧道正在运行，用新配置重启（改端口/模式/地址后旧隧道仍监听旧配置）
+        var st = state.statuses[tid];
+        if (st && st.running) {
+          try {
+            await ctx.tunnel.stop(tid);
+            await ctx.tunnel.start(tid, { allowRemote: state.allowRemote, confirmListenAll: true });
+            log('info', '编辑后已用新配置重启隧道: id=' + tid);
+            notify('success', '规则已更新，隧道已重启');
+          } catch (e) {
+            log('warn', '编辑后重启隧道失败: id=' + tid + ', err=' + errMsg(e));
+            notify('error', '规则已保存，但隧道重启失败：' + errMsg(e));
+          }
+        } else {
+          notify('success', '规则已更新');
+        }
+      } else {
+        var saved = await ctx.tunnel.addRule(patch, { allowRemote: state.allowRemote, confirmListenAll: true });
+        log('info', '创建隧道规则成功: id=' + saved.id + ', mode=' + patch.mode + ', host=' + patch.hostId + ', autoStart=' + patch.autoStart);
+        notify('success', '规则已创建');
+        if (patch.autoStart) {
+          try {
+            await ctx.tunnel.start(saved.id, { allowRemote: state.allowRemote, confirmListenAll: true });
+            log('info', '新建规则 autoStart 已启动: id=' + saved.id);
+          } catch (e) {
+            log('warn', '新建规则 autoStart 启动失败: id=' + saved.id + ', err=' + errMsg(e));
+          }
+        }
+      }
+      closeForm();
+      await refreshAll();
+    } catch (e) {
+      log('error', '保存隧道规则失败: ' + errMsg(e));
+      notify('error', '保存失败：' + errMsg(e));
+    }
+  }
+
+  async function handleExport() {
+    try {
+      var file = await ctx.tunnel.exportRules();
+      var blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'rd-tunnels-' + Date.now() + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      log('info', '导出隧道规则成功');
+      notify('success', '已导出规则');
+    } catch (e) {
+      log('error', '导出隧道规则失败: ' + errMsg(e));
+      notify('error', '导出失败：' + errMsg(e));
+    }
+  }
+
+  async function handleImportFile(file) {
+    try {
+      var text = await file.text();
+      var parsed = JSON.parse(text);
+      var strategyRaw = await ctx.ui.prompt('冲突策略', 'skip / overwrite / rename', 'skip');
+      var strategy = (strategyRaw === 'overwrite' || strategyRaw === 'rename') ? strategyRaw : 'skip';
+      log('info', '导入隧道规则文件: name=' + file.name + ', rules=' + (parsed.rules ? parsed.rules.length : 0) + ', strategy=' + strategy);
+      var result = await ctx.tunnel.importRules(parsed, strategy);
+      log('info', '导入隧道规则成功: imported=' + result.imported + ', skipped=' + result.skipped +
+        ', overwritten=' + result.overwritten + ', renamed=' + result.renamed);
+      notify('success', '导入完成：新增 ' + result.imported + '，跳过 ' + result.skipped +
+        '，覆盖 ' + result.overwritten + '，重命名 ' + result.renamed);
+      await refreshAll();
+    } catch (e) {
+      log('error', '导入隧道规则失败: file=' + file.name + ', err=' + errMsg(e));
+      notify('error', '导入失败：' + errMsg(e));
+    }
+  }
+
+  // ---------------- autoStart（连接成功 / 重连成功） ----------------
+  async function autoStart(hostId) {
+    try {
+      // 兜底：先清理该主机可能残留的旧隧道，否则 tunnel_start 会因"已运行"直接返回
+      await ctx.tunnel.stopAllForHost(hostId, 'host-reconnecting');
+    } catch (e) {
+      log('warn', 'autoStart 清理旧隧道失败: host=' + hostId + ', err=' + errMsg(e));
+    }
+    var rules;
+    try { rules = await ctx.tunnel.listRules(hostId); } catch (e) {
+      log('warn', 'autoStart 拉取规则失败: host=' + hostId + ', err=' + errMsg(e));
+      return;
+    }
+    var auto = rules.filter(function (r) { return r.autoStart; });
+    if (!auto.length) return;
+    log('info', 'autoStart 扫描: host=' + hostId + ', autoStart 规则数=' + auto.length);
+    var failed = 0;
+    for (var i = 0; i < auto.length; i++) {
+      var r = auto[i];
+      try {
+        await ctx.tunnel.start(r.id, { allowRemote: state.allowRemote, confirmListenAll: true });
+        log('info', 'autoStart 启动成功: host=' + hostId + ', tunnel=' + r.id);
+      } catch (e) {
+        failed++;
+        log('warn', 'autoStart 启动失败: host=' + hostId + ', tunnel=' + r.id + ', err=' + errMsg(e));
+      }
+    }
+    if (failed > 0) {
+      log('warn', 'autoStart 汇总: host=' + hostId + ', 失败=' + failed + '/' + auto.length);
+    }
+    await refreshStatuses();
+  }
+
+  // ---------------- 生命周期 ----------------
+  var busUnsubs = [];
+  var viewIsOpen = false;
+
+  R.on({
+    init: async function () {
+      log('info', '插件初始化（init）');
+      try {
+        await ctx.ui.registerToolbarButton({
+          id: 'port-forward-open',
+          label: '端口转发',
+          // 不传 icon：主程序工具栏会直接显示中文标签，避免显示图标名文本
+          tooltip: 'RD 官方端口转发管理器（内置插件示例）',
+          group: 'center',
+          onClick: function () { return ctx.ui.openPluginView(); },
+        });
+        log('info', '工具栏按钮已注册');
+      } catch (e) {
+        log('error', '注册工具栏按钮失败: ' + errMsg(e));
+      }
+    },
+    enable: async function () {
+      log('info', '插件启用（enable）');
+      // 先隐藏 loading 渲染空界面（数据随后异步加载），避免 SDK 调用
+      // 慢/挂起时界面一直停留在“正在加载…”
+      state.ready = true;
+      render();
+      try { state.allowRemote = !!(await ctx.storage.get('allowRemote')); } catch (e) { /* 默认 false */ }
+      el('allowRemote').checked = state.allowRemote;
+
+      busUnsubs.push(R.onBus('connection:success', function (hostId) { void autoStart(hostId); void refreshHostsOnly(); }));
+      busUnsubs.push(R.onBus('connection:reconnect-success', function (hostId) { void autoStart(hostId); void refreshHostsOnly(); }));
+      busUnsubs.push(R.onBus('tunnel:start', function () { void refreshStatuses(); }));
+      busUnsubs.push(R.onBus('tunnel:stop', function () { void refreshStatuses(); }));
+      busUnsubs.push(R.onBus('tunnel:error', function () { void refreshStatuses(); }));
+      log('info', '已订阅事件: connection:success / reconnect-success / tunnel:start|stop|error');
+
+      await loadAllHostsCache();
+      state.ready = true;
+      await refreshAll();
+    },
+    disable: async function () {
+      log('info', '插件禁用（disable）');
+      busUnsubs.forEach(function (u) { try { u(); } catch (e) { /* ignore */ } });
+      busUnsubs = [];
+      if (viewIsOpen) {
+        try { await ctx.ui.closePluginView(); } catch (e) { /* ignore */ }
+        viewIsOpen = false;
+      }
+    },
+    uninstall: async function () {
+      log('info', '插件卸载（uninstall）');
+    },
+  });
+
+  // ---------------- 事件绑定 ----------------
+  function bind() {
+    el('allowRemote').addEventListener('change', async function (e) {
+      var next = e.target.checked;
+      if (next) {
+        var ok = await ctx.ui.confirm('开启远程转发',
+          '开启远程转发（R 模式）后，远端服务器将可回连本机端口，属于高危操作。确定开启？');
+        if (!ok) { e.target.checked = false; log('info', '远程转发开关: 用户取消开启'); return; }
+      }
+      state.allowRemote = next;
+      try { await ctx.storage.set('allowRemote', next); } catch (err) { /* ignore */ }
+      log('info', '远程转发开关 -> ' + next);
+      document.getElementById('warnRemote').hidden = !next;
+    });
+
+    el('btnNew').addEventListener('click', function () { openNew(); });
+    el('btnCancel').addEventListener('click', closeForm);
+    el('btnSave').addEventListener('click', function () { void handleSave(); });
+
+    el('btnMenu').addEventListener('click', function (e) {
+      e.stopPropagation();
+      state.importMenuOpen = !state.importMenuOpen;
+      el('pfMenu').hidden = !state.importMenuOpen;
+    });
+    document.addEventListener('mousedown', function (e) {
+      if (state.importMenuOpen && !e.target.closest('.pf-menu-wrap')) {
+        state.importMenuOpen = false;
+        el('pfMenu').hidden = true;
+      }
+    });
+    el('btnExport').addEventListener('click', function () {
+      state.importMenuOpen = false;
+      el('pfMenu').hidden = true;
+      void handleExport();
+    });
+
+    // 文件导入
+    var fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json,.rd-tunnels.json';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput);
+    fileInput.addEventListener('change', function () {
+      var f = fileInput.files && fileInput.files[0];
+      fileInput.value = '';
+      state.importMenuOpen = false;
+      el('pfMenu').hidden = true;
+      if (f) void handleImportFile(f);
+    });
+    el('btnImport').addEventListener('click', function () { fileInput.click(); });
+
+    // 表单联动
+    el('fHost').addEventListener('change', renderForm);
+    el('fLocalAddr').addEventListener('change', function () {
+      state.localAddr = el('fLocalAddr').value;
+      renderLocalAddr();
+      renderForm();
+    });
+    el('fLocalAddrCustom').addEventListener('input', function () {
+      state.localAddrCustom = el('fLocalAddrCustom').value;
+      renderForm();
+    });
+    el('fLocalPort').addEventListener('input', renderForm);
+    el('fRemoteAddr').addEventListener('input', renderForm);
+    el('fRemotePort').addEventListener('input', renderForm);
+    el('fRiskConfirmed').addEventListener('change', renderForm);
+    // 表单自启开关：用户点击切换时同步开关视觉
+    el('fAutoStart').addEventListener('change', function () { syncSwitch(el('fAutoStart')); });
+
+    // 表格操作委托（按钮 + 自启开关）
+    document.getElementById('tbody').addEventListener('click', function (e) {
+      var el = e.target.closest('[data-act]');
+      if (!el) return;
+      var act = el.getAttribute('data-act');
+      var id = el.getAttribute('data-id');
+      if (act === 'autostart') {
+        // checkbox 的 checked 已被浏览器切换，直接用最新状态更新规则
+        void toggleAutoStart(id, el.checked, el);
+        return;
+      }
+      if (act === 'start') void handleStart(id);
+      else if (act === 'stop') void handleStop(id);
+      else if (act === 'edit') {
+        var rule = state.rules.filter(function (r) { return r.id === id; })[0];
+        if (rule) openEdit(rule);
+      } else if (act === 'remove') void handleRemove(id);
+    });
+
+    // Esc 关闭视图
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        try { ctx.ui.closePluginView(); } catch (err) { /* ignore */ }
+      }
+    });
+  }
+
+  // 视图打开/关闭时刷新数据：宿主窗口 class 变化可被 MutationObserver 捕获
+  function observeViewOpen() {
+    try {
+      var host = document.getElementById('__rd_plugin_views__');
+      if (!host) return;
+      new MutationObserver(function () {
+        var anyOpen = host.classList.contains('has-open');
+        var wasOpen = viewIsOpen;
+        viewIsOpen = anyOpen;
+        if (anyOpen && !wasOpen) {
+          // 视图刚打开：刷新数据保证最新
+          void refreshAll();
+        }
+      }).observe(host, { attributes: true, attributeFilter: ['class'] });
+    } catch (e) { /* 非宿主环境忽略 */ }
+  }
+
+  bind();
+  // 宿主容器由主程序创建，稍后观察（若已存在则直接观察）
+  setTimeout(function () { observeViewOpen(); }, 300);
+  setTimeout(function () { observeViewOpen(); }, 1200);
+})();
+</script>
+</body>
+</html>

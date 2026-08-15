@@ -50,7 +50,8 @@ export type PluginCategory =
   | 'security'
   | 'automation'
   | 'devops'
-  | 'utility';
+  | 'utility'
+  | 'tunnel';
 
 export interface PluginManifest {
   id: string;
@@ -235,6 +236,8 @@ export interface ToolbarButtonOption {
   icon?: string;
   tooltip?: string;
   disabled?: boolean;
+  /** 渲染分组（默认 right） */
+  group?: 'left' | 'center' | 'right';
   onClick: () => void | Promise<void>;
 }
 
@@ -316,6 +319,10 @@ export interface UiApi {
   notify(kind: ToastKind, message: string): void;
   confirm(title: string, message: string): Promise<boolean>;
   prompt(title: string, message: string, defaultValue?: string): Promise<string | null>;
+  /** 打开插件视图宿主（全屏模态显示插件自己的 index.html 界面） */
+  openPluginView(pluginId?: string): void;
+  /** 关闭当前打开的插件视图 */
+  closePluginView(): void;
   openPluginConfig(pluginId?: string): void;
   focusHost(hostId: string): void;
   focusTerminal(terminalId: string): void;
@@ -465,11 +472,23 @@ export interface TunnelImportResult {
 export interface TunnelApi {
   listRules(hostId?: string): Promise<TunnelRule[]>;
   getRule(tunnelId: string): Promise<TunnelRule | null>;
-  addRule(rule: Omit<TunnelRule, 'id' | 'createdAt'>): Promise<TunnelRule>;
-  updateRule(tunnelId: string, patch: Partial<Omit<TunnelRule, 'id' | 'hostId' | 'createdAt'>>): Promise<TunnelRule>;
+  addRule(
+    rule: Omit<TunnelRule, 'id' | 'createdAt'>,
+    options?: { allowRemote?: boolean; confirmListenAll?: boolean },
+  ): Promise<TunnelRule>;
+  updateRule(
+    tunnelId: string,
+    patch: Partial<Omit<TunnelRule, 'id' | 'hostId' | 'createdAt'>>,
+    options?: { allowRemote?: boolean; confirmListenAll?: boolean },
+  ): Promise<TunnelRule>;
   removeRule(tunnelId: string): Promise<void>;
-  start(tunnelId: string): Promise<TunnelStatus>;
+  start(
+    tunnelId: string,
+    options?: { allowRemote?: boolean; confirmListenAll?: boolean }
+  ): Promise<TunnelStatus>;
   stop(tunnelId: string): Promise<void>;
+  /** 停止指定主机的所有隧道（重连恢复前清理用） */
+  stopAllForHost(hostId: string, reason?: string): Promise<string[]>;
   getStatus(tunnelId: string): Promise<TunnelStatus | null>;
   listStatuses(hostId?: string): Promise<TunnelStatus[]>;
   exportRules(): Promise<RdTunnelsFile>;

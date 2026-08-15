@@ -10,21 +10,30 @@
  */
 import { createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { invoke } from '@tauri-apps/api/core';
 import {
   PluginSandbox,
   type PluginSandboxHandle,
 } from '../components/plugin/PluginSandbox';
 import type { PluginManifest, RDContext } from '../types/plugin';
 import { SDK_API_VERSION, createRDContext } from './pluginSdk';
+import { buildPluginIframeSrc } from './pluginBridge';
 import { kernelEventBus } from './eventBus';
 import { usePluginUiStore } from '../store/pluginUiStore';
 import { getCurrentThemeInfo, useThemeStore } from '../store/themeStore';
+import { logInfo, logWarn } from './log';
 
 function syncThemeToIframeViaMsg(iframeEl: HTMLIFrameElement | null | undefined): void {
   if (!iframeEl?.contentWindow) return;
   const info = getCurrentThemeInfo();
   iframeEl.contentWindow.postMessage(
-    { __rd_plugin: true, type: 'theme-sync', palette: info.palette, themeId: info.id },
+    {
+      __rd_plugin: true,
+      type: 'theme-sync',
+      palette: info.palette,
+      themeId: info.id,
+      themeType: info.type,
+    },
     '*'
   );
 }
@@ -32,28 +41,86 @@ function syncThemeToIframeViaMsg(iframeEl: HTMLIFrameElement | null | undefined)
 interface Mounted {
   root: Root;
   container: HTMLDivElement;
-  handle: PluginSandboxHandle | null;
+  /** 插件视图窗口（标题栏 + 内容区），默认隐藏，openView 时显示 */
+  windowEl: HTMLDivElement;
+  /** 沙箱句柄（useImperativeHandle 的 ref，React 提交后才会赋值） */
+  handleRef: { current: PluginSandboxHandle | null };
   manifest: PluginManifest;
   enabled: boolean;
   /** 该插件在 kernelEventBus 上的 owner，用于 offAll 批量清理监听器 */
   owner: object;
 }
 
-const SANDBOX_CONTAINER_ID = '__rd_plugin_sandboxes__';
+const VIEW_CONTAINER_ID = '__rd_plugin_views__';
 
+/**
+ * 常驻的插件视图根容器（非 React，由本管理器创建）：
+ * - `position: fixed; inset: 0`，默认 `visibility: hidden; pointer-events: none`
+ * - 打开插件视图时加 `has-open`，同时对应插件窗口加 `is-open`
+ */
 function ensureRootContainer(): HTMLDivElement {
-  let el = document.getElementById(SANDBOX_CONTAINER_ID) as HTMLDivElement | null;
+  let el = document.getElementById(VIEW_CONTAINER_ID) as HTMLDivElement | null;
   if (!el) {
     el = document.createElement('div');
-    el.id = SANDBOX_CONTAINER_ID;
-    el.style.display = 'none';
+    el.id = VIEW_CONTAINER_ID;
+    el.className = 'rd-view-host';
     document.body.appendChild(el);
   }
   return el;
 }
 
+/** 构造插件的 iframe src：优先加载插件自己的 index.html（注入 SDK 桥），失败回退 demo。 */
+async function resolveIframeSrc(pluginId: string, fallback: string): Promise<string> {
+  try {
+    const html = await invoke<string>('plugin_resolve_src', { pluginId });
+    return buildPluginIframeSrc(html, pluginId);
+  } catch (e) {
+    console.warn(`[PluginLifecycleManager] 加载插件界面失败 ${pluginId}:`, e);
+    return fallback;
+  }
+}
+
+/** demo iframe 内容（插件 index.html 缺失/加载失败时的占位） */
+function buildDemoSrc(pluginId: string): string {
+  return (
+    'data:text/html;charset=utf-8,' +
+    encodeURIComponent(
+      `<html><body><script>
+        window.addEventListener('message', (ev) => {
+          const d = ev.data;
+          if (!d || !d.__rd_plugin) return;
+          if (d.type === 'theme-sync') {
+            if (d.palette && typeof d.palette === 'object') {
+              for (const [k, v] of Object.entries(d.palette)) {
+                document.documentElement.style.setProperty(k, String(v));
+              }
+            }
+            if (d.themeId) document.documentElement.setAttribute('data-theme', String(d.themeId));
+            return;
+          }
+          if (d.type === 'watchdog-ping') {
+            window.parent.postMessage({ __rd_plugin: true, type: 'watchdog-pong', ts: d.ts }, '*');
+            return;
+          }
+          if (d.type === 'lifecycle:destroy') {
+            return;
+          }
+          if (d.type === 'lifecycle') {
+            const port = ev.ports && ev.ports[0];
+            if (port) port.postMessage({ ok: true, lifecycle: d.name });
+          }
+        });
+        window.parent.postMessage({ __rd_plugin_ready: true, id: ${JSON.stringify(pluginId)} }, '*');
+      <\/script></body></html>`,
+    )
+  );
+}
+
 class PluginLifecycleManager {
   private readonly mounted = new Map<string, Mounted>();
+  /** 进行中的挂载流程（pluginId -> Promise）。并发 setDesiredPlugins 时复用第一次的流程，
+   *  避免同一插件被重复挂载（孤儿 iframe + 重复 init/enable + 重复注册工具栏按钮）。 */
+  private readonly mounting = new Map<string, Promise<void>>();
 
   /**
    * 对齐启用集。Phase 1 不抛异常，所有错误打 console.warn。
@@ -70,9 +137,13 @@ class PluginLifecycleManager {
     for (const id of toRemove) {
       await this._disableAndDestroy(id);
     }
-    for (const [id, info] of desiredMap.entries()) {
-      await this._ensureMountedAndEnabled(id, info.manifest, info.indexHtmlUrl);
-    }
+    // 并行挂载所有启用插件，避免串行等待（一个插件慢会拖慢全部图标的出现）。
+    // _ensureMountedAndEnabled 内部有 mounting 去重，重复调用安全。
+    await Promise.all(
+      Array.from(desiredMap.entries()).map(([id, info]) =>
+        this._ensureMountedAndEnabled(id, info.manifest, info.indexHtmlUrl),
+      ),
+    );
   }
 
   private async _ensureMountedAndEnabled(
@@ -80,43 +151,55 @@ class PluginLifecycleManager {
     manifest: PluginManifest,
     customSrc?: string,
   ): Promise<void> {
-    const demoSrc =
-      'data:text/html;charset=utf-8,' +
-      encodeURIComponent(
-        `<html><body><script>
-          window.addEventListener('message', (ev) => {
-            const d = ev.data;
-            if (!d || !d.__rd_plugin) return;
-            if (d.type === 'theme-sync') {
-              if (d.palette && typeof d.palette === 'object') {
-                for (const [k, v] of Object.entries(d.palette)) {
-                  document.documentElement.style.setProperty(k, String(v));
-                }
-              }
-              if (d.themeId) document.documentElement.setAttribute('data-theme', String(d.themeId));
-              return;
-            }
-            if (d.type === 'watchdog-ping') {
-              window.parent.postMessage({ __rd_plugin: true, type: 'watchdog-pong', ts: d.ts }, '*');
-              return;
-            }
-            if (d.type === 'lifecycle:destroy') {
-              return;
-            }
-            if (d.type === 'lifecycle') {
-              const port = ev.ports && ev.ports[0];
-              if (port) port.postMessage({ ok: true, lifecycle: d.name });
-            }
-          });
-          window.parent.postMessage({ __rd_plugin_ready: true, id: ${JSON.stringify(id)} }, '*');
-        <\/script></body></html>`,
-      );
-    const src = customSrc?.trim() ? customSrc.trim() : demoSrc;
+    // 同一插件的并发挂载：等待第一次完成即可（首次流程已负责 init/enable）
+    const inFlight = this.mounting.get(id);
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+    const p = this._mountAndEnableOnce(id, manifest, customSrc);
+    this.mounting.set(id, p);
+    try {
+      await p;
+    } finally {
+      this.mounting.delete(id);
+    }
+  }
+
+  private async _mountAndEnableOnce(
+    id: string,
+    manifest: PluginManifest,
+    customSrc?: string,
+  ): Promise<void> {
+    // 优先加载插件自己的 index.html（注入 SDK 桥），失败回退 demo 占位
+    const src =
+      customSrc?.trim()
+        ? customSrc.trim()
+        : await resolveIframeSrc(id, buildDemoSrc(id));
 
     if (!this.mounted.has(id)) {
       const rootContainer = ensureRootContainer();
+
+      // 插件视图窗口：标题栏（插件名 + 关闭按钮）+ 内容区
+      const windowEl = document.createElement('div');
+      windowEl.className = 'rd-view-window';
+      windowEl.innerHTML = `
+        <div class="rd-view-titlebar">
+          <span class="rd-view-title"></span>
+          <button class="rd-view-close" title="关闭">✕</button>
+        </div>
+        <div class="rd-view-body"></div>`;
+      const closeBtn = windowEl.querySelector('.rd-view-close');
+      closeBtn?.addEventListener('click', () => {
+        usePluginUiStore.getState().closePluginView();
+      });
+      rootContainer.appendChild(windowEl);
+
+      const body = windowEl.querySelector('.rd-view-body') as HTMLDivElement;
       const container = document.createElement('div');
-      rootContainer.appendChild(container);
+      container.className = 'rd-plugin-sandbox-root';
+      body.appendChild(container);
+
       const root = createRoot(container);
       const handleRef: { current: PluginSandboxHandle | null } = { current: null };
       root.render(
@@ -124,26 +207,41 @@ class PluginLifecycleManager {
           pluginId: id,
           manifest,
           src,
+          ctx: this._ctxFor(id, manifest),
           ref: (h: PluginSandboxHandle | null) => {
             handleRef.current = h;
           },
           onReady: () => {},
         }),
       );
-      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+      // 等待 React 提交并挂上 ref 句柄。⚠️ 启动时主线程繁忙，React 初始渲染的
+      // 提交可能晚于一帧：若句柄未就绪就继续，下面的 callInit 会被静默跳过，
+      // 插件 init 永不执行 → 工具栏按钮/图标永远不出现。因此轮询等待（5s 上限）。
+      const handleDeadline = Date.now() + 5_000;
+      while (!handleRef.current && Date.now() < handleDeadline) {
+        await new Promise<void>((r) => setTimeout(r, 50));
+      }
+      if (!handleRef.current) {
+        console.warn(`[PluginLifecycleManager] ${id} 沙箱句柄 5s 内未就绪，无法初始化插件`);
+      }
       const owner: object = {};
       this.mounted.set(id, {
         root,
         container,
-        handle: handleRef.current,
+        windowEl,
+        handleRef,
         manifest,
         enabled: false,
         owner,
       });
+      logInfo(`[PluginLifecycleManager] 已挂载 ${id} 沙箱，等待 init/enable`);
     }
 
     const mounted = this.mounted.get(id)!;
     mounted.manifest = manifest;
+    // 标题跟随 manifest 名称
+    const title = mounted.windowEl.querySelector('.rd-view-title');
+    if (title) title.textContent = manifest.name;
 
     const ctx: Partial<RDContext> = createRDContext({
       pluginId: id,
@@ -152,23 +250,68 @@ class PluginLifecycleManager {
     });
 
     try {
-      if (!mounted.enabled) {
-        await mounted.handle?.callInit(ctx);
+      const handle = mounted.handleRef.current;
+      if (!handle) {
+        logWarn(`[PluginLifecycleManager] ${id} 沙箱句柄缺失，跳过 init/enable（插件按钮不会注册）`);
+      } else if (!mounted.enabled) {
+        logInfo(`[PluginLifecycleManager] ${id} 发送 init`);
+        await handle.callInit(ctx);
+        logInfo(`[PluginLifecycleManager] ${id} init 完成`);
         syncThemeToIframeViaMsg(mounted.container.querySelector('iframe') as HTMLIFrameElement);
-        await mounted.handle?.callEnable();
+        logInfo(`[PluginLifecycleManager] ${id} 发送 enable`);
+        await handle.callEnable();
+        logInfo(`[PluginLifecycleManager] ${id} enable 完成，插件已就绪`);
         mounted.enabled = true;
       }
     } catch (e) {
-      console.warn(`[PluginLifecycleManager] init/enable 失败 ${id}:`, e);
+      logWarn(
+        `[PluginLifecycleManager] init/enable 失败 ${id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /** 为 PluginSandbox 构造一份 ctx（用于 iframe 的 sdk-invoke 消息处理） */
+  private _ctxFor(id: string, manifest: PluginManifest): Partial<RDContext> {
+    return createRDContext({
+      pluginId: id,
+      manifest,
+      sdkVersion: SDK_API_VERSION,
+    });
+  }
+
+  /**
+   * 打开指定插件的视图（全屏模态显示其 index.html 界面）。
+   * 同一时刻仅显示一个插件视图。
+   */
+  openView(pluginId: string): void {
+    const root = document.getElementById(VIEW_CONTAINER_ID);
+    for (const m of this.mounted.values()) {
+      m.windowEl.classList.toggle('is-open', m.manifest.id === pluginId);
+    }
+    root?.classList.add('has-open');
+  }
+
+  /** 关闭当前插件视图。 */
+  closeView(): void {
+    document.getElementById(VIEW_CONTAINER_ID)?.classList.remove('has-open');
+    for (const m of this.mounted.values()) {
+      m.windowEl.classList.remove('is-open');
     }
   }
 
   reSyncAllTheme(): void {
+    const info = getCurrentThemeInfo();
     for (const m of this.mounted.values()) {
       const iframe = m.container.querySelector('iframe') as HTMLIFrameElement | null;
       if (iframe?.contentWindow) {
         iframe.contentWindow.postMessage(
-          { __rd_plugin: true, type: 'theme-sync', palette: getCurrentThemeInfo().palette, themeId: useThemeStore.getState().theme },
+          {
+            __rd_plugin: true,
+            type: 'theme-sync',
+            palette: info.palette,
+            themeId: useThemeStore.getState().theme,
+            themeType: info.type,
+          },
           '*'
         );
       }
@@ -178,9 +321,10 @@ class PluginLifecycleManager {
   private async _disableAndDestroy(id: string): Promise<void> {
     const m = this.mounted.get(id);
     if (!m) return;
+    const handle = m.handleRef.current;
     try {
-      if (m.enabled) await m.handle?.callDisable();
-      await m.handle?.callUninstall();
+      if (m.enabled) await handle?.callDisable();
+      await handle?.callUninstall();
     } catch (e) {
       console.warn(`[PluginLifecycleManager] disable/uninstall 异常 ${id}:`, e);
     } finally {
@@ -193,12 +337,12 @@ class PluginLifecycleManager {
         usePluginUiStore.getState().removeAllForPlugin(id);
       } catch {}
       try {
-        m.handle?.destroy();
+        handle?.destroy();
       } catch {}
       try {
         m.root.unmount();
       } catch {}
-      if (m.container.parentNode) m.container.parentNode.removeChild(m.container);
+      if (m.windowEl.parentNode) m.windowEl.parentNode.removeChild(m.windowEl);
       this.mounted.delete(id);
     }
   }
@@ -219,10 +363,18 @@ class PluginLifecycleManager {
 export const pluginLifecycleManager = new PluginLifecycleManager();
 
 if (typeof window !== 'undefined') {
-  let lastTheme: string = useThemeStore.getState().theme;
-  useThemeStore.subscribe((state) => {
-    if (state.theme !== lastTheme) {
-      lastTheme = state.theme;
+  // 主题同步给插件 iframe：主题 id 变化 OR 当前主题调色板变化（自定义主题编辑配色）
+  // 都会触发重新推送（theme-sync）。仅比较 id 会漏掉"改配色不改 id"的场景。
+  let lastThemeSig = '';
+  const themeSig = (): string => {
+    const info = getCurrentThemeInfo();
+    return info.id + '|' + JSON.stringify(info.palette);
+  };
+  lastThemeSig = themeSig();
+  useThemeStore.subscribe(() => {
+    const sig = themeSig();
+    if (sig !== lastThemeSig) {
+      lastThemeSig = sig;
       pluginLifecycleManager.reSyncAllTheme();
     }
   });

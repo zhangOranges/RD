@@ -7,13 +7,14 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { SettingsDialog } from './components/SettingsDialog';
 import { UpdateDialog } from './components/UpdateDialog';
 import { ToastContainer } from './components/Toast';
-import { PortForwardPluginBootstrap } from './components/plugin/PortForwardPluginBootstrap';
+import { PluginViewHost } from './components/plugin/PluginViewHost';
 import { RightPanel } from './components/RightPanel';
 import { useHostStore } from './store/hostStore';
 import { useUIStore } from './store/uiStore';
 import { useFileStore } from './store/fileStore';
 import { matchShortcut } from './store/shortcutStore';
 import { bindTransferProgressListener } from './store/transferStore';
+import { initPluginEventListeners, usePluginStore } from './store/pluginStore';
 import './styles/finder.css';
 import './styles/tabbar.css';
 import './styles/rightpanel.css';
@@ -52,6 +53,12 @@ function App() {
       loadCategories(),
       initEventListeners(),
       bindTransferProgressListener(),
+      // 注册插件内核事件监听（tunnel:* 事件转发到内核事件总线）。
+      // 注：端口转发已迁为内置插件，其 autoStart（连接成功自动启动隧道）
+      // 逻辑在插件内订阅 connection:success 实现，主程序不再负责。
+      initPluginEventListeners(),
+      // 加载插件列表并同步生命周期（内置端口转发插件随包自动安装、默认启用）
+      usePluginStore.getState().loadPlugins(),
     ])
       .then(() => {
         done = true;
@@ -258,7 +265,7 @@ function App() {
       <ToastContainer />
       <SettingsDialog />
       <UpdateDialog />
-      <PortForwardPluginBootstrap />
+      <PluginViewHost />
 
       {/* 启动加载遮罩 */}
       {!appReady && (

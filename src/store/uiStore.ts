@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 
-export type ToolType = 'sftp' | 'port-forward' | 'keys' | 'plugins';
+export type ToolType = 'sftp' | 'keys' | 'plugins';
 
 // ---- 持久化：插件开发者模式 + 热重载开关（localStorage）----
 const PLUGIN_DEV_MODE_KEY = 'plugin_dev_mode';
