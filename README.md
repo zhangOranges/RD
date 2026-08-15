@@ -20,12 +20,6 @@
     />
   </a>
   &nbsp;
-  <!-- 当前项目最小/推荐版本（静态，和 package.json 对齐） -->
-  <img
-    alt="Current Version"
-    src="https://img.shields.io/badge/version-v0.1.87-ffffff?labelColor=3c4658&color=1f2937&style=flat-square"
-  />
-  &nbsp;
   <!-- 许可证 -->
   <a href="#许可证">
     <img
