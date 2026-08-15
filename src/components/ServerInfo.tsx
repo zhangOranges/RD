@@ -56,8 +56,9 @@ export function ServerInfo() {
   const host = selectedHostId ? hosts.find((h) => h.id === selectedHostId) : undefined;
   const connState = selectedHostId ? connectionStates[selectedHostId] : undefined;
   const isConnected = connState === 'connected';
+  const isReconnecting = connState === 'reconnecting';
 
-  // 在线时长：连接状态变为 connected 时记录开始时间，每秒更新显示
+  // 在线时长 / 倒计时：每秒更新显示
   const connectedSinceRef = useRef<number | null>(null);
   const [, setTick] = useState(0);
 
@@ -239,9 +240,21 @@ export function ServerInfo() {
         </div>
       )}
 
-      <div className={`rp-conn-status ${isConnected ? 'connected' : 'disconnected'}`}>
+      <div
+        className={`rp-conn-status ${
+          isConnected ? 'connected' : isReconnecting ? 'reconnecting' : 'disconnected'
+        }`}
+      >
         <span className="rp-conn-dot" />
-        <span>{isConnected ? '已连接' : '未连接'}</span>
+        <span>
+          {isConnected
+            ? '已连接'
+            : isReconnecting
+              ? '重连中…'
+              : connState === 'connecting'
+                ? '连接中…'
+                : '未连接'}
+        </span>
       </div>
     </section>
   );

@@ -6,6 +6,7 @@ import {
   Network,
   KeyRound,
   Puzzle,
+  RefreshCw,
 } from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
 import { useFileStore } from '../store/fileStore';
@@ -25,6 +26,7 @@ export function ContentArea() {
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const hosts = useHostStore((s) => s.hosts);
   const connectionStates = useHostStore((s) => s.connectionStates);
+  const reconnectMeta = useHostStore((s) => s.reconnectMeta);
 
   const navigate = useFileStore((s) => s.navigate);
   const resetState = useFileStore((s) => s.resetState);
@@ -116,8 +118,23 @@ export function ContentArea() {
 
       logInfo(`[remote-dir] 起始路径决定: start=${JSON.stringify(startPath)} cached=${JSON.stringify(cachedPath)} home=${JSON.stringify(home)} rememberDir=${rememberDir}`);
 
-      // 4) 尝试 navigate；缓存路径失效时降级到家目录
-      const ok = await navigate(hostId, startPath);
+      // 4) 尝试 navigate；连接刚成功时 SFTP 子系统可能仍在握手，Timeout 是预期内的时序抖动，
+      //    做 2 次小退避重试（每次 200ms），期间抑制 Toast。其他错误立即暴露。
+      const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+      let ok = await navigate(hostId, startPath, { silentOnError: true });
+      if (!ok) {
+        const errMsg = useFileStore.getState().error ?? '';
+        const isTimeoutLike = /timeout|timed ?out|sftp error/i.test(errMsg);
+        if (isTimeoutLike) {
+          for (const delay of [200, 400]) {
+            if (cancelled) return;
+            logWarn(`[remote-dir] SFTP not ready yet (${errMsg.slice(0, 60)}), retry after ${delay}ms`);
+            await wait(delay);
+            ok = await navigate(hostId, startPath, { silentOnError: true });
+            if (ok) break;
+          }
+        }
+      }
       if (!ok && isValidAbsPath(cachedPath) && isValidAbsPath(home) && cachedPath !== home) {
         logWarn(`[remote-dir] 缓存路径失效，降级到家目录: cached=${JSON.stringify(cachedPath)} home=${JSON.stringify(home)}`);
         pushToast('warning', `上次路径已失效，已切换到家目录：${home}`);
@@ -331,7 +348,12 @@ export function ContentArea() {
     );
   }
 
-  if (connState !== 'connected') {
+  // 重连中：connState === 'reconnecting'，或有 reconnectMeta（状态翻转瞬间兜底）
+  const hostId = selectedHostId ?? '';
+  const isReconnecting =
+    connState === 'reconnecting' || (connState === 'disconnected' && !!reconnectMeta[hostId]);
+
+  if (connState !== 'connected' && !isReconnecting) {
     return (
       <div className="content-placeholder">
         <ServerCog size={48} className="content-placeholder-icon" />
@@ -346,8 +368,10 @@ export function ContentArea() {
   // 已连接 → 根据 activeTool 渲染不同页面
   if (activeTool === 'sftp') {
     // SFTP 模式：双栏（左本地 + 右远程）
+    const meta = reconnectMeta[hostId];
+    const remainingSec = meta?.nextDelayMs != null ? Math.max(0, Math.ceil(meta.nextDelayMs / 1000)) : null;
     return (
-      <div className="dual-pane">
+      <div className="dual-pane" style={{ position: 'relative' }}>
         <div className="dual-pane-section-title">SFTP 文件管理器</div>
         <div className="dual-pane-body">
           <div
@@ -364,6 +388,20 @@ export function ContentArea() {
             <FileBrowser hostId={selectedHost.id} />
           </div>
         </div>
+        {isReconnecting && (
+          <div className="sftp-reconnecting-overlay">
+            <RefreshCw size={28} className="sftp-reconnecting-icon" />
+            <div className="sftp-reconnecting-text">
+              <span className="sftp-reconnecting-title">尝试重连中…</span>
+              {meta?.attempt != null && (
+                <span className="sftp-reconnecting-sub">
+                  第 {meta.attempt} 次尝试{remainingSec != null ? ` · ${remainingSec}s 后重试` : ''}
+                </span>
+              )}
+              <span className="sftp-reconnecting-hint">网络恢复后将自动恢复连接</span>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

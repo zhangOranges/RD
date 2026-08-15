@@ -533,3 +533,9 @@
   min-height: 0;
   box-sizing: border-box;
 }
+
+/* 重连 banner 中 RefreshCw 图标的旋转动画 */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

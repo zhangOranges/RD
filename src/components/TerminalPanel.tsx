@@ -262,6 +262,9 @@ export function TerminalPanel() {
 
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const connectionStates = useHostStore((s) => s.connectionStates);
+  const reconnectMeta = useHostStore((s) => s.reconnectMeta);
+  const cancelReconnect = useHostStore((s) => s.cancelReconnect);
+  const connectHost = useHostStore((s) => s.connectHost);
   const hosts = useHostStore((s) => s.hosts);
   const terminalHeight = useUIStore((s) => s.terminalHeight);
   const terminalVisibleMap = useUIStore((s) => s.terminalVisible);
@@ -275,9 +278,19 @@ export function TerminalPanel() {
   const setActiveTerminalTab = useUIStore((s) => s.setActiveTerminalTab);
   const fullscreenShortcut = useShortcut('terminalFullscreen');
 
+  // 倒计时显示刷新（每 500ms）
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 500);
+    return () => window.clearInterval(t);
+  }, []);
+
   const terminalVisible = !!selectedHostId && !!terminalVisibleMap[selectedHostId];
   const isConnected =
     !!selectedHostId && connectionStates[selectedHostId] === 'connected';
+  const isReconnecting =
+    !!selectedHostId && connectionStates[selectedHostId] === 'reconnecting';
+  const reconnectMetaForHost = selectedHostId ? reconnectMeta[selectedHostId] : undefined;
   const hostName =
     hosts.find((h) => h.id === selectedHostId)?.name ?? '终端';
   const tabs = selectedHostId
@@ -778,13 +791,20 @@ export function TerminalPanel() {
 
   /* ---------- Effect 2：主机切换 —— 创建/销毁所有标签实例 ---------- */
   useEffect(() => {
-    if (!isConnected || !selectedHostId) {
-      // 未连接：清理所有实例（PTY 由断开逻辑关闭）
+    const connState = selectedHostId ? connectionStates[selectedHostId] : undefined;
+    // 仅当主机完全 disconnected（非 connecting、非 reconnecting）时才销毁终端实例
+    // 这样断线后重连期间，用户仍能看到之前的终端输出
+    if (!selectedHostId || connState === 'disconnected') {
       for (const [, inst] of tabsRef.current) {
         inst.term.dispose();
         inst.container.remove();
       }
       tabsRef.current.clear();
+      currentHostRef.current = null;
+      return;
+    }
+    // reconnecting / connecting 但还没有实例（首次或刷新后）：不创建，等 connected 再说
+    if (!isConnected && tabsRef.current.size === 0) {
       currentHostRef.current = null;
       return;
     }
@@ -825,11 +845,11 @@ export function TerminalPanel() {
       }
       tabsRef.current.clear();
 
-      // 仅在主机断开连接时关闭 PTY；面板隐藏时保留会话
+      // 仅在主机真正断开（非 reconnecting / connecting 等待）时关闭 PTY 并清空快照
+      // 这样断线后自动重连时，保持快照方便用户看到上下文；但真正 disconnected 状态下清空
       const currentConnState =
         useHostStore.getState().connectionStates[hostId];
-      if (currentConnState !== 'connected') {
-        // 主机已断开：清空快照和初始同步状态（重连后是全新会话）
+      if (currentConnState === 'disconnected' || !currentConnState) {
         for (const tabId of currentTabs) {
           const key = makeTabKey(hostId, tabId);
           snapshotsRef.current.delete(key);
@@ -844,7 +864,7 @@ export function TerminalPanel() {
       currentHostRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedHostId, isConnected]);
+  }, [selectedHostId, isConnected, isReconnecting]);
 
   /* ---------- Effect 3：活动标签变化 —— 显示/隐藏 + fit + cwd 同步 ---------- */
   useEffect(() => {
@@ -1092,8 +1112,24 @@ export function TerminalPanel() {
     }
   };
 
-  const showConnectPrompt = !isConnected;
+  // 断线/重连中顶部 banner 是否显示
+  const showBanner = !!selectedHostId && (isReconnecting || (!isConnected && tabsRef.current.size > 0));
+  const bannerCountdown = reconnectMetaForHost
+    ? Math.max(0, Math.ceil((reconnectMetaForHost.nextAt - Date.now()) / 1000))
+    : 0;
+  const bannerAttempt = reconnectMetaForHost?.attempt ?? 0;
+
+  // showConnectPrompt：完全未连接状态才显示（无已有终端实例 + 非重连中）
+  const showConnectPrompt = !!selectedHostId && !isConnected && !isReconnecting && tabsRef.current.size === 0;
   const showEmptyState = isConnected && tabs.length === 0;
+
+  // 手动立即重试（不等倒计时）
+  const handleReconnectNow = async () => {
+    if (!selectedHostId || !isReconnecting) return;
+    // 取消当前重连循环，立即发起 connect
+    cancelReconnect(selectedHostId);
+    await connectHost(selectedHostId);
+  };
 
   const rootEl = (
     <div
@@ -1149,7 +1185,23 @@ export function TerminalPanel() {
         </div>
         <div className="terminal-header-actions">
           {isConnected && (
-            <span className="terminal-header-state">已连接</span>
+            <span className="terminal-header-state" style={{ color: 'var(--state-connected)' }}>已连接</span>
+          )}
+          {isReconnecting && (
+            <span
+              className="terminal-header-state"
+              style={{
+                color: 'var(--state-reconnecting)',
+                animation: 'rpReconnectFade 0.9s ease-in-out infinite',
+              }}
+            >
+              重连中 · {bannerCountdown}s
+            </span>
+          )}
+          {!isConnected && !isReconnecting && selectedHostId && tabsRef.current.size > 0 && (
+            <span className="terminal-header-state" style={{ color: 'var(--text-tertiary)' }}>
+              已断线
+            </span>
           )}
           <button
             className="terminal-titlebar-btn"
@@ -1181,6 +1233,95 @@ export function TerminalPanel() {
           </button>
         </div>
       </div>
+
+      {/* 断线 / 重连中 顶部提示条 */}
+      {showBanner && selectedHostId && (
+        <div
+          role="alert"
+          className="terminal-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '6px 14px',
+            fontSize: 12,
+            background: isReconnecting
+              ? 'color-mix(in srgb, var(--state-reconnecting) 14%, transparent)'
+              : 'color-mix(in srgb, var(--danger) 12%, transparent)',
+            borderBottom: `1px solid ${
+              isReconnecting
+                ? 'color-mix(in srgb, var(--state-reconnecting) 35%, transparent)'
+                : 'color-mix(in srgb, var(--danger) 30%, transparent)'
+            }`,
+            color: isReconnecting ? 'var(--text-primary)' : 'var(--text-primary)',
+          }}
+        >
+          {isReconnecting ? (
+            <RefreshCw size={14} style={{ color: 'var(--state-reconnecting)', animation: 'spin 1.2s linear infinite' }} />
+          ) : (
+            <Unplug size={14} style={{ color: 'var(--danger)' }} />
+          )}
+          <span style={{ flex: '1 1 auto', minWidth: 0 }}>
+            {isReconnecting
+              ? <>网络已断开，正在自动重连…<span style={{ opacity: 0.7 }}>（第 {bannerAttempt} 次，{bannerCountdown}s 后重试）</span></>
+              : <>连接已断开，请检查网络或手动重连</>}
+          </span>
+          {isReconnecting && (
+            <>
+              <button
+                type="button"
+                className="terminal-banner-btn"
+                onClick={() => void handleReconnectNow()}
+                style={{
+                  padding: '3px 10px',
+                  fontSize: 11,
+                  borderRadius: 5,
+                  border: '1px solid color-mix(in srgb, var(--state-reconnecting) 45%, transparent)',
+                  background: 'color-mix(in srgb, var(--state-reconnecting) 18%, transparent)',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                }}
+              >
+                立即重试
+              </button>
+              <button
+                type="button"
+                className="terminal-banner-btn"
+                onClick={() => cancelReconnect(selectedHostId)}
+                style={{
+                  padding: '3px 10px',
+                  fontSize: 11,
+                  borderRadius: 5,
+                  border: '1px solid var(--border-muted)',
+                  background: 'var(--hover)',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                }}
+              >
+                取消重连
+              </button>
+            </>
+          )}
+          {!isReconnecting && (
+            <button
+              type="button"
+              className="terminal-banner-btn"
+              onClick={() => selectedHostId && void connectHost(selectedHostId)}
+              style={{
+                padding: '3px 10px',
+                fontSize: 11,
+                borderRadius: 5,
+                border: '1px solid color-mix(in srgb, var(--info) 45%, transparent)',
+                background: 'color-mix(in srgb, var(--info) 18%, transparent)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              手动连接
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 终端主体 */}
       <div className="terminal-body" ref={bodyRef}>

@@ -26,7 +26,7 @@ interface FileState {
   /** 多选：选中的文件名集合 */
   selectedNames: Set<string>;
 
-  navigate: (hostId: string, path: string, opts?: { skipHistory?: boolean }) => Promise<boolean>;
+  navigate: (hostId: string, path: string, opts?: { skipHistory?: boolean; silentOnError?: boolean }) => Promise<boolean>;
   refresh: (hostId: string) => Promise<void>;
   goBack: (hostId: string) => Promise<void>;
   goForward: (hostId: string) => Promise<void>;
@@ -151,6 +151,9 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   navigate: async (hostId, path, opts) => {
     const skipHistory = opts?.skipHistory ?? false;
+    // silentOnError：true 时失败不弹 Toast（用于自动重连后首次加载等时序敏感场景，
+    // 调用方会自行做 retry / 状态兜底）。
+    const silentOnError = opts?.silentOnError ?? false;
     // 捕获并立即重置标志：即便后续 sftp_list_dir 抛错，标志也不会残留影响下一次导航
     const fromTerminal = syncFromTerminal;
     syncFromTerminal = false;
@@ -159,7 +162,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     if (typeof path !== 'string' || !path.startsWith('/')) {
       const msg = `无效的远程路径：${JSON.stringify(path)}`;
       set({ loading: false, error: msg });
-      useToastStore.getState().push('error', msg);
+      if (!silentOnError) useToastStore.getState().push('error', msg);
       return false;
     }
     set({ loading: true, error: null });
@@ -218,7 +221,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     } catch (err) {
       const msg = describeSftpError(err);
       set({ loading: false, error: msg });
-      useToastStore.getState().push('error', msg);
+      if (!silentOnError) useToastStore.getState().push('error', msg);
       return false;
     }
   },

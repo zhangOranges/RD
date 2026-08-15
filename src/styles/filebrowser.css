@@ -364,6 +364,55 @@
   to { transform: rotate(360deg); }
 }
 
+/* ---------- 重连中 overlay ---------- */
+.fb-reconnecting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-toolbar-solid, var(--bg-content)) 82%, transparent);
+  backdrop-filter: blur(6px) saturate(160%);
+  -webkit-backdrop-filter: blur(6px) saturate(160%);
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text-primary);
+  z-index: 40;
+}
+
+.fb-reconnecting-icon {
+  color: var(--state-reconnecting, #f5a524);
+  animation: fb-spin 1.2s linear infinite;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--state-reconnecting, #f5a524) 40%, transparent));
+}
+
+.fb-reconnecting-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.fb-reconnecting-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.fb-reconnecting-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--finder-font-mono);
+}
+
+.fb-reconnecting-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
 /* ---------- 地址栏：Finder 风格面包屑 + 科技感 ---------- */
 .addressbar {
   flex: 1 1 auto;
@@ -1367,4 +1416,52 @@
   background: var(--accent-soft-2);
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
+}
+
+/* ---------- SFTP 整面板重连中 overlay ---------- */
+.sftp-reconnecting-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  background: color-mix(in srgb, var(--bg-toolbar-solid, var(--bg-content)) 85%, transparent);
+  backdrop-filter: blur(8px) saturate(160%);
+  -webkit-backdrop-filter: blur(8px) saturate(160%);
+  color: var(--text-primary);
+  z-index: 100;
+}
+
+.sftp-reconnecting-icon {
+  color: var(--state-reconnecting, #f5a524);
+  animation: fb-spin 1.2s linear infinite;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--state-reconnecting, #f5a524) 45%, transparent));
+}
+
+.sftp-reconnecting-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.sftp-reconnecting-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sftp-reconnecting-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: var(--finder-font-mono);
+}
+
+.sftp-reconnecting-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
 }

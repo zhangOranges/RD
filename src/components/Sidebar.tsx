@@ -48,6 +48,7 @@ export function Sidebar() {
   const selectHost = useHostStore((s) => s.selectHost);
   const connectHost = useHostStore((s) => s.connectHost);
   const disconnectHost = useHostStore((s) => s.disconnectHost);
+  const cancelReconnect = useHostStore((s) => s.cancelReconnect);
   const removeHost = useHostStore((s) => s.removeHost);
   const saveCategory = useHostStore((s) => s.saveCategory);
   const deleteCategory = useHostStore((s) => s.deleteCategory);
@@ -917,8 +918,20 @@ export function Sidebar() {
 
           {ctxMenu.kind === 'host' && ctxHost && (
             <>
-              {connectionStates[ctxHost.id] === 'connected' ||
-              connectionStates[ctxHost.id] === 'connecting' ? (
+              {connectionStates[ctxHost.id] === 'reconnecting' ? (
+                <button
+                  className="host-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeContextMenu();
+                    cancelReconnect(ctxHost.id);
+                  }}
+                >
+                  <AlertTriangle size={11} /> 取消重连
+                </button>
+              ) : connectionStates[ctxHost.id] === 'connected' ||
+                connectionStates[ctxHost.id] === 'connecting' ? (
                 <button
                   className="host-menu-item"
                   type="button"

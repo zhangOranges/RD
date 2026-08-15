@@ -188,6 +188,29 @@
   box-shadow: 0 0 0 2px rgba(48, 209, 88, 0.18),
     0 0 8px rgba(48, 209, 88, 0.45);
 }
+.tabbar-tab-dot.host-state-reconnecting {
+  background: var(--state-reconnecting);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-reconnecting) 25%, transparent),
+    0 0 10px color-mix(in srgb, var(--state-reconnecting) 55%, transparent);
+  animation: reconnectBlink 0.9s ease-in-out infinite;
+}
+
+/* 重连中计数徽标 */
+.tabbar-reconnect-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #000;
+  background: var(--state-reconnecting);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--state-reconnecting) 40%, transparent);
+  margin-left: 2px;
+}
 
 /* 标签名称 */
 .tabbar-tab-name {

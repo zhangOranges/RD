@@ -66,6 +66,14 @@
 }
 .rp-conn-status.connected { color: var(--state-connected); }
 .rp-conn-status.disconnected { color: var(--text-tertiary); }
+.rp-conn-status.reconnecting {
+  color: var(--state-reconnecting);
+  animation: rpReconnectFade 0.9s ease-in-out infinite;
+}
+@keyframes rpReconnectFade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
 .rp-conn-dot {
   width: 6px; height: 6px; border-radius: 50%;
   background: currentColor;

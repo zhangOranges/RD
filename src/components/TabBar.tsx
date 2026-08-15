@@ -32,9 +32,11 @@ export function TabBar() {
   const hosts = useHostStore((s) => s.hosts);
   const categories = useHostStore((s) => s.categories);
   const connectionStates = useHostStore((s) => s.connectionStates);
+  const reconnectMeta = useHostStore((s) => s.reconnectMeta);
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const selectHost = useHostStore((s) => s.selectHost);
   const disconnectHost = useHostStore((s) => s.disconnectHost);
+  const cancelReconnect = useHostStore((s) => s.cancelReconnect);
 
   const toggleTerminal = useUIStore((s) => s.toggleTerminal);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
@@ -51,16 +53,37 @@ export function TabBar() {
   const themeMenuRef = useRef<HTMLDivElement | null>(null);
   const themeBtnRef = useRef<HTMLButtonElement | null>(null);
 
-  // 标签 = 所有 connectionState 为 connected 或 connecting 的主机
+  // 用于倒计时显示刷新（每 500ms）
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 500);
+    return () => window.clearInterval(t);
+  }, []);
+
+  // 标签 = 所有 connectionState 为 connected / connecting / reconnecting 的主机
   const tabs = useMemo<HostConfig[]>(
     () =>
       hosts.filter(
         (h) =>
           connectionStates[h.id] === 'connected' ||
-          connectionStates[h.id] === 'connecting',
+          connectionStates[h.id] === 'connecting' ||
+          connectionStates[h.id] === 'reconnecting',
       ),
     [hosts, connectionStates],
   );
+
+  // 重连中状态下的关闭行为：取消重连 + 切到 disconnected
+  async function handleTabCloseOrCancel(host: HostConfig, e: React.MouseEvent) {
+    e.stopPropagation();
+    const state = connectionStates[host.id];
+    if (state === 'reconnecting') {
+      cancelReconnect(host.id);
+    }
+    const idx = tabs.findIndex((t) => t.id === host.id);
+    const next = tabs[idx + 1] ?? tabs[idx - 1] ?? null;
+    await disconnectHost(host.id);
+    selectHost(next ? next.id : null);
+  }
 
   // 窗口最大化状态
   const [isMaximized, setIsMaximized] = useState(false);
@@ -165,12 +188,9 @@ export function TabBar() {
     selectHost(host.id);
   }
 
+  // 保留 handleTabClose 兼容（内部转调新方法）
   async function handleTabClose(host: HostConfig, e: React.MouseEvent) {
-    e.stopPropagation();
-    const idx = tabs.findIndex((t) => t.id === host.id);
-    const next = tabs[idx + 1] ?? tabs[idx - 1] ?? null;
-    await disconnectHost(host.id);
-    selectHost(next ? next.id : null);
+    await handleTabCloseOrCancel(host, e);
   }
 
   function handleTerminalToggle() {
@@ -190,6 +210,9 @@ export function TabBar() {
 
   async function closeTab(hostId: string) {
     setCtxMenu(null);
+    if (connectionStates[hostId] === 'reconnecting') {
+      cancelReconnect(hostId);
+    }
     const idx = tabs.findIndex((t) => t.id === hostId);
     const next = tabs[idx + 1] ?? tabs[idx - 1] ?? null;
     await disconnectHost(hostId);
@@ -271,14 +294,25 @@ export function TabBar() {
         {tabs.map((host) => {
           const state = connectionStates[host.id] ?? 'disconnected';
           const active = host.id === selectedHostId;
+          const meta = reconnectMeta[host.id];
+          const isReconnecting = state === 'reconnecting';
+          const countdownSec = meta
+            ? Math.max(0, Math.ceil((meta.nextAt - Date.now()) / 1000))
+            : 0;
           return (
             <div
               key={host.id}
-              className={`tabbar-tab ${active ? 'tabbar-tab-active' : ''}`}
+              className={`tabbar-tab ${active ? 'tabbar-tab-active' : ''} ${
+                isReconnecting ? 'tabbar-tab-reconnecting' : ''
+              }`}
               role="tab"
               tabIndex={0}
               aria-selected={active}
-              title={`${host.username}@${host.host}:${host.port}`}
+              title={
+                isReconnecting
+                  ? `${host.username}@${host.host}:${host.port} — 重连中（第 ${meta?.attempt ?? 1} 次，${countdownSec}s 后重试）`
+                  : `${host.username}@${host.host}:${host.port}`
+              }
               onClick={() => handleTabClick(host)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -292,15 +326,24 @@ export function TabBar() {
                 className={`tabbar-tab-dot host-state-${state}`}
                 aria-hidden="true"
               />
-              <span className="tabbar-tab-name">{host.name}</span>
+              <span className="tabbar-tab-name">
+                {host.name}
+                {isReconnecting && meta && (
+                  <span className="tabbar-reconnect-count" title={`${countdownSec}s 后第 ${meta.attempt} 次重试`}>
+                    {meta.attempt}
+                  </span>
+                )}
+              </span>
               <span className={`tabbar-tab-addr ${maskMode ? 'mask-sensitive' : ''}`}>
-                {host.username}@{host.host}
+                {isReconnecting
+                  ? `重连中 · ${countdownSec}s`
+                  : `${host.username}@{host.host}`}
               </span>
               <button
                 type="button"
                 className="tabbar-tab-close"
                 aria-label="关闭标签"
-                title="关闭标签"
+                title={isReconnecting ? '取消重连并关闭' : '关闭标签'}
                 onClick={(e) => void handleTabClose(host, e)}
               >
                 <X size={12} />

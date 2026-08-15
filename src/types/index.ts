@@ -29,7 +29,17 @@ export type AuthType = 'password' | 'key';
 export type CredentialType = 'password' | 'private_key';
 
 // 连接状态
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+// 重连相关元信息（断线后自动重连期间展示）
+export interface ReconnectMeta {
+  /** 当前第几次尝试（从 1 开始计数） */
+  attempt: number;
+  /** 下一次尝试前的等待（毫秒） */
+  nextDelayMs: number;
+  /** 下次尝试的预计时间戳（Date.now），UI 可做倒计时展示 */
+  nextAt: number;
+}
 
 // connect_host 命令的入参（前端 camelCase，Tauri 自动转 snake_case）
 export interface ConnectParams {

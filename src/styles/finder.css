@@ -90,6 +90,7 @@ html[data-theme="eye-care-green"] body {
   --state-disconnected: #c7c7cc;
   --state-connecting: #FF9F0A;
   --state-connected: #30D158;
+  --state-reconnecting: #FFD60A;
 
   /* 语义色 */
   --danger:  #FF3B30;
@@ -244,6 +245,7 @@ html[data-theme="eye-care-green"] body {
   --state-disconnected: #48484a;
   --state-connecting: #FF9F0A;
   --state-connected: #30D158;
+  --state-reconnecting: #FFD60A;
 
   --shadow-dialog: 0 24px 72px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.4);
   --shadow-toast: 0 8px 28px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
@@ -369,6 +371,7 @@ html[data-theme="eye-care-green"] body {
   --state-disconnected: #3d566f;
   --state-connecting: #FFB020;
   --state-connected: #00E5A0;
+  --state-reconnecting: #FFCC00;
 
   --danger:  #FF453A;
   --warning: #FFB020;
@@ -502,6 +505,7 @@ html[data-theme="eye-care-green"] body {
   --state-disconnected: #9DB3A5;
   --state-connecting: #B8860B;
   --state-connected: #3CB371;
+  --state-reconnecting: #DAA520;
 
   --danger:  #C0392B;
   --warning: #B8860B;
@@ -634,6 +638,7 @@ html[data-theme="eye-care-green"] body {
     --state-disconnected: #48484a;
     --state-connecting: #FF9F0A;
     --state-connected: #30D158;
+    --state-reconnecting: #FFD60A;
 
     --shadow-dialog: 0 24px 72px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.4);
     --shadow-toast: 0 8px 28px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
@@ -1206,10 +1211,28 @@ html[data-theme="eye-care-green"] body {
   box-shadow: 0 0 0 2px rgba(48, 209, 88, 0.18),
               0 0 8px rgba(48, 209, 88, 0.45);
 }
+.host-state-reconnecting {
+  background: var(--state-reconnecting);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-reconnecting) 25%, transparent),
+              0 0 10px color-mix(in srgb, var(--state-reconnecting) 55%, transparent);
+  animation: reconnectBlink 0.9s ease-in-out infinite;
+}
 
 @keyframes pulseGlow {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 2px rgba(255, 159, 10, 0.18), 0 0 10px rgba(255, 159, 10, 0.5); }
   50% { opacity: 0.7; box-shadow: 0 0 0 2px rgba(255, 159, 10, 0.10), 0 0 4px rgba(255, 159, 10, 0.3); }
+}
+@keyframes reconnectBlink {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-reconnecting) 25%, transparent),
+                0 0 10px color-mix(in srgb, var(--state-reconnecting) 55%, transparent);
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--state-reconnecting) 10%, transparent),
+                0 0 4px color-mix(in srgb, var(--state-reconnecting) 30%, transparent);
+  }
 }
 
 .host-item-selected .host-state-dot {
@@ -1223,6 +1246,10 @@ html[data-theme="eye-care-green"] body {
 .host-item-selected .host-state-connecting {
   box-shadow: 0 0 0 2px rgba(255,255,255,0.5),
               0 0 10px rgba(255, 159, 10, 0.7);
+}
+.host-item-selected .host-state-reconnecting {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.5),
+              0 0 10px color-mix(in srgb, var(--state-reconnecting) 70%, transparent);
 }
 
 .host-info {

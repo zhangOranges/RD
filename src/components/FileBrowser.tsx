@@ -196,6 +196,11 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
 
   // 主机名称
   const hosts = useHostStore((s) => s.hosts);
+  const connectionStates = useHostStore((s) => s.connectionStates);
+  const reconnectMeta = useHostStore((s) => s.reconnectMeta);
+  const connState = connectionStates[hostId];
+  const isReconnecting = connState === 'reconnecting';
+  const meta = reconnectMeta[hostId];
   const hostName = useMemo(() => {
     const h = hosts.find((it) => it.id === hostId);
     return h?.name ?? hostId;
@@ -1149,6 +1154,13 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
         </div>
       )}
 
+      {isReconnecting && (
+        <ReconnectingOverlay
+          attempt={meta?.attempt}
+          nextDelayMs={meta?.nextDelayMs}
+        />
+      )}
+
       {/* ==================== 顶部工具栏 ==================== */}
       <div className="remote-pane-toolbar">
         <span className="pane-label">远程: {hostName}</span>
@@ -1831,6 +1843,34 @@ function Loading() {
     <div className="fb-loading">
       <div className="fb-loading-spinner" />
       <span>加载中…</span>
+    </div>
+  );
+}
+
+// ============================================================
+// Reconnecting overlay
+// ============================================================
+function ReconnectingOverlay({
+  attempt,
+  nextDelayMs,
+}: {
+  attempt?: number;
+  nextDelayMs?: number;
+}) {
+  const remainingSec = nextDelayMs != null ? Math.max(0, Math.ceil(nextDelayMs / 1000)) : null;
+
+  return (
+    <div className="fb-reconnecting">
+      <RefreshCw size={24} className="fb-reconnecting-icon" />
+      <div className="fb-reconnecting-text">
+        <span className="fb-reconnecting-title">尝试重连中…</span>
+        {attempt != null && (
+          <span className="fb-reconnecting-sub">
+            第 {attempt} 次尝试{remainingSec != null ? ` · ${remainingSec}s 后重试` : ''}
+          </span>
+        )}
+        <span className="fb-reconnecting-hint">网络恢复后将自动恢复文件浏览</span>
+      </div>
     </div>
   );
 }
