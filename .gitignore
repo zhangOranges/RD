@@ -37,6 +37,7 @@ Thumbs.db
 # Only ignore editor scratch files.
 .trae/**/*.tmp
 .trae/**/.tmp
+.soloncode/**
 
 # ---- Local icons / design source (optional, per project choice) ----
 # Uncomment if you want to ignore original icon source files:
