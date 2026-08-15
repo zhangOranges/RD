@@ -513,9 +513,8 @@ pub fn plugin_ensure_builtin(
 ) -> Result<(), String> {
     let app_dir = resolve_app_data_dir(Some(app), Some(state))?;
 
-    let src_dir = resolve_builtin_src_dir(app).ok_or_else(|| {
-        format!("内置插件目录未找到: {}", BUILTIN_PLUGIN_ID)
-    })?;
+    let src_dir = resolve_builtin_src_dir(app)
+        .ok_or_else(|| format!("内置插件目录未找到: {}", BUILTIN_PLUGIN_ID))?;
     // 随包资源里的目标版本（用于判断已安装版本是否需要升级/修复）
     let src_version = manager::parse_manifest(&src_dir.join("manifest.json"))
         .ok()

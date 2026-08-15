@@ -45,9 +45,10 @@ export function TabBar() {
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
   const terminalVisibleMap = useUIStore((s) => s.terminalVisible);
   const maskMode = useUIStore((s) => s.maskMode);
-  // 已安装插件列表（菜单内容）：随 pluginStore 异步加载，内置插件常驻可见。
+  // 已安装插件列表（菜单内容）：随 pluginStore 异步加载，只显示已启用的插件
   const plugins = usePluginStore((s) => s.plugins);
   const pluginsLoading = usePluginStore((s) => s.loading);
+  const enabledPlugins = plugins.filter((p) => p.enabled);
   const [pluginMenuOpen, setPluginMenuOpen] = useState(false);
   const pluginMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -398,35 +399,27 @@ export function TabBar() {
             onClick={() => setPluginMenuOpen((v) => !v)}
           >
             <Puzzle size={15} />
-            {plugins.length > 0 && (
-              <span className="tabbar-plugin-badge">{plugins.length}</span>
+            {enabledPlugins.length > 0 && (
+              <span className="tabbar-plugin-badge">{enabledPlugins.length}</span>
             )}
           </button>
           {pluginMenuOpen && (
             <div className="tabbar-plugin-menu" role="menu">
-              {plugins.length > 0 ? (
-                plugins.map((p) => (
+              {enabledPlugins.length > 0 ? (
+                enabledPlugins.map((p) => (
                   <button
                     key={p.id}
                     type="button"
                     className="tabbar-plugin-menu-item"
                     onClick={() => {
                       setPluginMenuOpen(false);
-                      if (p.enabled) {
-                        // 统一走 store 的 openPluginView：PluginViewHost 会据此
-                        // 渲染遮罩并调用 lifecycleManager.openView，关闭按钮才能生效
-                        usePluginUiStore.getState().openPluginView(p.id);
-                      } else {
-                        // 已停用：跳转设置去启用
-                        useUIStore.getState().setSettingsVisible(true);
-                      }
+                      // 仅启用插件展示，点击直接打开视图
+                      usePluginUiStore.getState().openPluginView(p.id);
                     }}
                   >
                     <span
                       className="tabbar-plugin-menu-dot"
-                      style={{
-                        background: p.enabled ? 'var(--accent)' : 'var(--text-tertiary)',
-                      }}
+                      style={{ background: 'var(--accent)' }}
                     />
                     <span
                       style={{
@@ -439,15 +432,12 @@ export function TabBar() {
                     >
                       {p.name}
                     </span>
-                    {!p.enabled && (
-                      <span className="tabbar-plugin-menu-tag">已停用</span>
-                    )}
                   </button>
                 ))
               ) : pluginsLoading ? (
                 <div className="tabbar-plugin-menu-hint">插件加载中…</div>
               ) : (
-                <div className="tabbar-plugin-menu-hint">尚未安装插件</div>
+                <div className="tabbar-plugin-menu-hint">暂无已启用的插件</div>
               )}
             </div>
           )}

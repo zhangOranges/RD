@@ -459,15 +459,6 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-/* 「已停用」标签 */
-.tabbar-plugin-menu-tag {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  background: var(--hover);
-  border-radius: 4px;
-  padding: 1px 5px;
-  flex-shrink: 0;
-}
 
 /* ---------- 右键菜单（复用 .host-menu 风格） ---------- */
 .tabbar-context-menu {
