@@ -550,7 +550,9 @@
     document.getElementById('loading').hidden = state.ready;
     var table = document.getElementById('table');
     table.hidden = !state.ready;
+    // 每次渲染同步顶栏开关与警告条，避免状态漂移导致“开关关着但提示还在”
     document.getElementById('warnRemote').hidden = !state.allowRemote;
+    el('allowRemote').checked = state.allowRemote;
 
     var tbody = document.getElementById('tbody');
     tbody.innerHTML = '';
@@ -936,8 +938,12 @@
       // 慢/挂起时界面一直停留在“正在加载…”
       state.ready = true;
       render();
-      try { state.allowRemote = !!(await ctx.storage.get('allowRemote')); } catch (e) { /* 默认 false */ }
+      try {
+        state.allowRemote = !!(await ctx.storage.get('allowRemote'));
+        log('info', 'enable 读取 allowRemote=' + state.allowRemote);
+      } catch (e) { /* 默认 false */ }
       el('allowRemote').checked = state.allowRemote;
+      render();
 
       busUnsubs.push(R.onBus('connection:success', function (hostId) { void autoStart(hostId); void refreshHostsOnly(); }));
       busUnsubs.push(R.onBus('connection:reconnect-success', function (hostId) { void autoStart(hostId); void refreshHostsOnly(); }));

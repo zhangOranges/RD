@@ -1,7 +1,7 @@
 {
   "id": "rd-native-port-forward",
   "name": "端口转发",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "apiVersion": "v1",
   "author": "RD",
   "description": "RD 官方端口转发管理插件（SSH 本地 / 远程 / 动态转发）。本插件是内置插件的最佳实践示例：界面与逻辑全部声明在插件自己的目录中，不依赖主程序。",
