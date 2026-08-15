@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/icon.png" width="128" height="128" alt="RD Logo" />
+  <img src="src-tauri/icons/icon.png" width="128" height="128" alt="RD Logo" style="border-radius: 28px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);" />
 </p>
 
 <h1 align="center">RD — 跨平台 SSH/SFTP 远程文件管理器</h1>

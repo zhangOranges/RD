@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3 } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3, Info, Code2, Sparkles, MessageCircle, Star, ExternalLink } from 'lucide-react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
 import { useThemeStore, useThemeOptions, PRESET_OPTIONS } from '../store/themeStore';
@@ -24,7 +25,7 @@ import {
   type MirrorOption,
 } from '../hooks/useAppUpdater';
 
-type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'debug';
+type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'debug' | 'about';
 
 interface TabItem {
   id: SettingsTab;
@@ -38,7 +39,14 @@ const TABS: TabItem[] = [
   { id: 'update', label: '更新', icon: DownloadCloud },
   { id: 'shortcuts', label: '快捷键', icon: Keyboard },
   { id: 'debug', label: '调试', icon: Bug },
+  { id: 'about', label: '关于', icon: Info },
 ];
+
+const GITHUB_REPO = 'https://github.com/zhangOranges/RD';
+const LINK_DOWNLOAD = `${GITHUB_REPO}/releases/latest`;
+const LINK_BUG = `${GITHUB_REPO}/issues/new?assignees=&labels=bug&projects=&template=bug_report.yml&title=%5BBug%5D+`;
+const LINK_FEATURE = `${GITHUB_REPO}/issues/new?assignees=&labels=enhancement&projects=&template=feature_request.yml&title=%5BFeature%5D+`;
+const LINK_DISCUSS = `${GITHUB_REPO}/discussions`;
 
 /**
  * 设置弹窗（Finder 风格模态）。
@@ -1167,6 +1175,99 @@ export function SettingsDialog() {
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* 关于 */}
+            {activeTab === 'about' && (
+              <div className="settings-pane settings-about-pane">
+                <div className="settings-about-hero">
+                  <div className="settings-about-logo">
+                    <img src="/RD.png" alt="RD" className="settings-about-logo-img" />
+                  </div>
+                  <div className="settings-about-title">RD · 跨平台 SSH/SFTP 远程文件管理器</div>
+                  <div className="settings-about-version">
+                    当前版本 v{updater.currentVersion ?? '0.1.0'}
+                  </div>
+                </div>
+
+                <div className="settings-about-callout">
+                  <div className="settings-about-callout-title">
+                    如果你是开发者 / 运维 / 重度 SSH 用户，
+                  </div>
+                  <div className="settings-about-callout-sub">
+                    欢迎下载最新版本试用，你的反馈就是我们最宝贵的迭代动力 💪
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn settings-about-download-btn"
+                  onClick={() => {
+                    void openUrl(LINK_DOWNLOAD);
+                  }}
+                >
+                  <Code2 size={16} strokeWidth={1.8} />
+                  <span>GITHUB</span>
+                  <span className="settings-about-download-btn-accent">
+                    DOWNLOAD LATEST RELEASE
+                  </span>
+                  <ExternalLink size={14} />
+                </button>
+
+                <div className="settings-about-action-links">
+                  <a
+                    className="settings-about-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void openUrl(LINK_BUG);
+                    }}
+                    href={LINK_BUG}
+                  >
+                    <Bug size={15} />
+                    <span>报 Bug</span>
+                  </a>
+                  <span className="settings-about-link-sep">·</span>
+                  <a
+                    className="settings-about-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void openUrl(LINK_FEATURE);
+                    }}
+                    href={LINK_FEATURE}
+                  >
+                    <Sparkles size={15} />
+                    <span>提功能建议</span>
+                  </a>
+                  <span className="settings-about-link-sep">·</span>
+                  <a
+                    className="settings-about-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void openUrl(LINK_DISCUSS);
+                    }}
+                    href={LINK_DISCUSS}
+                  >
+                    <MessageCircle size={15} />
+                    <span>参与讨论</span>
+                  </a>
+                  <span className="settings-about-link-sep">·</span>
+                  <a
+                    className="settings-about-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void openUrl(GITHUB_REPO);
+                    }}
+                    href={GITHUB_REPO}
+                  >
+                    <Star size={15} />
+                    <span>点个 Star 支持一下</span>
+                  </a>
+                </div>
+
+                <div className="settings-about-footer">
+                  如遇到终端、文件传输、跨平台构建、自动更新、主题等任何问题，欢迎提 Issue，我们会尽快响应。
                 </div>
               </div>
             )}
