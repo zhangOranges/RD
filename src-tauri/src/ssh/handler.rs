@@ -228,6 +228,34 @@ impl Handler for ClientHandler {
         originator_port: u32,
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        // ---- 诊断：先把收到的请求信息和当前 registry 全貌打出来 ----
+        let reg_keys: Vec<(String, u32)>;
+        {
+            let reg = self
+                .remote_forwards
+                .lock()
+                .expect("remote_forwards mutex poisoned");
+            reg_keys = reg.keys().cloned().collect();
+        }
+        if let Some(app) = &self.app_handle {
+            let keys_preview: Vec<String> = reg_keys
+                .iter()
+                .map(|(a, p)| format!("{}:{}", a, p))
+                .collect();
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "tunnel_forward remote 服务器转发请求: connected={}:{}, origin={}:{}, registry_keys=[{}]",
+                    connected_address,
+                    connected_port,
+                    originator_address,
+                    originator_port,
+                    keys_preview.join(", ")
+                ),
+            );
+        }
+
         let target = {
             let reg = self
                 .remote_forwards
@@ -246,6 +274,16 @@ impl Handler for ClientHandler {
         };
 
         let Some(target) = target else {
+            if let Some(app) = &self.app_handle {
+                debug_log(
+                    app,
+                    LogLevel::Warn,
+                    &format!(
+                        "tunnel_forward remote 收到服务器转发连接但未找到注册目标: connected={}:{}, origin={}:{} (registry 端口匹配失败，可能是 tcpip_forward 返回端口与注册表 key 不一致)",
+                        connected_address, connected_port, originator_address, originator_port
+                    ),
+                );
+            }
             return Ok(());
         };
 
@@ -253,24 +291,60 @@ impl Handler for ClientHandler {
         let local_addr = target.local_addr.clone();
         let local_port = target.local_port;
         let origin = format!("{}:{}", originator_address, originator_port);
+        let connected_label = format!("{}:{}", connected_address, connected_port);
 
         tokio::spawn(async move {
-            match tokio::net::TcpStream::connect((local_addr.as_str(), local_port)).await {
-                Ok(mut tcp) => {
-                    let mut chan_stream = channel.into_stream();
-                    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut chan_stream).await;
-                }
+            // --- 1. 连本地目标 ---
+            let tcp = match tokio::net::TcpStream::connect((local_addr.as_str(), local_port)).await
+            {
+                Ok(tcp) => tcp,
                 Err(e) => {
                     if let Some(app) = &app {
                         debug_log(
                             app,
                             LogLevel::Error,
                             &format!(
-                                "tunnel_forward remote 连接本地目标失败: {}:{} (origin {}) - {}",
-                                local_addr, local_port, origin, e
+                                "tunnel_forward remote 连接本地目标失败: {}:{} (forwarded from {}, origin {}) - {}",
+                                local_addr, local_port, connected_label, origin, e
                             ),
                         );
                     }
+                    return;
+                }
+            };
+            if let Some(app) = &app {
+                debug_log(
+                    app,
+                    LogLevel::Info,
+                    &format!(
+                        "tunnel_forward remote 本地目标连接成功: {}:{} (forwarded from {}, origin {})",
+                        local_addr, local_port, connected_label, origin
+                    ),
+                );
+            }
+
+            // --- 2. 双向拷贝（把结果也记日志，含字节数/错误，便于排查 502/断流） ---
+            let mut tcp = tcp;
+            let mut chan_stream = channel.into_stream();
+            let copy_res = tokio::io::copy_bidirectional(&mut tcp, &mut chan_stream).await;
+            if let Some(app) = &app {
+                match copy_res {
+                    Ok((in_bytes, out_bytes)) => debug_log(
+                        app,
+                        LogLevel::Info,
+                        &format!(
+                            "tunnel_forward remote 连接正常结束: {}:{} <- {}, origin {}, 上行 {}B 下行 {}B",
+                            local_addr, local_port, connected_label, origin, out_bytes, in_bytes
+                        ),
+                    ),
+                    Err(e) => debug_log(
+                        app,
+                        LogLevel::Warn,
+                        &format!(
+                            "tunnel_forward remote 连接中途中断: {}:{} <- {}, origin {}, err={}",
+                            local_addr, local_port, connected_label, origin, e
+                        ),
+                    ),
                 }
             }
         });

@@ -153,29 +153,20 @@ pub async fn run_remote_forward(
     // Register the local target first so the handler can route forwarded
     // connections the moment the server accepts the tcpip-forward request.
     let key = (remote_addr.clone(), remote_port as u32);
+    let target = RemoteForwardTarget {
+        local_addr: local_target_addr.clone(),
+        local_port: local_target_port,
+    };
     {
         let mut reg = registry.lock().expect("remote_forwards mutex poisoned");
-        reg.insert(
-            key.clone(),
-            RemoteForwardTarget {
-                local_addr: local_target_addr.clone(),
-                local_port: local_target_port,
-            },
-        );
+        reg.insert(key.clone(), target.clone());
     }
-    // Removes the registry entry and best-effort cancels the server-side
-    // listener when this task ends (including on abort).
-    let _guard = RemoteForwardGuard {
-        registry: registry.clone(),
-        handle: handle.clone(),
-        key: key.clone(),
-    };
 
     debug_log(
         app,
         LogLevel::Info,
         &format!(
-            "tunnel_forward remote 已注册目标: 服务器 {}:{} -> 本地 {}:{}",
+            "tunnel_forward remote 已注册目标: 请求服务器 {}:{} -> 本地 {}:{}",
             remote_addr, remote_port, local_target_addr, local_target_port
         ),
     );
@@ -184,7 +175,7 @@ pub async fn run_remote_forward(
     // accepted connections back to us over forwarded-tcpip channels.
     // tcpip_forward 是 &mut self 操作 → 写锁（一次性、耗时短）。
     let mut guard = handle.write().await;
-    let bound_port = guard
+    let bound_port_raw = guard
         .tcpip_forward(remote_addr.clone(), remote_port as u32)
         .await
         .map_err(|e| {
@@ -211,12 +202,57 @@ pub async fn run_remote_forward(
         })?;
     drop(guard);
 
+    // SSH 协议：tcpip_forward 返回的 bound_port
+    //   - 如果客户端请求 port != 0，服务器通常返回同一个端口作为确认；
+    //     部分 russh / 服务器实现返回 0，表示"绑定成功，端口 = 请求端口"。
+    //   - 如果客户端请求 port == 0（动态分配），服务器返回实际分配的端口。
+    // 统一归约：bound_port_raw == 0 时视为等于 remote_port。
+    let actual_port = if bound_port_raw == 0 {
+        remote_port as u32
+    } else {
+        bound_port_raw
+    };
+
+    // 如果服务器实际分配的端口 != 请求端口（动态分配 or 服务器换了），
+    // 必须更新 registry 的 key，否则 handler 收到 connected_port 匹配不上。
+    // 同时更新 RemoteForwardGuard 的 key，确保 cancel/cleanup 也用正确端口。
+    let guard_key = if actual_port != remote_port as u32 {
+        let old_key = key;
+        let new_key = (remote_addr.clone(), actual_port);
+        {
+            let mut reg = registry.lock().expect("remote_forwards mutex poisoned");
+            reg.remove(&old_key);
+            reg.insert(new_key.clone(), target);
+        }
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!(
+                "tunnel_forward remote 端口重映射: 请求 {} -> 实际绑定 {}",
+                remote_port, actual_port
+            ),
+        );
+        new_key
+    } else {
+        key.clone()
+    };
+
+    // Removes the registry entry and best-effort cancels the server-side
+    // listener when this task ends (including on abort).
+    // 注意：guard_key 用于后续 cancel（cancel_tcpip_forward 传的是实际端口）；
+    //       registry 清理也用同一个 guard_key。
+    let _guard = RemoteForwardGuard {
+        registry: registry.clone(),
+        handle: handle.clone(),
+        key: guard_key,
+    };
+
     debug_log(
         app,
         LogLevel::Info,
         &format!(
-            "tunnel_forward remote 已监听: 服务器 {}:{} (bound_port={}) -> 本地 {}:{}",
-            remote_addr, bound_port, bound_port, local_target_addr, local_target_port
+            "tunnel_forward remote 已监听: 服务器 {}:{} (请求端口={}, bound_port_raw={}) -> 本地 {}:{}",
+            remote_addr, actual_port, remote_port, bound_port_raw, local_target_addr, local_target_port
         ),
     );
 
