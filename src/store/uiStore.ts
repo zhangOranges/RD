@@ -1,8 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 
-export type ToolType = 'sftp' | 'keys' | 'plugins';
-
 // ---- 持久化：插件开发者模式 + 热重载开关（localStorage）----
 const PLUGIN_DEV_MODE_KEY = 'plugin_dev_mode';
 const PLUGIN_HOT_RELOAD_KEY = 'plugin_hot_reload_enabled';
@@ -95,8 +93,6 @@ interface UIState {
   terminalResizing: boolean;
   // 设置弹窗可见性（Task 10）
   settingsVisible: boolean;
-  // 工具菜单选中项
-  activeTool: ToolType;
   // 右侧功能面板宽度
   rightPanelWidth: number;
   // 是否正在拖拽右侧面板
@@ -140,7 +136,6 @@ interface UIState {
   setCurrentPath: (p: string | null) => void;
   setSettingsVisible: (v: boolean) => void;
   toggleSettings: () => void;
-  setActiveTool: (t: ToolType) => void;
   setRightPanelWidth: (w: number) => void;
   setRightPanelResizing: (v: boolean) => void;
   setRightPanelVisible: (v: boolean) => void;
@@ -157,8 +152,6 @@ interface UIState {
   setActiveTerminalTab: (hostId: string, tabId: string) => void;
   // 清除某主机的终端标签持久化数据（删除主机时调用）
   clearTerminalTabsForHost: (hostId: string) => void;
-  // 切换打码模式
-  toggleMaskMode: () => void;
   // 显式设置打码模式
   setMaskMode: (v: boolean) => void;
   // 加载插件相关全局开关（从 Rust setting 持久化读取）
@@ -190,7 +183,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   sidebarResizing: false,
   terminalResizing: false,
   settingsVisible: false,
-  activeTool: 'sftp',
   rightPanelWidth: 280,
   rightPanelResizing: false,
   rightPanelVisible: true,
@@ -237,7 +229,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   setCurrentPath: (p) => set({ currentPath: p }),
   setSettingsVisible: (v) => set({ settingsVisible: v }),
   toggleSettings: () => set((s) => ({ settingsVisible: !s.settingsVisible })),
-  setActiveTool: (t) => set({ activeTool: t }),
   setRightPanelWidth: (w) =>
     set({
       rightPanelWidth: Math.min(MAX_RIGHT_PANEL, Math.max(MIN_RIGHT_PANEL, Math.round(w))),
@@ -306,7 +297,6 @@ export const useUIStore = create<UIState>((set, get) => ({
       return { terminalTabs: nextTabs, activeTerminalTab: nextActive };
     });
   },
-  toggleMaskMode: () => set((s) => ({ maskMode: !s.maskMode })),
   setMaskMode: (v) => set({ maskMode: v }),
 
   loadPluginSettings: async () => {

@@ -168,12 +168,16 @@ export function createRDContext(opts: {
             );
           });
       },
+      // TODO: 侧栏动作注入（需配合 Sidebar 渲染位）
       registerSidebarAction: () => notImplemented(),
       removeSidebarAction: () => notImplemented(),
+      // TODO: 文件浏览器右键菜单项注入（需配合 FileBrowser 扩展点）
       registerFileContextMenu: () => notImplemented(),
       removeFileContextMenu: () => notImplemented(),
+      // TODO: 设置子页签注入（需配合 SettingsDialog 扩展点）
       registerSettingsSubTab: () => notImplemented(),
       removeSettingsSubTab: () => notImplemented(),
+      // TODO: 右侧面板注入（需配合 RightPanel 容器扩展点）
       registerRightPanel: () => notImplemented(),
       removeRightPanel: () => notImplemented(),
       notify: (kind, message) => {
@@ -258,9 +262,13 @@ export function createRDContext(opts: {
           );
         });
       },
+      // TODO: 跳转到设置中该插件的配置子页（需配合 SettingsDialog 定位）
       openPluginConfig: () => notImplemented(),
+      // TODO: 聚焦指定主机（需配合 Sidebar/selectHost 选中行为）
       focusHost: () => notImplemented(),
+      // TODO: 聚焦并展开终端（需配合 TerminalPanel + hostId 切换）
       focusTerminal: () => notImplemented(),
+      // TODO: 打开/关闭右侧指定面板（需配合 RightPanel 注册机制）
       openRightPanel: () => notImplemented(),
       closeRightPanel: () => notImplemented(),
       openPluginView: (pluginId?: string) => {
@@ -357,18 +365,22 @@ export function createRDContext(opts: {
           return { success: false, output: outputHuman, exitCode };
         }
       },
+      // TODO: 通过 hostId 打开一个新的交互式终端 Tab，并返回 tabId 句柄（需配合 TerminalPanel + TerminalManager）
       startShell: async () => {
         await assertPermission(opts.pluginId, 'ssh.run');
         return notImplementedAsync();
       },
+      // TODO: 向指定终端 tab 的 PTY 写入文本/控制序列（需配合 xterm.js write + tabId 寻址）
       writeToTerminal: async () => {
         await assertPermission(opts.pluginId, 'ssh.run');
         return notImplementedAsync();
       },
+      // TODO: 调整指定终端 tab 的 PTY 行列尺寸（cols/rows，需配合 xterm.js resize + russh channel）
       resizeTerminal: async () => {
         await assertPermission(opts.pluginId, 'ssh.run');
         return notImplementedAsync();
       },
+      // TODO: 关闭指定终端 tab（触发 disconnect + 清理 UI 标签，需配合 TerminalPanel removeTab）
       closeTerminal: async () => {
         await assertPermission(opts.pluginId, 'ssh.run');
         return notImplementedAsync();

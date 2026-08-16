@@ -3,8 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   ServerCog,
   FolderTree,
-  KeyRound,
-  Puzzle,
   RefreshCw,
 } from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
@@ -31,8 +29,6 @@ export function ContentArea() {
   const resetState = useFileStore((s) => s.resetState);
   const pushToast = useToastStore((s) => s.push);
 
-  // 当前活动的工具菜单项（sftp / terminal / port-forward / ...）
-  const activeTool = useUIStore((s) => s.activeTool);
   // 传输任务注册（远程→本地下载用）
   const createTransferTask = useTransferStore((s) => s.createTask);
   // 本地栏拖拽接收高亮
@@ -367,64 +363,41 @@ export function ContentArea() {
     );
   }
 
-  // 已连接 → 根据 activeTool 渲染不同页面
-  if (activeTool === 'sftp') {
-    // SFTP 模式：双栏（左本地 + 右远程）
-    const meta = reconnectMeta[hostId];
-    const remainingSec = meta?.nextDelayMs != null ? Math.max(0, Math.ceil(meta.nextDelayMs / 1000)) : null;
-    return (
-      <div className="dual-pane" style={{ position: 'relative' }}>
-        <div className="dual-pane-section-title">SFTP 文件管理器</div>
-        <div className="dual-pane-body">
-          <div
-            className={`dual-pane-left${localDragOver ? ' drag-over' : ''}`}
-            onDragEnter={onLocalDragEnter}
-            onDragOver={onLocalDragOver}
-            onDragLeave={onLocalDragLeave}
-            onDrop={onLocalDrop}
-          >
-            <LocalFilePane />
-          </div>
-          <div className="dual-pane-divider" />
-          <div className="dual-pane-right">
-            <FileBrowser hostId={selectedHost.id} />
+  // 已连接 → SFTP 双栏（左本地 + 右远程）
+  const meta = reconnectMeta[hostId];
+  const remainingSec = meta?.nextDelayMs != null ? Math.max(0, Math.ceil(meta.nextDelayMs / 1000)) : null;
+  return (
+    <div className="dual-pane" style={{ position: 'relative' }}>
+      <div className="dual-pane-section-title">SFTP 文件管理器</div>
+      <div className="dual-pane-body">
+        <div
+          className={`dual-pane-left${localDragOver ? ' drag-over' : ''}`}
+          onDragEnter={onLocalDragEnter}
+          onDragOver={onLocalDragOver}
+          onDragLeave={onLocalDragLeave}
+          onDrop={onLocalDrop}
+        >
+          <LocalFilePane />
+        </div>
+        <div className="dual-pane-divider" />
+        <div className="dual-pane-right">
+          <FileBrowser hostId={selectedHost.id} />
+        </div>
+      </div>
+      {isReconnecting && (
+        <div className="sftp-reconnecting-overlay">
+          <RefreshCw size={28} className="sftp-reconnecting-icon" />
+          <div className="sftp-reconnecting-text">
+            <span className="sftp-reconnecting-title">尝试重连中…</span>
+            {meta?.attempt != null && (
+              <span className="sftp-reconnecting-sub">
+                第 {meta.attempt} 次尝试{remainingSec != null ? ` · ${remainingSec}s 后重试` : ''}
+              </span>
+            )}
+            <span className="sftp-reconnecting-hint">网络恢复后将自动恢复连接</span>
           </div>
         </div>
-        {isReconnecting && (
-          <div className="sftp-reconnecting-overlay">
-            <RefreshCw size={28} className="sftp-reconnecting-icon" />
-            <div className="sftp-reconnecting-text">
-              <span className="sftp-reconnecting-title">尝试重连中…</span>
-              {meta?.attempt != null && (
-                <span className="sftp-reconnecting-sub">
-                  第 {meta.attempt} 次尝试{remainingSec != null ? ` · ${remainingSec}s 后重试` : ''}
-                </span>
-              )}
-              <span className="sftp-reconnecting-hint">网络恢复后将自动恢复连接</span>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // 其他工具：占位页（复用 .content-placeholder 样式）
-  let placeholderIcon: React.ReactNode = <FolderTree size={48} className="content-placeholder-icon" />;
-  let placeholderTitle = '未知工具';
-  switch (activeTool) {
-    case 'keys':
-      placeholderIcon = <KeyRound size={48} className="content-placeholder-icon" />;
-      placeholderTitle = '密钥管理（开发中）';
-      break;
-    case 'plugins':
-      placeholderIcon = <Puzzle size={48} className="content-placeholder-icon" />;
-      placeholderTitle = '插件中心（开发中）';
-      break;
-  }
-  return (
-    <div className="content-placeholder">
-      {placeholderIcon}
-      <p className="content-placeholder-title">{placeholderTitle}</p>
+      )}
     </div>
   );
 }
