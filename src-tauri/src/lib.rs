@@ -751,6 +751,7 @@ pub fn run() {
             plugin::plugin_permissions_meta,
             plugin::plugin_parse_manifest_from_dir,
             plugin::plugin_resolve_src,
+            plugin::plugin_resolve_icon,
             plugin::plugin_http_request,
             tunnel::tunnel_list_rules,
             tunnel::tunnel_add_rule,

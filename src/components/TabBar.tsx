@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { invoke } from '@tauri-apps/api/core';
 import {
   X,
   Minus,
@@ -51,6 +52,30 @@ export function TabBar() {
   const enabledPlugins = plugins.filter((p) => p.enabled);
   const [pluginMenuOpen, setPluginMenuOpen] = useState(false);
   const pluginMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // 加载每个已启用插件的图标 data URL（manifest.icon 声明的文件）。
+  // 失败时回退到 undefined，UI 用默认圆点兜底。
+  const [pluginIcons, setPluginIcons] = useState<Record<string, string>>({});
+  const loadPluginIcons = useCallback(async () => {
+    const entries = await Promise.all(
+      enabledPlugins.map(async (p) => {
+        try {
+          const dataUrl = await invoke<string>('plugin_resolve_icon', { pluginId: p.id });
+          return [p.id, dataUrl] as const;
+        } catch {
+          return [p.id, ''] as const;
+        }
+      }),
+    );
+    const map: Record<string, string> = {};
+    for (const [id, url] of entries) {
+      if (url) map[id] = url;
+    }
+    setPluginIcons(map);
+  }, [enabledPlugins]);
+  useEffect(() => {
+    void loadPluginIcons();
+  }, [loadPluginIcons]);
 
   // 点击插件菜单外部时关闭
   useEffect(() => {
@@ -406,34 +431,46 @@ export function TabBar() {
           {pluginMenuOpen && (
             <div className="tabbar-plugin-menu" role="menu">
               {enabledPlugins.length > 0 ? (
-                enabledPlugins.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className="tabbar-plugin-menu-item"
-                    onClick={() => {
-                      setPluginMenuOpen(false);
-                      // 仅启用插件展示，点击直接打开视图
-                      usePluginUiStore.getState().openPluginView(p.id);
-                    }}
-                  >
-                    <span
-                      className="tabbar-plugin-menu-dot"
-                      style={{ background: 'var(--accent)' }}
-                    />
-                    <span
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
+                enabledPlugins.map((p) => {
+                  const iconUrl = pluginIcons[p.id];
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="tabbar-plugin-menu-item"
+                      onClick={() => {
+                        setPluginMenuOpen(false);
+                        // 仅启用插件展示，点击直接打开视图
+                        usePluginUiStore.getState().openPluginView(p.id);
                       }}
                     >
-                      {p.name}
-                    </span>
-                  </button>
-                ))
+                      {iconUrl ? (
+                        <img
+                          src={iconUrl}
+                          alt=""
+                          className="tabbar-plugin-menu-icon"
+                          draggable={false}
+                        />
+                      ) : (
+                        <span
+                          className="tabbar-plugin-menu-dot"
+                          style={{ background: 'var(--accent)' }}
+                        />
+                      )}
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p.name}
+                      </span>
+                    </button>
+                  );
+                })
               ) : pluginsLoading ? (
                 <div className="tabbar-plugin-menu-hint">插件加载中…</div>
               ) : (

@@ -460,6 +460,16 @@
   flex-shrink: 0;
 }
 
+/* 插件图标：与圆点同尺寸占位，保持对齐 */
+.tabbar-plugin-menu-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ---------- 右键菜单（复用 .host-menu 风格） ---------- */
 .tabbar-context-menu {
   z-index: 9999;

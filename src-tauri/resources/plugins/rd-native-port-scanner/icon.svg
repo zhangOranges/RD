@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 端口扫描插件图标：雷达扫描 + 端口节点 -->
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <!-- 雷达圈 -->
+  <circle cx="32" cy="32" r="26" fill="none" stroke="url(#g1)" stroke-width="2.5" opacity="0.5"/>
+  <circle cx="32" cy="32" r="18" fill="none" stroke="url(#g1)" stroke-width="2" opacity="0.35"/>
+  <circle cx="32" cy="32" r="10" fill="none" stroke="url(#g1)" stroke-width="1.5" opacity="0.25"/>
+  <!-- 扫描扇形 -->
+  <path d="M32 32 L58 32 A26 26 0 0 0 46 9 Z" fill="url(#g1)" opacity="0.18"/>
+  <!-- 扫描线 -->
+  <line x1="32" y1="32" x2="56" y2="20" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- 端口节点（绿色=监听） -->
+  <circle cx="48" cy="32" r="3.5" fill="#22c55e"/>
+  <circle cx="32" cy="48" r="3" fill="#22c55e"/>
+  <circle cx="20" cy="20" r="2.5" fill="#22c55e"/>
+  <!-- 端口节点（蓝色=已连接） -->
+  <circle cx="44" cy="44" r="2.5" fill="#3b82f6"/>
+  <circle cx="16" cy="36" r="2" fill="#3b82f6"/>
+  <!-- 中心点 -->
+  <circle cx="32" cy="32" r="3" fill="#6366f1"/>
+</svg>

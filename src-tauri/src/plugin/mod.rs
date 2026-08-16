@@ -550,22 +550,90 @@ pub fn plugin_resolve_src(
     Err(format!("PLUGIN_NOT_FOUND: {}", plugin_id))
 }
 
-/// 内置端口转发插件 ID（随应用打包，首次启动自动注册）。
-pub const BUILTIN_PLUGIN_ID: &str = "rd-native-port-forward";
+/// 读取插件的图标文件，返回 data URL（base64 编码）。
+/// 用于在 TabBar 插件菜单 / 设置页等位置显示插件图标。
+/// 若 manifest.icon 为 None 或文件不存在，返回 Err（前端回退到默认图标）。
+#[tauri::command]
+pub fn plugin_resolve_icon(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PluginState>,
+    plugin_id: String,
+) -> Result<String, String> {
+    let app_dir = resolve_app_data_dir(Some(&app), Some(&state))?;
+    let plugins_dir = app_dir.join("plugins");
+    let entries =
+        std::fs::read_dir(&plugins_dir).map_err(|e| format!("读取插件目录失败: {}", e))?;
+
+    for entry in entries.flatten() {
+        let dir_path = entry.path();
+        if !dir_path.is_dir() {
+            continue;
+        }
+        let dir_name = dir_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if dir_name != plugin_id && !dir_name.starts_with(&format!("{}@", plugin_id)) {
+            continue;
+        }
+        let manifest_path = dir_path.join("manifest.json");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let manifest = manager::parse_manifest(&manifest_path)?;
+        let icon_rel = match manifest.icon {
+            Some(i) if !i.is_empty() => i,
+            _ => return Err("ICON_NOT_CONFIGURED".to_string()),
+        };
+        let icon_path = dir_path.join(&icon_rel);
+        if !icon_path.exists() {
+            return Err(format!("ICON_FILE_NOT_FOUND: {}", icon_path.display()));
+        }
+        let bytes = std::fs::read(&icon_path)
+            .map_err(|e| format!("读取图标文件失败 {}: {}", icon_path.display(), e))?;
+        // 根据后缀推断 MIME
+        let mime = if icon_rel.ends_with(".svg") {
+            "image/svg+xml"
+        } else if icon_rel.ends_with(".png") {
+            "image/png"
+        } else if icon_rel.ends_with(".jpg") || icon_rel.ends_with(".jpeg") {
+            "image/jpeg"
+        } else if icon_rel.ends_with(".gif") {
+            "image/gif"
+        } else if icon_rel.ends_with(".webp") {
+            "image/webp"
+        } else {
+            "application/octet-stream"
+        };
+        // svg 是文本，直接 UTF-8 编码（不 base64，保留可读性 + 减小体积）
+        if mime == "image/svg+xml" {
+            let text =
+                String::from_utf8(bytes).map_err(|e| format!("SVG 图标不是合法 UTF-8: {}", e))?;
+            // data URL 的 SVG 需要 URL 编码特殊字符（# 是必须的，其他可选）
+            let encoded = text.replace('#', "%23").replace(['\n', '\r'], "");
+            return Ok(format!("data:{};utf8,{}", mime, encoded));
+        }
+        // 其他二进制格式：base64
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        return Ok(format!("data:{};base64,{}", mime, b64));
+    }
+    Err(format!("PLUGIN_NOT_FOUND: {}", plugin_id))
+}
+
+/// 内置插件 ID 列表（随应用打包，首次启动自动注册）。
+/// 新增内置插件时只需在此数组追加 ID，并在 `resources/plugins/<id>/` 放入插件文件。
+pub const BUILTIN_PLUGIN_IDS: &[&str] = &["rd-native-port-forward", "rd-native-port-scanner"];
 
 /// 定位内置插件的资源源目录（打包后 → 开发调试）：
 /// 1. `resource_dir/plugins/<id>`（tauri bundle.resources 映射的目标）
 /// 2. `resource_dir/resources/plugins/<id>`（部分环境未映射时的兜底）
 /// 3. 开发模式：`src-tauri/resources/plugins/<id>`（源码目录）
-fn resolve_builtin_src_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+fn resolve_builtin_src_dir(app: &tauri::AppHandle, plugin_id: &str) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(res) = app.path().resource_dir() {
-        candidates.push(res.join("plugins").join(BUILTIN_PLUGIN_ID));
-        candidates.push(
-            res.join("resources")
-                .join("plugins")
-                .join(BUILTIN_PLUGIN_ID),
-        );
+        candidates.push(res.join("plugins").join(plugin_id));
+        candidates.push(res.join("resources").join("plugins").join(plugin_id));
     }
     #[cfg(debug_assertions)]
     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
@@ -573,7 +641,7 @@ fn resolve_builtin_src_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
             PathBuf::from(manifest_dir)
                 .join("resources")
                 .join("plugins")
-                .join(BUILTIN_PLUGIN_ID),
+                .join(plugin_id),
         );
     }
     candidates
@@ -581,26 +649,132 @@ fn resolve_builtin_src_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
         .find(|c| c.join("manifest.json").exists())
 }
 
-/// 首次启动注册内置插件（幂等 + 自愈 + 回滚）：
-/// - 未安装 → 从应用资源目录复制内置插件目录并安装
-/// - 已安装但界面入口缺失、或版本与随包资源不一致 →
-///   ① 先 rename 备份旧目录 + 快照 store 条目 → ② 卸载旧版 → ③ 安装新版；
-///   若 ③ 失败则把备份 rename 回来 + 恢复 store 条目，避免「升级过程中断导致内置插件彻底没入口」。
+/// 首次启动注册所有内置插件（幂等 + 自愈 + 回滚）。
+/// 遍历 `BUILTIN_PLUGIN_IDS` 逐个调用 `ensure_single_builtin`，单个失败不影响其他插件。
 pub fn plugin_ensure_builtin(
     app: &tauri::AppHandle,
     state: &tauri::State<'_, PluginState>,
 ) -> Result<(), String> {
+    let app_dir = resolve_app_data_dir(Some(app), Some(state))?;
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "plugin_ensure_builtin 启动: app_dir={} builtin_count={} ids=[{}]",
+            app_dir.display(),
+            BUILTIN_PLUGIN_IDS.len(),
+            BUILTIN_PLUGIN_IDS.join(", ")
+        ),
+    );
+    let mut errors = Vec::new();
+    for &pid in BUILTIN_PLUGIN_IDS {
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!("内置插件开始处理: id={}", pid),
+        );
+        match ensure_single_builtin(app, &app_dir, pid) {
+            Ok(()) => {
+                debug_log(
+                    app,
+                    LogLevel::Info,
+                    &format!("内置插件处理完成: id={}", pid),
+                );
+            }
+            Err(e) => {
+                debug_log(
+                    app,
+                    LogLevel::Error,
+                    &format!("内置插件注册失败: {} -> {}", pid, e),
+                );
+                errors.push(format!("{}: {}", pid, e));
+            }
+        }
+    }
+    if errors.is_empty() {
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!(
+                "plugin_ensure_builtin 完成: 成功 {} 个, 失败 {} 个",
+                BUILTIN_PLUGIN_IDS.len() - errors.len(),
+                errors.len()
+            ),
+        );
+        Ok(())
+    } else {
+        Err(format!("部分内置插件注册失败: {}", errors.join("; ")))
+    }
+}
+
+/// 注册单个内置插件（幂等 + 自愈 + 回滚）：
+/// - 未安装 → 从应用资源目录复制内置插件目录并安装
+/// - 已安装但界面入口缺失、或版本与随包资源不一致 →
+///   ① 先 rename 备份旧目录 + 快照 store 条目 → ② 卸载旧版 → ③ 安装新版；
+///   若 ③ 失败则把备份 rename 回来 + 恢复 store 条目，避免「升级过程中断导致内置插件彻底没入口」。
+fn ensure_single_builtin(
+    app: &tauri::AppHandle,
+    app_dir: &std::path::Path,
+    plugin_id: &str,
+) -> Result<(), String> {
     use crate::plugin::store::{load_store, save_store, PluginStoreItem};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    let app_dir = resolve_app_data_dir(Some(app), Some(state))?;
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "ensure_single_builtin start: id={} app_dir={}",
+            plugin_id,
+            app_dir.display()
+        ),
+    );
 
-    let src_dir = resolve_builtin_src_dir(app)
-        .ok_or_else(|| format!("内置插件目录未找到: {}", BUILTIN_PLUGIN_ID))?;
+    let src_dir = resolve_builtin_src_dir(app, plugin_id)
+        .ok_or_else(|| format!("内置插件目录未找到: {}", plugin_id))?;
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "ensure_single_builtin: id={} src_dir_resolved={}",
+            plugin_id,
+            src_dir.display()
+        ),
+    );
+
     // 随包资源里的目标版本（用于判断已安装版本是否需要升级/修复）
-    let src_version = manager::parse_manifest(&src_dir.join("manifest.json"))
-        .ok()
-        .map(|m| m.version.clone());
+    let src_manifest_path = src_dir.join("manifest.json");
+    let src_version = match manager::parse_manifest(&src_manifest_path) {
+        Ok(m) => {
+            let v = m.version.clone();
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "ensure_single_builtin: id={} src_manifest_ok src_version={}",
+                    plugin_id, v
+                ),
+            );
+            Some(v)
+        }
+        Err(e) => {
+            debug_log(
+                app,
+                LogLevel::Error,
+                &format!(
+                    "ensure_single_builtin: id={} src_manifest_parse_fail path={} err={}",
+                    plugin_id,
+                    src_manifest_path.display(),
+                    e
+                ),
+            );
+            return Err(format!(
+                "内置插件源 manifest 解析失败: {} -> {}",
+                src_manifest_path.display(),
+                e
+            ));
+        }
+    };
 
     /// 升级过程中的备份元信息：rename 后的旧目录路径 + store 条目快照
     struct UpgradeBackup {
@@ -617,7 +791,7 @@ pub fn plugin_ensure_builtin(
             }
         }
         /// 回滚：把备份目录 rename 回原名，并把 store 条目写回
-        fn restore(self, app_data_dir: &Path) -> Result<(), String> {
+        fn restore(self, app_data_dir: &Path, plugin_id: &str) -> Result<(), String> {
             // 1) 若「新安装半截」导致 original_dir 存在，先移除以免 rename 冲突
             if self.original_dir.exists() {
                 let _ = std::fs::remove_dir_all(&self.original_dir);
@@ -635,7 +809,7 @@ pub fn plugin_ensure_builtin(
             }
             // 3) 恢复 store 条目（先移除已写入的新 id 条目，再插入旧条目快照）
             let mut items = load_store(app_data_dir).unwrap_or_default();
-            items.retain(|i| i.id != BUILTIN_PLUGIN_ID);
+            items.retain(|i| i.id != plugin_id);
             if let Some(s) = self.store_item {
                 items.push(s);
             }
@@ -644,74 +818,152 @@ pub fn plugin_ensure_builtin(
         }
     }
 
-    let existing = manager::scan(&app_dir)?;
-    let backup: Option<UpgradeBackup> =
-        if let Some(p) = existing.iter().find(|p| p.manifest.id == BUILTIN_PLUGIN_ID) {
-            let entry = p
-                .manifest
-                .index_html
-                .clone()
-                .unwrap_or_else(|| p.manifest.entry.clone());
-            let dir = app_dir
-                .join("plugins")
-                .join(format!("{}@{}", p.manifest.id, p.manifest.version));
-            let entry_ok = dir.join(&entry).exists();
-            let version_ok = src_version
-                .as_ref()
-                .map(|v| v == &p.manifest.version)
-                .unwrap_or(true);
-            if entry_ok && version_ok {
-                return Ok(());
-            }
-            debug_log(
+    let existing = manager::scan(app_dir)?;
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "ensure_single_builtin: id={} scan_existing_count={}",
+            plugin_id,
+            existing.len()
+        ),
+    );
+    if !existing.is_empty() {
+        let ids: Vec<&str> = existing.iter().map(|p| p.manifest.id.as_str()).collect();
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!(
+                "ensure_single_builtin: id={} existing_ids=[{}]",
+                plugin_id,
+                ids.join(", ")
+            ),
+        );
+    }
+
+    let backup: Option<UpgradeBackup> = if let Some(p) =
+        existing.iter().find(|p| p.manifest.id == plugin_id)
+    {
+        let entry = p
+            .manifest
+            .index_html
+            .clone()
+            .unwrap_or_else(|| p.manifest.entry.clone());
+        let dir = app_dir
+            .join("plugins")
+            .join(format!("{}@{}", p.manifest.id, p.manifest.version));
+        let entry_path = dir.join(&entry);
+        let entry_ok = entry_path.exists();
+        let version_ok = src_version
+            .as_ref()
+            .map(|v| v == &p.manifest.version)
+            .unwrap_or(true);
+        debug_log(
                 app,
-                LogLevel::Warn,
+                LogLevel::Info,
                 &format!(
-                    "内置插件需更新/修复（entry_ok={}, installed_v={}, src_v={:?}），重新安装",
-                    entry_ok, p.manifest.version, src_version
+                    "ensure_single_builtin: id={} found_installed installed_v={} install_dir={} entry_file={} entry_ok={} version_ok={}",
+                    plugin_id, p.manifest.version, dir.display(), entry, entry_ok, version_ok
                 ),
             );
+        if entry_ok && version_ok {
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "ensure_single_builtin: id={} 已安装且版本/入口正常，跳过",
+                    plugin_id
+                ),
+            );
+            return Ok(());
+        }
+        debug_log(
+            app,
+            LogLevel::Warn,
+            &format!(
+                "内置插件需更新/修复（entry_ok={}, installed_v={}, src_v={:?}），重新安装",
+                entry_ok, p.manifest.version, src_version
+            ),
+        );
 
-            // ===== 升级前备份（O(1) rename，不是整目录复制） =====
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let backup_dir = app_dir.join("plugins").join(format!(
-                "{}@{}._backup_{}",
-                p.manifest.id, p.manifest.version, ts
-            ));
-            let store_item_snapshot: Option<PluginStoreItem> = load_store(&app_dir)
-                .ok()
-                .and_then(|items| items.into_iter().find(|s| s.id == BUILTIN_PLUGIN_ID));
-            if dir.exists() {
-                std::fs::rename(&dir, &backup_dir).map_err(|e| {
-                    format!(
-                        "备份旧插件目录失败 {} -> {}: {}",
-                        dir.display(),
-                        backup_dir.display(),
-                        e
-                    )
-                })?;
-            }
-            // 备份完后，手动移除 store 条目（不再调用 manager::uninstall，
-            // 因为它会 rm -rf 目录；而目录已经被我们 rename 走了）
-            {
-                let mut items = load_store(&app_dir).unwrap_or_default();
-                items.retain(|i| i.id != BUILTIN_PLUGIN_ID);
-                save_store(&app_dir, &items)?;
-            }
-            Some(UpgradeBackup {
-                backup_dir,
-                original_dir: dir,
-                store_item: store_item_snapshot,
-            })
-        } else {
-            None
-        };
+        // ===== 升级前备份（O(1) rename，不是整目录复制） =====
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let backup_dir = app_dir.join("plugins").join(format!(
+            "{}@{}._backup_{}",
+            p.manifest.id, p.manifest.version, ts
+        ));
+        let store_item_snapshot: Option<PluginStoreItem> = load_store(app_dir)
+            .ok()
+            .and_then(|items| items.into_iter().find(|s| s.id == plugin_id));
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!(
+                "ensure_single_builtin: id={} 开始备份旧版: {} -> {} store_snapshot={}",
+                plugin_id,
+                dir.display(),
+                backup_dir.display(),
+                store_item_snapshot.is_some()
+            ),
+        );
+        if dir.exists() {
+            std::fs::rename(&dir, &backup_dir).map_err(|e| {
+                format!(
+                    "备份旧插件目录失败 {} -> {}: {}",
+                    dir.display(),
+                    backup_dir.display(),
+                    e
+                )
+            })?;
+        }
+        // 备份完后，手动移除 store 条目（不再调用 manager::uninstall，
+        // 因为它会 rm -rf 目录；而目录已经被我们 rename 走了）
+        {
+            let mut items = load_store(app_dir).unwrap_or_default();
+            let before = items.len();
+            items.retain(|i| i.id != plugin_id);
+            let removed = before - items.len();
+            save_store(app_dir, &items)?;
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "ensure_single_builtin: id={} 已移除旧 store 条目 (removed {})",
+                    plugin_id, removed
+                ),
+            );
+        }
+        Some(UpgradeBackup {
+            backup_dir,
+            original_dir: dir,
+            store_item: store_item_snapshot,
+        })
+    } else {
+        debug_log(
+            app,
+            LogLevel::Info,
+            &format!(
+                "ensure_single_builtin: id={} 未发现已安装副本，走首次安装流程",
+                plugin_id
+            ),
+        );
+        None
+    };
 
     // ===== 安装新版 =====
-    let install_result = manager::install_from_dir(&app_dir, &src_dir);
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "ensure_single_builtin: id={} 开始安装: src_dir={}",
+            plugin_id,
+            src_dir.display()
+        ),
+    );
+    let install_result = manager::install_from_dir(app_dir, &src_dir);
     match (&install_result, backup) {
         (Ok(manifest), Some(bk)) => {
             // 成功 → 丢弃备份
@@ -746,7 +998,7 @@ pub fn plugin_ensure_builtin(
                 LogLevel::Error,
                 &format!("内置插件安装失败，正在回滚到上一可用版本: {}", e),
             );
-            if let Err(rb) = bk.restore(&app_dir) {
+            if let Err(rb) = bk.restore(app_dir, plugin_id) {
                 debug_log(app, LogLevel::Error, &format!("内置插件回滚失败: {}", rb));
                 return Err(format!(
                     "安装失败且回滚失败: install_err={}; rollback_err={}",
