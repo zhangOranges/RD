@@ -97,6 +97,26 @@
   }
   .form-textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
 
+  /* select 专用：去除原生 appearance，自定义下拉箭头 */
+  .form-select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='none' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5l3 3 3-3'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 12px 12px;
+    cursor: pointer;
+  }
+  .form-select:hover {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='none' stroke='%23cbd5e1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5l3 3 3-3'/></svg>");
+  }
+  .form-select option {
+    background: var(--bg-content, #1a1a1f);
+    color: var(--text-primary, #e4e4e7);
+  }
+
   /* 开关 */
   .pf-switch-label {
     display: inline-flex;
@@ -308,8 +328,8 @@
     </div>
   </header>
 
-  <div class="pf-warn" id="warnRemote" hidden>⚠ 远程转发模式已开启，远端服务器将可回连本机端口</div>
-  <div class="pf-warn danger" id="warnFormRemote" hidden>⚠ 远程转发 (R 模式) 属于高危操作，请确认服务器权限安全</div>
+  <div class="pf-warn" id="warnRemote">⚠ 远程转发模式已开启，远端服务器将可回连本机端口</div>
+  <div class="pf-warn danger" id="warnFormRemote">⚠ 远程转发 (R 模式) 属于高危操作，请确认服务器权限安全</div>
 
   <div class="pf-body">
     <div class="pf-loading" id="loading">正在加载…</div>
@@ -439,6 +459,7 @@
     localAddrCustom: '',
     importMenuOpen: false,
     ready: false,
+    hostsLoadError: null, // 主机列表上次加载失败的错误信息，用于下拉精确提示
   };
 
   var el = function (id) { return document.getElementById(id); };
@@ -487,10 +508,13 @@
       state.hosts = all; // 列出全部主机（未连接的在下拉中禁用并标注）
       state.hostStates = {};
       all.forEach(function (h, i) { state.hostStates[h.id] = states[i] || 'disconnected'; });
+      state.hostsLoadError = null;
     } catch (e) {
       log('warn', '加载主机列表失败: ' + errMsg(e));
       state.hosts = [];
       state.hostStates = {};
+      state.hostsLoadError = errMsg(e);
+      notify('error', '加载 SSH 主机列表失败：' + errMsg(e));
     }
   }
   // 仅刷新主机列表并重渲染下拉（连接成功/重连成功时调用，避免表单里看不到刚连接的主机）
@@ -519,7 +543,10 @@
   var _allHostsCache = [];
   function getAllHostsCache() { return _allHostsCache; }
   async function loadAllHostsCache() {
-    try { _allHostsCache = await ctx.server.listAll(); } catch (e) { _allHostsCache = []; }
+    try { _allHostsCache = await ctx.server.listAll(); } catch (e) {
+      _allHostsCache = [];
+      log('warn', 'loadAllHostsCache 失败: ' + errMsg(e));
+    }
   }
 
   function modePill(mode) {
@@ -551,7 +578,14 @@
     var table = document.getElementById('table');
     table.hidden = !state.ready;
     // 每次渲染同步顶栏开关与警告条，避免状态漂移导致“开关关着但提示还在”
-    document.getElementById('warnRemote').hidden = !state.allowRemote;
+    const warnRemoteEl = document.getElementById('warnRemote');
+    const wfr = document.getElementById('warnFormRemote');
+    if (wfr) {
+      wfr.style.display = state.editingId === null && state.mode === 'remote' ? '' : 'none';
+    }
+    if (warnRemoteEl) {
+      warnRemoteEl.style.display = state.allowRemote ? '' : 'none';
+    }
     el('allowRemote').checked = state.allowRemote;
 
     var tbody = document.getElementById('tbody');
@@ -597,7 +631,11 @@
       html += '<option value="' + esc(h.id) + '"' + (connected ? '' : ' disabled') + '>' + label + '</option>';
     });
     if (!state.hosts.length) {
-      html += '<option value="" disabled>暂无主机，请先在左侧添加并连接</option>';
+      if (state.hostsLoadError) {
+        html += '<option value="" disabled>加载失败：' + esc(state.hostsLoadError) + '</option>';
+      } else {
+        html += '<option value="" disabled>暂无主机，请先在左侧添加并连接</option>';
+      }
     }
     sel.innerHTML = html;
     // 保持用户当前选择（表格刷新时不应重置表单）
@@ -650,7 +688,10 @@
     renderModeGroup();
     renderLocalAddr();
     el('remoteGroup').hidden = state.mode === 'dynamic';
-    el('warnFormRemote').hidden = !(state.editingId === null && state.mode === 'remote');
+    const wfr = document.getElementById('warnFormRemote');
+    if (wfr) {
+      wfr.style.display = state.editingId === null && state.mode === 'remote' ? '' : 'none';
+    }
     document.getElementById('formTitle').textContent = state.editingId ? '编辑规则' : '新建规则';
     var saveBtn = el('btnSave');
     saveBtn.textContent = state.editingId ? '保存修改' : '创建规则';
@@ -739,6 +780,7 @@
     state.mode = rule.mode;
     state.localAddr = LISTEN_PRESETS.indexOf(rule.localAddr) !== -1 ? rule.localAddr : 'custom';
     state.localAddrCustom = LISTEN_PRESETS.indexOf(rule.localAddr) !== -1 ? '' : rule.localAddr;
+    renderHostSelect();
     el('fHost').value = rule.hostId;
     el('fLocalPort').value = rule.localPort;
     el('fRemoteAddr').value = rule.remoteAddr || '';
@@ -752,11 +794,15 @@
     log('info', '编辑隧道规则: id=' + rule.id + ', mode=' + rule.mode);
     renderForm();
   }
-  function openNew() {
+  async function openNew() {
     state.editingId = null;
     state.mode = 'local';
     state.localAddr = '127.0.0.1';
     state.localAddrCustom = '';
+    // 防御性：如果主机列表为空（enable 阶段加载失败或时序问题），先重新加载
+    if (!state.hosts || state.hosts.length === 0) {
+      try { await loadHosts(); } catch (e) { /* ignore */ }
+    }
     // 默认选中第一个已连接的主机（未连接的主机在下拉中已禁用，不能作为默认值）
     var firstConnected = null;
     for (var i = 0; i < state.hosts.length; i++) {
@@ -765,6 +811,7 @@
         break;
       }
     }
+    renderHostSelect();
     el('fHost').value = firstConnected || '';
     el('fLocalPort').value = '';
     el('fRemoteAddr').value = '';
@@ -982,10 +1029,13 @@
       state.allowRemote = next;
       try { await ctx.storage.set('allowRemote', next); } catch (err) { /* ignore */ }
       log('info', '远程转发开关 -> ' + next);
-      document.getElementById('warnRemote').hidden = !next;
+      const warnRemoteBox = document.getElementById('warnRemote');
+      if (warnRemoteBox) {
+        warnRemoteBox.style.display = next ? '' : 'none';
+      }
     });
 
-    el('btnNew').addEventListener('click', function () { openNew(); });
+    el('btnNew').addEventListener('click', function () { void openNew(); });
     el('btnCancel').addEventListener('click', closeForm);
     el('btnSave').addEventListener('click', function () { void handleSave(); });
 
@@ -1041,13 +1091,13 @@
 
     // 表格操作委托（按钮 + 自启开关）
     document.getElementById('tbody').addEventListener('click', function (e) {
-      var el = e.target.closest('[data-act]');
-      if (!el) return;
-      var act = el.getAttribute('data-act');
-      var id = el.getAttribute('data-id');
+      var actBtn = e.target.closest('[data-act]');
+      if (!actBtn) return;
+      var act = actBtn.getAttribute('data-act');
+      var id = actBtn.getAttribute('data-id');
       if (act === 'autostart') {
         // checkbox 的 checked 已被浏览器切换，直接用最新状态更新规则
-        void toggleAutoStart(id, el.checked, el);
+        void toggleAutoStart(id, actBtn.checked, actBtn);
         return;
       }
       if (act === 'start') void handleStart(id);

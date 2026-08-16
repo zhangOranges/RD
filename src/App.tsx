@@ -54,8 +54,8 @@ function App() {
       initEventListeners(),
       bindTransferProgressListener(),
       // 注册插件内核事件监听（tunnel:* 事件转发到内核事件总线）。
-      // 注：端口转发已迁为内置插件，其 autoStart（连接成功自动启动隧道）
-      // 逻辑在插件内订阅 connection:success 实现，主程序不再负责。
+      // 注：端口转发已迁为内置插件，其 autoStart、连接生命周期、UI 渲染
+      // 均在插件内独立实现，主程序仅负责通过 PluginViewHost 打开 iframe。
       initPluginEventListeners(),
       // 加载插件列表并同步生命周期（内置端口转发插件随包自动安装、默认启用）
       usePluginStore.getState().loadPlugins(),

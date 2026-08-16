@@ -58,6 +58,30 @@ fn resolve_app_data_dir(
     Err("无法获取 app data dir".to_string())
 }
 
+/// 统一的权限解析逻辑（与 manager::scan 保持一致）：
+/// 1. 优先从 plugin-state.json 中读取已授予的 granted_permissions；
+/// 2. 若 store 中无记录（首次安装/数据异常），则扫描 plugins 目录找到对应
+///    manifest，使用 manifest.permissions 作为默认值；
+/// 3. 仍然找不到时返回空数组（权限拒绝）。
+///
+/// 所有需要做内核权限校验的命令（plugin_assert_perm、plugin_http_request 等）
+/// 都必须调用此函数，避免权限回退策略不一致导致的偶发拒绝。
+fn resolve_granted_permissions(dir: &Path, plugin_id: &str) -> Vec<String> {
+    let items = store::load_store(dir).unwrap_or_default();
+    items
+        .iter()
+        .find(|i| i.id == plugin_id)
+        .map(|i| i.granted_permissions.clone())
+        .unwrap_or_else(|| {
+            if let Ok(scanned) = manager::scan(dir) {
+                if let Some(p) = scanned.iter().find(|p| p.manifest.id == plugin_id) {
+                    return p.manifest.permissions.clone();
+                }
+            }
+            Vec::new()
+        })
+}
+
 // ===== Tauri Commands =====
 
 #[tauri::command]
@@ -393,12 +417,7 @@ pub fn plugin_assert_perm(
     perm: String,
 ) -> Result<(), String> {
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
-    let items = store::load_store(&dir).unwrap_or_default();
-    let granted: Vec<String> = items
-        .iter()
-        .find(|i| i.id == id)
-        .map(|i| i.granted_permissions.clone())
-        .unwrap_or_default();
+    let granted = resolve_granted_permissions(&dir, &id);
     permissions::assert_perm(&granted, &perm)
 }
 
@@ -764,12 +783,7 @@ pub async fn plugin_http_request(
     allow_internal: Option<bool>,
 ) -> Result<HttpResponseDto, String> {
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
-    let items = store::load_store(&dir).unwrap_or_default();
-    let granted = items
-        .iter()
-        .find(|i| i.id == id)
-        .map(|i| i.granted_permissions.clone())
-        .unwrap_or_default();
+    let granted = resolve_granted_permissions(&dir, &id);
     permissions::assert_perm(&granted, "network.http")?;
 
     let parsed = reqwest::Url::parse(&url).map_err(|e| format!("URL_INVALID: {}", e))?;
