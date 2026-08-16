@@ -1,4 +1,4 @@
-import { sanitizeHostConfig } from '../hostSafe';
+import { sanitizeHostConfig, sanitizeHostConfigs } from '../hostSafe';
 import type { HostConfig } from '../../types';
 
 function testNoSecretsInJson(): boolean {
@@ -172,7 +172,163 @@ function testSpreadMisuseTriggersFailure(): boolean {
   }
 }
 
-const results = [testNoSecretsInJson(), testReflectionSafe(), testFutureSensitiveFieldsNotLeaked(), testSpreadMisuseTriggersFailure()];
+/**
+ * TR-3.3.5：auth_type=key 时 has_private_key=true、has_password=false（与上面对称）
+ */
+function testAuthTypeKeySetsPrivateKeyFlag(): boolean {
+  const raw: HostConfig & { private_key?: string } = {
+    id: 'h5',
+    name: 'key-auth-host',
+    host: '5.5.5.5',
+    port: 22,
+    username: 'ops',
+    auth_type: 'key',
+    remember_dir: true,
+    remark: 'with path cache',
+    category_id: 'infra',
+    path_cache_id: 'cache-001',
+    private_key: '-----BEGIN OPENSSH PRIVATE KEY-----\nPRIVATE_CONTENT\n-----END',
+  };
+  const safe = sanitizeHostConfig(raw);
+  const privateKeyStillLeaked =
+    JSON.stringify(safe).includes('PRIVATE_CONTENT') ||
+    'private_key' in safe ||
+    (safe as unknown as Record<string, unknown>).private_key !== undefined;
+  const ok =
+    safe.has_private_key === true &&
+    safe.has_password === false &&
+    !privateKeyStillLeaked &&
+    safe.path_cache_id === 'cache-001' &&   // ← 白名单里的 path_cache_id 必须被保留
+    safe.category_id === 'infra' &&
+    safe.remember_dir === true &&
+    safe.remark === 'with path cache';
+  console.assert(
+    ok,
+    `TR-3.3.5 FAILED: has_pk=${safe.has_private_key}, has_pw=${safe.has_password}, leaked=${privateKeyStillLeaked}, path_cache=${safe.path_cache_id}`,
+  );
+  return ok;
+}
+
+/**
+ * TR-3.3.6：返回对象必须「恰好等于」白名单字段集合——字段数要对。
+ * 这是保险①的结果断言：如果有人未来把 sanitize 改回 spread 或忘记删旧字段，
+ * 字段数就不可能是精确的 12 个。
+ */
+function testSafeKeyCountEqualsWhitelist(): boolean {
+  const raw: HostConfig = {
+    id: 'h6',
+    name: 'minimal',
+    host: '6.6.6.6',
+    port: 22,
+    username: 'u',
+    auth_type: 'password',
+    remember_dir: false,
+    remark: '',
+    category_id: '',
+    // 故意缺 path_cache_id（undefined）—— 白名单赋值会写 undefined，但 Object.keys
+    // 默认不计入 undefined 属性（严格说：Object.keys 会把 undefined 值的自有属性算进来吗？
+    // 会的——只要被赋值。因为 `safe: HostConfigSafe = {...}` 中，path_cache_id 这一行会被
+    // 显式写 undefined，所以它会出现在 Object.keys 中，键的总数一定是 12。
+  };
+  const safe = sanitizeHostConfig(raw) as unknown as Record<string, unknown>;
+  const keys = Object.keys(safe).sort();
+  const expected = [
+    'auth_type',
+    'category_id',
+    'has_password',
+    'has_private_key',
+    'host',
+    'id',
+    'name',
+    'path_cache_id',
+    'port',
+    'remember_dir',
+    'remark',
+    'username',
+  ].sort();
+  const eq = keys.length === expected.length && keys.every((k, i) => k === expected[i]);
+  console.assert(
+    eq,
+    `TR-3.3.6 FAILED: keys=${JSON.stringify(keys)} expected=${JSON.stringify(expected)}`,
+  );
+  return eq;
+}
+
+/**
+ * TR-3.3.7：sanitizeHostConfigs 批量脱敏——结果数量正确 + 每项都安全
+ */
+function testBatchSanitize(): boolean {
+  const list: HostConfig[] = [
+    {
+      id: 'b1', name: 'host1', host: '1.1.1.1', port: 22, username: 'u1',
+      auth_type: 'password', remember_dir: false, remark: '', category_id: '',
+    },
+    {
+      id: 'b2', name: 'host2', host: '2.2.2.2', port: 2222, username: 'u2',
+      auth_type: 'key', remember_dir: true, remark: 'prod', category_id: 'infra',
+      path_cache_id: 'pc-1',
+    },
+  ];
+  const safeList = sanitizeHostConfigs(list);
+  const json = JSON.stringify(safeList);
+  const ok =
+    safeList.length === 2 &&
+    safeList[0].id === 'b1' &&
+    safeList[1].id === 'b2' &&
+    safeList[1].has_private_key === true &&
+    safeList[1].path_cache_id === 'pc-1' &&
+    // 检查 JSON 中不含 "password": 或 "private_key": 这种敏感字段键名
+    // （has_password / has_private_key 是白名单字段，不算泄漏）
+    !json.includes('"password":') &&
+    !json.includes('"private_key":');
+  console.assert(ok, `TR-3.3.7 FAILED: len=${safeList.length}, json=${json}`);
+  return ok;
+}
+
+/**
+ * TR-3.3.8：保险③ —— 原型链注入黑名单字段时必须被拦截
+ * `in` 操作符会检查原型链，如果有人通过 Object.prototype 污染注入了 password 属性，
+ * 保险③的 `blocked in safe` 会检测到并 throw。
+ */
+function testAssuranceBlocklistPrototypePollution(): boolean {
+  const minimal: HostConfig = {
+    id: 'p1', name: 'proto-test', host: '1.2.3.4', port: 22, username: 'u',
+    auth_type: 'password', remember_dir: false, remark: '', category_id: '',
+  };
+  // 临时在原型链上注入 password 属性
+  const proto = Object.prototype as unknown as Record<string, unknown>;
+  const hadOwn = Object.prototype.hasOwnProperty.call(proto, 'password');
+  const saved = (proto as { password?: unknown }).password;
+  (proto as { password?: unknown }).password = 'POLLUTED_VIA_PROTOTYPE';
+  try {
+    sanitizeHostConfig(minimal);
+    console.assert(false, 'TR-3.3.8 FAILED: 原型链注入 password 后 sanitize 未抛错');
+    return false;
+  } catch (e) {
+    const msg = (e as Error).message;
+    const ok = msg.includes('HOST_SAFE_LEAK_DETECTED') || msg.includes('HOST_SAFE_ASSURANCE_FAILURE');
+    console.assert(ok, `TR-3.3.8 FAILED: 抛错但消息不对: ${msg}`);
+    return ok;
+  } finally {
+    // 恢复原型
+    if (hadOwn) {
+      (proto as { password?: unknown }).password = saved;
+    } else {
+      delete (proto as { password?: unknown }).password;
+    }
+  }
+}
+
+const results = [
+  testNoSecretsInJson(),
+  testReflectionSafe(),
+  testFutureSensitiveFieldsNotLeaked(),
+  testSpreadMisuseTriggersFailure(),
+  testAuthTypeKeySetsPrivateKeyFlag(),
+  testSafeKeyCountEqualsWhitelist(),
+  testBatchSanitize(),
+  testAssuranceBlocklistPrototypePollution(),
+];
 console.log(`\nHostSafe Tests: ${results.filter((r) => r).length}/${results.length} passed`);
 if (!results.every(Boolean)) {
   throw new Error('HostSafe tests failed');

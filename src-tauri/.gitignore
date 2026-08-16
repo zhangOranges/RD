@@ -40,3 +40,10 @@ vendor/
 .vscode
 .idea
 *.iml
+
+# ---- Coverage artifacts ----
+# cargo-llvm-cov 默认输出在 target/llvm-cov（/target/ 已忽略），
+# 下面兜底防止 profile 原始数据落在 crate 根目录
+*.profraw
+*.profdata
+coverage/

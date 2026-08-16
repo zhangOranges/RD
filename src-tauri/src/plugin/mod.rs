@@ -1080,3 +1080,176 @@ pub async fn plugin_http_request(
         ok: status.is_success(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // =========================================================================
+    // TR-1: validate_plugin_id —— 路径穿越/非法字符必须拦截
+    // =========================================================================
+
+    #[test]
+    fn test_validate_plugin_id_normal_cases() {
+        // ASCII 字母数字 + 常见合法分隔符：都应该放行
+        assert!(validate_plugin_id("rd-native-port-forward").is_ok());
+        assert!(validate_plugin_id("com.example.plugin_123").is_ok());
+        assert!(validate_plugin_id("a").is_ok());
+        assert!(validate_plugin_id("my-plugin_v1.0.0").is_ok());
+    }
+
+    #[test]
+    fn test_validate_plugin_id_rejects_empty() {
+        assert_eq!(
+            validate_plugin_id(""),
+            Err("INVALID_PLUGIN_ID".to_string()),
+            "空字符串必须拒绝"
+        );
+    }
+
+    #[test]
+    fn test_validate_plugin_id_rejects_path_traversal() {
+        let cases = [
+            "foo/../bar",        // Unix 风格上跳
+            "..",                // 纯上跳
+            "prefix..suffix",    // 中间含 ..（Windows 也能被误用）
+            "foo\\..\\bar",      // Windows 风格上跳
+        ];
+        for c in cases.iter() {
+            assert!(
+                validate_plugin_id(c).is_err(),
+                "含「..」的插件 ID 必须被拒: {}",
+                c
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_plugin_id_rejects_path_separators() {
+        let cases = [
+            "a/b",               // Unix 分隔符
+            "a\\b\\c",           // Windows 分隔符
+            "/absolute",         // 根路径起点
+            "\\\\unc\\share",    // UNC 前缀片段
+        ];
+        for c in cases.iter() {
+            assert!(
+                validate_plugin_id(c).is_err(),
+                "含路径分隔符的插件 ID 必须被拒: {}",
+                c
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_plugin_id_rejects_colon() {
+        // NTFS 冒号 = ADS（备用数据流），会导致 CreateDirectory 报 ERROR_INVALID_NAME (123)
+        let cases = [
+            "C:plugin",          // 盘符式
+            "stream:data",       // ADS 式
+            "plugin:v1",         // 版本号误用
+        ];
+        for c in cases.iter() {
+            assert!(
+                validate_plugin_id(c).is_err(),
+                "含冒号的插件 ID 必须被拒: {}",
+                c
+            );
+        }
+    }
+
+    // =========================================================================
+    // TR-2: 存储配额常量 —— 预期边界白盒校验
+    // （plugin_storage_set 本身需 AppHandle，不便在纯 UT 里跑，
+    //  这里校验其依赖的关键常量值与序列化字节数匹配，防止未来改值时偏离设计。）
+    // =========================================================================
+
+    #[test]
+    fn test_storage_quota_constants_match_design() {
+        // 设计值：单 key ≤ 256 KiB；整份 store.json ≤ 8 MiB；单文件 ≤ 16 MiB
+        assert_eq!(PLUGIN_STORAGE_MAX_VALUE_BYTES, 256 * 1024);
+        assert_eq!(PLUGIN_STORAGE_MAX_TOTAL_BYTES, 8 * 1024 * 1024);
+        assert_eq!(PLUGIN_STORAGE_MAX_FILE_BYTES, 16 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_storage_value_size_boundary_256kib() {
+        // 构造一个长度恰好为 N 字节的 JSON Value（字符串类型）。
+        // 单字符 `a`：JSON 序列化后 = "aaaaa..."（带外层引号 + 内部字符）。
+        // 精确到边界：刚好低于限额 → 应能通过；超 1B → 应拒绝。
+        let limit = PLUGIN_STORAGE_MAX_VALUE_BYTES;
+
+        // 256 * 1024 - 2 = 外层引号占 2B，内部 pure ASCII 占 (limit - 2) 字节
+        let len_ok = limit - 2;
+        let s_ok = "a".repeat(len_ok);
+        let v_ok = json!(s_ok);
+        let bytes_ok = serde_json::to_vec(&v_ok).unwrap();
+        assert_eq!(
+            bytes_ok.len(),
+            limit,
+            "预期 limit 边界 Value 序列化后正好 = {}B（实际 {}B）",
+            limit,
+            bytes_ok.len()
+        );
+
+        // 超 1 字节：必然超过限额
+        let len_bad = limit - 1;
+        let s_bad = "a".repeat(len_bad);
+        let v_bad = json!(s_bad);
+        let bytes_bad = serde_json::to_vec(&v_bad).unwrap();
+        assert!(
+            bytes_bad.len() > limit,
+            "超限 1B 的 Value 序列化应 > {}B（实际 {}B）",
+            limit,
+            bytes_bad.len()
+        );
+    }
+
+    // =========================================================================
+    // TR-3: resolve_granted_permissions —— 纯文件系统侧的权限解析
+    // （需要临时目录 + 至少一个 store 或 manifest；没有 manifest 时返回空数组。）
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_granted_permissions_no_store_no_manifest_returns_empty() {
+        let tmp = tempdir();
+        let granted = resolve_granted_permissions(&tmp, "non-existent-plugin");
+        assert!(
+            granted.is_empty(),
+            "既无 store 也无对应 manifest 时，应返回空数组（实际 {:?}）",
+            granted
+        );
+    }
+
+    #[test]
+    fn test_resolve_granted_permissions_invalid_plugin_id_still_returns_empty() {
+        let tmp = tempdir();
+        // 非法 ID 不会被 validate 在此函数里拦住（validate 在更外层调用），
+        // 但至少不会 panic，返回空数组即可
+        let granted = resolve_granted_permissions(&tmp, "../bad-id");
+        assert!(granted.is_empty());
+    }
+
+    // ---- helpers ----
+
+    fn tempdir() -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "rd-plugin-ut-{}-{}",
+            std::process::id(),
+            rand_hex()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn rand_hex() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        format!("{:x}", n)
+    }
+}

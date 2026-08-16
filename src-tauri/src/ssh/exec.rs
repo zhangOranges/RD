@@ -10,10 +10,17 @@ use crate::{debug_log, LogLevel};
 fn cmd_preview(cmd: &str) -> String {
     const MAX_CMD_LEN: usize = 200;
     if cmd.len() <= MAX_CMD_LEN {
-        cmd.to_string()
-    } else {
-        format!("{}...(+{}B)", &cmd[..MAX_CMD_LEN], cmd.len() - MAX_CMD_LEN)
+        return cmd.to_string();
     }
+    // 在字节预算内找到最近的 UTF-8 char 边界（向回退 floor），避免在多字节字符中间切分导致 panic
+    let mut cut = MAX_CMD_LEN;
+    while cut > 0 && !cmd.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    // 极端情况：如果前 200B 全是同一个字符的尾字节（几乎不会发生），退化为 cut=0，
+    // 此时 "前缀...(+NB)" 中的前缀为空字符串，仍然安全且不 panic。
+    let extra = cmd.len() - cut;
+    format!("{}...(+{}B)", &cmd[..cut], extra)
 }
 
 /// Execute a command on the remote server and return its stdout.
@@ -310,4 +317,87 @@ pub async fn get_server_stats(
         },
         uptime_secs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // TR-E1: cmd_preview —— 日志脱敏：短命令原样、长命令截断到 200 字节
+    // =========================================================================
+
+    #[test]
+    fn test_cmd_preview_short_unchanged() {
+        // 空命令也安全
+        assert_eq!(cmd_preview(""), "");
+        // 短命令：原样
+        assert_eq!(cmd_preview("ls -la"), "ls -la");
+        // 恰好 199B：原样
+        let s199 = "a".repeat(199);
+        assert_eq!(cmd_preview(&s199), s199);
+        // 恰好 200B：原样（边界）
+        let s200 = "x".repeat(200);
+        assert_eq!(cmd_preview(&s200), s200);
+    }
+
+    #[test]
+    fn test_cmd_preview_truncation_201_bytes() {
+        // 超过 200B 1B：格式 "prefix...(+NB)"
+        let s201 = "b".repeat(201);
+        let out = cmd_preview(&s201);
+        assert!(
+            out.ends_with("...(+1B)"),
+            "超 1B 应该尾加 ...(+1B)，实际尾={}",
+            &out[out.len().saturating_sub(10)..]
+        );
+        assert_eq!(out.len(), 200 + 8); // prefix 200B + "...(+1B)" = 8
+        assert_eq!(&out[..200], "b".repeat(200));
+    }
+
+    #[test]
+    fn test_cmd_preview_truncation_large() {
+        // 一个典型敏感场景：echo 超长 token / 密码
+        let secret = "SENSITIVE_PASSWORD_TOKEN_XYZ";
+        // 在 200 字节之后再拼 secret，确保 secret 段完全落在截断区之外
+        let prefix = "echo ".to_string() + &"A".repeat(195); // prefix 199B
+        let mut big = prefix;
+        big.push(' '); // 200
+        big.push_str(secret); // 200+
+        let out = cmd_preview(&big);
+        // 前缀部分仍在：必须以 "echo " 开头（200B 内）
+        assert!(out.starts_with("echo "), "前缀应该保留: {}", &out[..50]);
+        // secret 不应出现在最终日志预览里（如果出了就是截断边界错了）
+        assert!(
+            !out.contains(secret),
+            "截断后的预览不应包含 200B 之后的敏感段。out={}",
+            out
+        );
+        // 超出字节数必须与实际差值匹配
+        assert!(
+            out.contains(&format!("(+{}B)", big.len() - 200)),
+            "超出字节数声明应精确。out={}",
+            out
+        );
+    }
+
+    #[test]
+    fn test_cmd_preview_non_ascii_multibyte_uses_byte_length() {
+        // 中文 3B/char：cmd_preview 必须正确处理，不能在 char 中间切分导致 panic。
+        let zh = "中".repeat(100); // 100 chars × 3B = 300B
+        let out = cmd_preview(&zh);
+        // ① 不 panic 就已经过了核心测试（之前该 UT 因 panic 失败）
+        // ② 因为 200B 正好落在第 67 个「中」的中间（66 完整 × 3B = 198B，第 67 个 中: 198..201），
+        //    所以 floor 到 198B，extra = 300 - 198 = 102
+        assert!(
+            out.contains("(+102B)"),
+            "非 ASCII floor 切分后的 extra 声明应精确。out={}",
+            out
+        );
+        // ③ 前缀应该恰好由 66 个完整的「中」字组成（198B），不能出现乱码或替换字符
+        let prefix: Vec<&str> = out.splitn(2, "...(+").collect();
+        assert_eq!(prefix.len(), 2);
+        assert_eq!(prefix[0].chars().count(), 66, "前缀 chars 数应恰为 66 个完整中文字符");
+        assert!(prefix[0].chars().all(|c| c == '中'), "前缀字符应全部为「中」，实际前缀={}", prefix[0]);
+    }
 }

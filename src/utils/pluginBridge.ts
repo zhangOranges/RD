@@ -23,6 +23,9 @@
  */
 
 import { getCurrentThemeInfo } from '../store/themeStore';
+import { escapeAttr, escapeCssValue } from './escape';
+// 重新导出以便外部（以及测试前的临时调用方）继续从 pluginBridge 入口取用这两个函数
+export { escapeAttr, escapeCssValue };
 
 /**
  * 插件公共样式库（随桥脚本一起注入到每个插件 iframe 的 <head> 内）。
@@ -632,32 +635,4 @@ export function buildPluginIframeSrc(html: string, pluginId: string): string {
     : `${tag}${injected}`;
 
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(injected);
-}
-
-/** HTML 属性值转义（双引号内容），仅处理最低必要字符避免 XSS / 解析断裂 */
-function escapeAttr(s: string): string {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-/**
- * CSS 属性值转义：在 `:root{--x:<value>}` 中注入时，防止
- *   - `;}` 闭合注入
- *   - 换行/回车导致 CSS 解析断开
- *   - 反斜杠破坏后续声明
- * 合法值本身（#rrggbb、rgba(...)、url("...") 等）经过此函数后保持语义不变，
- * 因为只对真正的 CSS 控制字符做转义。
- */
-function escapeCssValue(s: string): string {
-  return String(s)
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\A ')
-    .replace(/\r/g, '\\D ')
-    .replace(/"/g, '\\"')
-    .replace(/'/g, "\\'")
-    .replace(/;/g, '\\;')
-    .replace(/}/g, '\\}');
 }
