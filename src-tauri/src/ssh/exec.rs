@@ -397,7 +397,15 @@ mod tests {
         // ③ 前缀应该恰好由 66 个完整的「中」字组成（198B），不能出现乱码或替换字符
         let prefix: Vec<&str> = out.splitn(2, "...(+").collect();
         assert_eq!(prefix.len(), 2);
-        assert_eq!(prefix[0].chars().count(), 66, "前缀 chars 数应恰为 66 个完整中文字符");
-        assert!(prefix[0].chars().all(|c| c == '中'), "前缀字符应全部为「中」，实际前缀={}", prefix[0]);
+        assert_eq!(
+            prefix[0].chars().count(),
+            66,
+            "前缀 chars 数应恰为 66 个完整中文字符"
+        );
+        assert!(
+            prefix[0].chars().all(|c| c == '中'),
+            "前缀字符应全部为「中」，实际前缀={}",
+            prefix[0]
+        );
     }
 }

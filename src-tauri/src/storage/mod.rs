@@ -52,18 +52,34 @@ pub fn new_state() -> StorageState {
 // 后续无 await，async 仅为把命令放到线程池执行。
 
 #[tauri::command]
-pub async fn list_hosts(state: State<'_, StorageState>) -> Result<Vec<HostConfig>, String> {
+pub async fn list_hosts(
+    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
+) -> Result<Vec<HostConfig>, String> {
     let base_dir = state.base_dir().to_path_buf();
-    hosts::list_hosts(&base_dir).map_err(|e| e.to_string())
+    hosts::list_hosts(&base_dir).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(&app, LogLevel::Error, &format!("list_hosts 失败: {}", msg));
+        msg
+    })
 }
 
 #[tauri::command]
 pub async fn get_host(
     id: String,
     state: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<Option<HostConfig>, String> {
     let base_dir = state.base_dir().to_path_buf();
-    hosts::get_host(&base_dir, &id).map_err(|e| e.to_string())
+    hosts::get_host(&base_dir, &id).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("get_host 失败: id={} - {}", id, msg),
+        );
+        msg
+    })
 }
 
 /// 仅保存非敏感配置；敏感凭据请使用 `save_credential`。
@@ -230,10 +246,22 @@ pub async fn get_path_cache(
     host_id: String,
     tab_id: String,
     state: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<Option<String>, String> {
     let base_dir = state.base_dir().to_path_buf();
     let key = resolve_cache_key(&base_dir, &host_id);
-    path_cache::get_path(&base_dir, &key, &tab_id).map_err(|e| e.to_string())
+    path_cache::get_path(&base_dir, &key, &tab_id).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "get_path_cache 失败: host_id={} tab_id={} - {}",
+                host_id, tab_id, msg
+            ),
+        );
+        msg
+    })
 }
 
 #[tauri::command]
@@ -262,9 +290,21 @@ pub async fn set_path_cache(
 
 /// 读取设置。键不存在时返回该键的默认值（无默认值则为空字符串）。
 #[tauri::command]
-pub async fn get_setting(key: String, state: State<'_, StorageState>) -> Result<String, String> {
+pub async fn get_setting(
+    key: String,
+    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
     let base_dir = state.base_dir().to_path_buf();
-    settings::get_setting(&base_dir, &key).map_err(|e| e.to_string())
+    settings::get_setting(&base_dir, &key).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("get_setting 失败: key={} - {}", key, msg),
+        );
+        msg
+    })
 }
 
 #[tauri::command]
@@ -291,22 +331,57 @@ pub async fn set_setting(
 #[tauri::command]
 pub async fn list_categories(
     state: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<CategoryConfig>, String> {
     let base_dir = state.base_dir().to_path_buf();
-    categories::list_categories(&base_dir).map_err(|e| e.to_string())
+    categories::list_categories(&base_dir).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("list_categories 失败: {}", msg),
+        );
+        msg
+    })
 }
 
 #[tauri::command]
 pub async fn save_category(
     cat: CategoryConfig,
     state: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
-    categories::save_category(&base_dir, cat).map_err(|e| e.to_string())
+    let cat_id = cat.id.clone();
+    let cat_name = cat.name.clone();
+    categories::save_category(&base_dir, cat).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "save_category 失败: id={} name={} - {}",
+                cat_id, cat_name, msg
+            ),
+        );
+        msg
+    })
 }
 
 #[tauri::command]
-pub async fn delete_category(id: String, state: State<'_, StorageState>) -> Result<(), String> {
+pub async fn delete_category(
+    id: String,
+    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     let base_dir = state.base_dir().to_path_buf();
-    categories::delete_category(&base_dir, &id).map_err(|e| e.to_string())
+    categories::delete_category(&base_dir, &id).map_err(|e| {
+        let msg = e.to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("delete_category 失败: id={} - {}", id, msg),
+        );
+        msg
+    })
 }

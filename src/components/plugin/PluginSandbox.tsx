@@ -3,7 +3,7 @@ import type { PluginManifest, RDContext, RdEventMap } from '../../types/plugin';
 import { kernelEventBus } from '../../utils/eventBus';
 import { usePluginStore } from '../../store/pluginStore';
 import { usePluginUiStore } from '../../store/pluginUiStore';
-import { logInfo } from '../../utils/log';
+import { logInfo, logWarn, logError } from '../../utils/log';
 
 type ForwarderFn = (...args: unknown[]) => void;
 
@@ -361,12 +361,14 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
             }
             // 检查上次 pong 是否超过 5s
             if (Date.now() - lastPongRef.current > 5_000) {
+              const msg = `插件疑似卡死（5s 无 pong），已自动停止`;
               console.warn(
                 `[PluginSandbox] 插件 ${pluginId} 疑似卡死（5s 无 pong），自动禁用`,
               );
               usePluginUiStore
                 .getState()
-                .addLog(pluginId, 'error', '插件疑似卡死，已自动停止');
+                .addLog(pluginId, 'error', msg);
+              logError(`[Plugin:${pluginId}] ${msg}`);
               usePluginStore
                 .getState()
                 .togglePlugin(pluginId, false)
@@ -392,16 +394,14 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
             if (!perf.memory) return; // 非 Chrome 环境降级
             const usedMB = perf.memory.usedJSHeapSize / 1024 / 1024;
             if (usedMB > 200) {
+              const memMsg = `内存超限: ${usedMB.toFixed(1)}MB，已自动停止`;
               console.warn(
                 `[PluginSandbox] 插件 ${pluginId} 内存超限: ${usedMB.toFixed(1)}MB`,
               );
               usePluginUiStore
                 .getState()
-                .addLog(
-                  pluginId,
-                  'error',
-                  `内存超限: ${usedMB.toFixed(1)}MB，已自动停止`,
-                );
+                .addLog(pluginId, 'error', memMsg);
+              logError(`[Plugin:${pluginId}] ${memMsg}`);
               usePluginStore
                 .getState()
                 .togglePlugin(pluginId, false)
@@ -435,10 +435,13 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         const col = Number(data.col || 0);
         const stack = String(data.stack || '');
         const ts = Date.now();
-        usePluginUiStore.getState().addLog(pluginId, 'error',
+        const panelMsg =
           `插件${kind === 'unhandledrejection' ? '未捕获 Promise' : ''}错误: ${message}` +
           (src ? ` （${src}:${line}:${col}）` : line ? ` （:${line}:${col}）` : '') +
-          (stack ? '\n' + stack : ''));
+          (stack ? '\n' + stack : '');
+        usePluginUiStore.getState().addLog(pluginId, 'error', panelMsg);
+        // 同时落盘到 update.log（错误日志始终写入，不依赖调试开关）
+        logError(`[Plugin:${pluginId}] ${kind === 'unhandledrejection' ? '[unhandledrejection] ' : ''}${message}${src ? ` @ ${src}:${line}:${col}` : ''}${stack ? `\n${stack}` : ''}`);
         setPluginError({ kind, message, src, line, col, stack, ts });
         return;
       }
@@ -450,13 +453,16 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
           levelRaw === 'warn' ? 'warn' : levelRaw === 'error' ? 'error' : 'info';
         const rawLevel = String(data.rawLevel || level);
         const message = String(data.message ?? '');
+        const panelMsg =
+          rawLevel !== level ? `[console.${rawLevel}] ${message}` : message;
         usePluginUiStore
           .getState()
-          .addLog(
-            pluginId,
-            level,
-            rawLevel !== level ? `[console.${rawLevel}] ${message}` : message,
-          );
+          .addLog(pluginId, level, panelMsg);
+        // 按等级同步落盘：warn/error 始终写入 update.log；info 随调试开关控制
+        const fileMsg = `[Plugin:${pluginId}]${rawLevel !== level ? ` [console.${rawLevel}]` : ''} ${message}`;
+        if (level === 'error') logError(fileMsg);
+        else if (level === 'warn') logWarn(fileMsg);
+        else logInfo(fileMsg);
         return;
       }
 
@@ -472,6 +478,8 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
             ? `[perf:measure] ${name}: ${duration}ms （start +${startTime}ms）`
             : `[perf:mark] ${name} @ +${startTime}ms`;
         usePluginUiStore.getState().addLog(pluginId, 'info', msg);
+        // info 级别落盘（后端 DebugLogState 关时自动过滤掉）
+        logInfo(`[Plugin:${pluginId}] ${msg}`);
         return;
       }
 

@@ -10,6 +10,8 @@
 use serde::Serialize;
 use std::io::Read;
 
+use crate::{debug_log, LogLevel};
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalFileEntry {
@@ -22,12 +24,39 @@ pub struct LocalFileEntry {
 
 /// 列出本地目录下的条目，文件夹置顶，同类按名称（不区分大小写）排序。
 #[tauri::command]
-pub async fn list_local_dir(path: String) -> Result<Vec<LocalFileEntry>, String> {
+pub async fn list_local_dir(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<Vec<LocalFileEntry>, String> {
     let mut entries = Vec::new();
-    let read_dir = std::fs::read_dir(&path).map_err(|e| format!("read dir: {e}"))?;
+    let read_dir = std::fs::read_dir(&path).map_err(|e| {
+        let msg = format!("read dir: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("list_local_dir: {} path={}", msg, path),
+        );
+        msg
+    })?;
     for entry in read_dir {
-        let entry = entry.map_err(|e| format!("read entry: {e}"))?;
-        let metadata = entry.metadata().map_err(|e| format!("metadata: {e}"))?;
+        let entry = entry.map_err(|e| {
+            let msg = format!("read entry: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("list_local_dir: {} path={}", msg, path),
+            );
+            msg
+        })?;
+        let metadata = entry.metadata().map_err(|e| {
+            let msg = format!("metadata: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("list_local_dir: {} path={}", msg, path),
+            );
+            msg
+        })?;
         let name = entry.file_name().to_string_lossy().to_string();
         let modified = metadata
             .modified()
@@ -63,10 +92,14 @@ pub async fn list_local_dir(path: String) -> Result<Vec<LocalFileEntry>, String>
 
 /// 返回当前用户的 home 目录路径。
 #[tauri::command]
-pub async fn local_home_dir() -> Result<String, String> {
+pub async fn local_home_dir(app: tauri::AppHandle) -> Result<String, String> {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
-        .ok_or_else(|| "cannot determine home directory".to_string())
+        .ok_or_else(|| {
+            let msg = "cannot determine home directory".to_string();
+            debug_log(&app, LogLevel::Error, &format!("local_home_dir: {}", msg));
+            msg
+        })
 }
 
 /// 返回系统临时目录路径。
@@ -81,23 +114,59 @@ pub async fn local_temp_dir() -> Result<String, String> {
 ///  - 仅允许常规文件（拒绝目录、设备、symlink 目标是目录的情况）
 ///  - 单个文件大小上限 2 GiB（避免一次性占满内存）
 #[tauri::command]
-pub async fn read_local_file_bytes(path: String) -> Result<Vec<u8>, String> {
+pub async fn read_local_file_bytes(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
     // 先确认路径是一个常规可读文件
-    let meta = std::fs::metadata(&path).map_err(|e| format!("stat: {e}"))?;
+    let meta = std::fs::metadata(&path).map_err(|e| {
+        let msg = format!("stat: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_bytes: {} path={}", msg, path),
+        );
+        msg
+    })?;
     if !meta.is_file() {
-        return Err("not a regular file".to_string());
+        let msg = "not a regular file".to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_bytes: {} path={}", msg, path),
+        );
+        return Err(msg);
     }
     let size = meta.len();
     const MAX: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB 单次读取上限
     if size > MAX {
-        return Err(format!(
+        let msg = format!(
             "file too large ({} bytes) to read at once, max is 2 GiB",
             size
-        ));
+        );
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_bytes: {} path={}", msg, path),
+        );
+        return Err(msg);
     }
-    let mut f = std::fs::File::open(&path).map_err(|e| format!("open: {e}"))?;
+    let mut f = std::fs::File::open(&path).map_err(|e| {
+        let msg = format!("open: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_bytes: {} path={}", msg, path),
+        );
+        msg
+    })?;
     let mut buf = Vec::with_capacity(size as usize);
-    f.read_to_end(&mut buf).map_err(|e| format!("read: {e}"))?;
+    f.read_to_end(&mut buf).map_err(|e| {
+        let msg = format!("read: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_bytes: {} path={} size={}", msg, path, size),
+        );
+        msg
+    })?;
     Ok(buf)
 }
 
@@ -108,15 +177,30 @@ pub async fn read_local_file_bytes(path: String) -> Result<Vec<u8>, String> {
 /// 前端通过 `invoke<ArrayBuffer>` 接收，无需逐字节拷贝。
 #[tauri::command]
 pub async fn read_local_file_chunk(
+    app: tauri::AppHandle,
     path: String,
     offset: u64,
     length: u64,
 ) -> Result<tauri::ipc::Response, String> {
     use std::io::{Read, Seek, SeekFrom};
 
-    let meta = std::fs::metadata(&path).map_err(|e| format!("stat: {e}"))?;
+    let meta = std::fs::metadata(&path).map_err(|e| {
+        let msg = format!("stat: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_chunk: {} path={}", msg, path),
+        );
+        msg
+    })?;
     if !meta.is_file() {
-        return Err("not a regular file".to_string());
+        let msg = "not a regular file".to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_chunk: {} path={}", msg, path),
+        );
+        return Err(msg);
     }
     let file_size = meta.len();
     if offset >= file_size {
@@ -125,16 +209,45 @@ pub async fn read_local_file_chunk(
     }
     let actual_len = length.min(file_size - offset);
 
-    let mut f = std::fs::File::open(&path).map_err(|e| format!("open: {e}"))?;
-    f.seek(SeekFrom::Start(offset))
-        .map_err(|e| format!("seek: {e}"))?;
+    let mut f = std::fs::File::open(&path).map_err(|e| {
+        let msg = format!("open: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("read_local_file_chunk: {} path={}", msg, path),
+        );
+        msg
+    })?;
+    f.seek(SeekFrom::Start(offset)).map_err(|e| {
+        let msg = format!("seek: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "read_local_file_chunk: {} path={} offset={}",
+                msg, path, offset
+            ),
+        );
+        msg
+    })?;
 
     let mut buf = vec![0u8; actual_len as usize];
     let mut read = 0u64;
     while read < actual_len {
         let n = f
             .read(&mut buf[read as usize..(actual_len as usize)])
-            .map_err(|e| format!("read: {e}"))?;
+            .map_err(|e| {
+                let msg = format!("read: {e}");
+                debug_log(
+                    &app,
+                    LogLevel::Error,
+                    &format!(
+                        "read_local_file_chunk: {} path={} offset={} read_already={}",
+                        msg, path, offset, read
+                    ),
+                );
+                msg
+            })?;
         if n == 0 {
             break; // EOF 提前
         }
@@ -156,6 +269,7 @@ pub struct CompressResult {
 /// 调用系统 tar 命令（Windows 10+、macOS、Linux 均自带）。
 #[tauri::command]
 pub async fn compress_local_dir(
+    app: tauri::AppHandle,
     dir_path: String,
     dir_name: String,
 ) -> Result<CompressResult, String> {
@@ -168,18 +282,56 @@ pub async fn compress_local_dir(
     let output_path = temp_dir.join(format!("rd_transfer_{}_{}.tar.gz", timestamp, safe_name));
     let output_str = output_path.to_string_lossy().to_string();
 
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "compress_local_dir 开始: dir_path={} dir_name={} -> output={}",
+            dir_path, dir_name, output_str
+        ),
+    );
+
     let output = std::process::Command::new("tar")
         .args(["-czf", &output_str, "-C", &dir_path, &dir_name])
         .output()
-        .map_err(|e| format!("Failed to run tar: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("Failed to run tar: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!(
+                    "compress_local_dir: {} dir_path={} dir_name={}",
+                    msg, dir_path, dir_name
+                ),
+            );
+            msg
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("tar compress failed: {stderr}"));
+        let msg = format!("tar compress failed: {stderr}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "compress_local_dir: {} dir_path={} dir_name={}",
+                msg, dir_path, dir_name
+            ),
+        );
+        return Err(msg);
     }
 
     let size = std::fs::metadata(&output_path)
         .map(|m| m.len())
         .unwrap_or(0);
+
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "compress_local_dir 完成: dir_path={} dir_name={} output={} size={}B",
+            dir_path, dir_name, output_str, size
+        ),
+    );
 
     Ok(CompressResult {
         path: output_str,
@@ -189,36 +341,128 @@ pub async fn compress_local_dir(
 
 /// 解压本地 tar.gz 文件到指定目录。
 #[tauri::command]
-pub async fn extract_local_archive(archive_path: String, dest_dir: String) -> Result<(), String> {
+pub async fn extract_local_archive(
+    app: tauri::AppHandle,
+    archive_path: String,
+    dest_dir: String,
+) -> Result<(), String> {
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "extract_local_archive 开始: archive={} dest={}",
+            archive_path, dest_dir
+        ),
+    );
+
     // 确保目标目录存在
-    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create dest dir: {e}"))?;
+    std::fs::create_dir_all(&dest_dir).map_err(|e| {
+        let msg = format!("create dest dir: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "extract_local_archive: {} archive={} dest={}",
+                msg, archive_path, dest_dir
+            ),
+        );
+        msg
+    })?;
 
     let output = std::process::Command::new("tar")
         .args(["-xzf", &archive_path, "-C", &dest_dir])
         .output()
-        .map_err(|e| format!("Failed to run tar: {e}"))?;
+        .map_err(|e| {
+            let msg = format!("Failed to run tar: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!(
+                    "extract_local_archive: {} archive={} dest={}",
+                    msg, archive_path, dest_dir
+                ),
+            );
+            msg
+        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("tar extract failed: {stderr}"));
+        let msg = format!("tar extract failed: {stderr}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "extract_local_archive: {} archive={} dest={}",
+                msg, archive_path, dest_dir
+            ),
+        );
+        return Err(msg);
     }
+
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "extract_local_archive 完成: archive={} dest={}",
+            archive_path, dest_dir
+        ),
+    );
     Ok(())
 }
 
 /// 删除本地文件或目录（用于清理临时压缩包）。
 #[tauri::command]
-pub async fn delete_local_path(path: String) -> Result<(), String> {
-    let meta = std::fs::metadata(&path).map_err(|e| format!("stat: {e}"))?;
+pub async fn delete_local_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let meta = std::fs::metadata(&path).map_err(|e| {
+        let msg = format!("stat: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("delete_local_path: {} path={}", msg, path),
+        );
+        msg
+    })?;
     if meta.is_dir() {
-        std::fs::remove_dir_all(&path).map_err(|e| format!("remove dir: {e}"))?;
+        std::fs::remove_dir_all(&path).map_err(|e| {
+            let msg = format!("remove dir: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("delete_local_path: {} path={}", msg, path),
+            );
+            msg
+        })?;
     } else {
-        std::fs::remove_file(&path).map_err(|e| format!("remove file: {e}"))?;
+        std::fs::remove_file(&path).map_err(|e| {
+            let msg = format!("remove file: {e}");
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("delete_local_path: {} path={}", msg, path),
+            );
+            msg
+        })?;
     }
     Ok(())
 }
 
 /// 重命名/移动本地文件或目录。
 #[tauri::command]
-pub async fn rename_local_path(old_path: String, new_path: String) -> Result<(), String> {
-    std::fs::rename(&old_path, &new_path).map_err(|e| format!("rename: {e}"))?;
+pub async fn rename_local_path(
+    app: tauri::AppHandle,
+    old_path: String,
+    new_path: String,
+) -> Result<(), String> {
+    std::fs::rename(&old_path, &new_path).map_err(|e| {
+        let msg = format!("rename: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "rename_local_path: {} old={} new={}",
+                msg, old_path, new_path
+            ),
+        );
+        msg
+    })?;
     Ok(())
 }

@@ -153,11 +153,7 @@ pub fn start_watching(app: &AppHandle, dirs: &[PathBuf]) {
             // 对每个有效目录做递归监听；同一个 watcher 可以 watch 多个目录
             for dir in &valid_dirs {
                 if let Err(e) = w.watch(dir, RecursiveMode::Recursive) {
-                    eprintln!(
-                        "[hot_reload] 监听目录 {} 失败: {}",
-                        dir.display(),
-                        e
-                    );
+                    eprintln!("[hot_reload] 监听目录 {} 失败: {}", dir.display(), e);
                 }
             }
 

@@ -440,7 +440,23 @@ pub fn plugin_assert_perm(
 ) -> Result<(), String> {
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
     let granted = resolve_granted_permissions(&dir, &id);
-    permissions::assert_perm(&granted, &perm)
+    match permissions::assert_perm(&granted, &perm) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            debug_log(
+                &app,
+                LogLevel::Warn,
+                &format!(
+                    "plugin_assert_perm 被拒: plugin={} perm={} granted=[{}] err={}",
+                    id,
+                    perm,
+                    granted.join(","),
+                    e
+                ),
+            );
+            Err(e)
+        }
+    }
 }
 
 /// 返回所有权限的元数据（id / risk / description），供前端渲染权限列表。
@@ -644,12 +660,9 @@ pub fn plugin_ensure_builtin(
                 "{}@{}._backup_{}",
                 p.manifest.id, p.manifest.version, ts
             ));
-            let store_item_snapshot: Option<PluginStoreItem> =
-                load_store(&app_dir)
-                    .ok()
-                    .and_then(|items| {
-                        items.into_iter().find(|s| s.id == BUILTIN_PLUGIN_ID)
-                    });
+            let store_item_snapshot: Option<PluginStoreItem> = load_store(&app_dir)
+                .ok()
+                .and_then(|items| items.into_iter().find(|s| s.id == BUILTIN_PLUGIN_ID));
             if dir.exists() {
                 std::fs::rename(&dir, &backup_dir).map_err(|e| {
                     format!(
@@ -710,10 +723,7 @@ pub fn plugin_ensure_builtin(
             debug_log(
                 app,
                 LogLevel::Error,
-                &format!(
-                    "内置插件安装失败，正在回滚到上一可用版本: {}",
-                    e
-                ),
+                &format!("内置插件安装失败，正在回滚到上一可用版本: {}", e),
             );
             if let Err(rb) = bk.restore(&app_dir) {
                 debug_log(app, LogLevel::Error, &format!("内置插件回滚失败: {}", rb));
@@ -809,33 +819,76 @@ pub fn plugin_storage_set(
     v: serde_json::Value,
 ) -> Result<(), String> {
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
-    validate_plugin_id(&pid)?;
+    validate_plugin_id(&pid).map_err(|e| {
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_storage_set: 非法插件ID pid={} err={}", pid, e),
+        );
+        e
+    })?;
     if k.contains("..") || k.contains('/') || k.contains('\\') {
-        return Err("INVALID_KEY".to_string());
+        let e = "INVALID_KEY".to_string();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_storage_set: 非法 key pid={} key={}", pid, k),
+        );
+        return Err(e);
     }
     // ① value 级配额：单个 value 序列化字节 ≤ 256KB
-    let value_bytes = serde_json::to_vec(&v)
-        .map_err(|e| format!("序列化存储值失败: {}", e))?;
+    let value_bytes = serde_json::to_vec(&v).map_err(|e| {
+        let msg = format!("序列化存储值失败: {}", e);
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_storage_set: {} pid={} key={}", msg, pid, k),
+        );
+        msg
+    })?;
     if value_bytes.len() > PLUGIN_STORAGE_MAX_VALUE_BYTES {
-        return Err(format!(
+        let msg = format!(
             "STORAGE_VALUE_TOO_LARGE: key={} size={}B max={}B",
             k,
             value_bytes.len(),
             PLUGIN_STORAGE_MAX_VALUE_BYTES
-        ));
+        );
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_storage_set: {} pid={}", msg, pid),
+        );
+        return Err(msg);
     }
     let data_dir = plugin_data_dir(&dir, &pid)?;
     let mut map = load_store_json(&data_dir);
+    let key = k.clone();
     map.insert(k, v);
     // ② total 级配额：整份 store.json ≤ 8MB（含所有 key）
     let total = store_json_size(&map) as u64;
     if total > PLUGIN_STORAGE_MAX_TOTAL_BYTES {
-        return Err(format!(
+        let msg = format!(
             "STORAGE_QUOTA_EXCEEDED: plugin={} total={}B max={}B",
             pid, total, PLUGIN_STORAGE_MAX_TOTAL_BYTES
-        ));
+        );
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_storage_set: {}", msg),
+        );
+        return Err(msg);
     }
-    save_store_json(&data_dir, &map)
+    save_store_json(&data_dir, &map).map_err(|e| {
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "plugin_storage_set: 写入失败 pid={} key={} err={}",
+                pid, key, e
+            ),
+        );
+        e
+    })
 }
 
 #[tauri::command]
@@ -911,11 +964,16 @@ pub fn plugin_storage_list_files(
                 if let Ok(md) = entry_path.metadata() {
                     let size = md.len();
                     if size > PLUGIN_STORAGE_MAX_FILE_BYTES {
-                        eprintln!(
-                            "[plugin_storage] 文件超过单文件配额: {} size={}B max={}B",
-                            entry_path.display(),
-                            size,
-                            PLUGIN_STORAGE_MAX_FILE_BYTES
+                        debug_log(
+                            &app,
+                            LogLevel::Warn,
+                            &format!(
+                                "plugin_storage_list_files: 文件超过单文件配额 plugin={} file={} size={}B max={}B",
+                                pid,
+                                entry_path.display(),
+                                size,
+                                PLUGIN_STORAGE_MAX_FILE_BYTES
+                            ),
                         );
                     }
                 }
@@ -999,32 +1057,83 @@ pub async fn plugin_http_request(
 ) -> Result<HttpResponseDto, String> {
     let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
     let granted = resolve_granted_permissions(&dir, &id);
-    permissions::assert_perm(&granted, "network.http")?;
+    permissions::assert_perm(&granted, "network.http").map_err(|e| {
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!(
+                "plugin_http_request 权限被拒: plugin={} url={} err={}",
+                id, url, e
+            ),
+        );
+        e
+    })?;
 
-    let parsed = reqwest::Url::parse(&url).map_err(|e| format!("URL_INVALID: {}", e))?;
+    let parsed = reqwest::Url::parse(&url).map_err(|e| {
+        let msg = format!("URL_INVALID: {}", e);
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_http_request: plugin={} {} url={}", id, msg, url),
+        );
+        msg
+    })?;
     let scheme = parsed.scheme();
     if scheme != "http" && scheme != "https" {
-        return Err("URL_INVALID: only http/https allowed".into());
+        let e: String = "URL_INVALID: only http/https allowed".into();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_http_request: plugin={} {} url={}", id, e, url),
+        );
+        return Err(e);
     }
     let host = parsed.host_str().unwrap_or("").to_string();
     if host.is_empty() {
-        return Err("URL_INVALID: missing host".into());
+        let e: String = "URL_INVALID: missing host".into();
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!("plugin_http_request: plugin={} {} url={}", id, e, url),
+        );
+        return Err(e);
     }
 
     let allow_internal_net = allow_internal.unwrap_or(false);
     if !allow_internal_net && is_private_host(&host) {
-        return Err("NETWORK_FORBIDDEN: internal network access blocked by global switch".into());
+        let e: String =
+            "NETWORK_FORBIDDEN: internal network access blocked by global switch".into();
+        debug_log(
+            &app,
+            LogLevel::Warn,
+            &format!(
+                "plugin_http_request: plugin={} {} host={} url={}",
+                id, e, host, url
+            ),
+        );
+        return Err(e);
     }
 
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(15_000));
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| format!("HTTP_CLIENT_ERROR: {}", e))?;
-
     let method_str = method
         .unwrap_or_else(|| "GET".to_string())
         .to_ascii_uppercase();
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| {
+            let msg = format!("HTTP_CLIENT_ERROR: {}", e);
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!(
+                    "plugin_http_request: plugin={} {} method={} url={}",
+                    id, msg, method_str, url
+                ),
+            );
+            msg
+        })?;
+
     let req_method: reqwest::Method = match method_str.as_str() {
         "GET" => reqwest::Method::GET,
         "POST" => reqwest::Method::POST,
@@ -1033,8 +1142,29 @@ pub async fn plugin_http_request(
         "PATCH" => reqwest::Method::PATCH,
         "HEAD" => reqwest::Method::HEAD,
         "OPTIONS" => reqwest::Method::OPTIONS,
-        other => return Err(format!("HTTP_METHOD_INVALID: {}", other)),
+        other => {
+            let e = format!("HTTP_METHOD_INVALID: {}", other);
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("plugin_http_request: plugin={} {} url={}", id, e, url),
+            );
+            return Err(e);
+        }
     };
+
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "plugin_http_request 发起: plugin={} method={} url={} timeout={}ms allow_internal={}",
+            id,
+            method_str,
+            url,
+            timeout.as_millis(),
+            allow_internal_net
+        ),
+    );
 
     let mut req = client.request(req_method, parsed);
     if let Some(hs) = headers {
@@ -1046,10 +1176,18 @@ pub async fn plugin_http_request(
         req = req.body(b);
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("HTTP_REQUEST_FAILED: {}", e))?;
+    let resp = req.send().await.map_err(|e| {
+        let msg = format!("HTTP_REQUEST_FAILED: {}", e);
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "plugin_http_request: plugin={} {} method={} url={}",
+                id, msg, method_str, url
+            ),
+        );
+        msg
+    })?;
 
     let status = resp.status();
     let mut header_map = std::collections::HashMap::new();
@@ -1063,14 +1201,39 @@ pub async fn plugin_http_request(
             .or_insert(v_str);
     }
 
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("HTTP_BODY_READ_FAILED: {}", e))?;
+    let bytes = resp.bytes().await.map_err(|e| {
+        let msg = format!("HTTP_BODY_READ_FAILED: {}", e);
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "plugin_http_request: plugin={} {} status={} url={}",
+                id, msg, status, url
+            ),
+        );
+        msg
+    })?;
     let body_val: serde_json::Value = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
         Err(_) => serde_json::Value::String(String::from_utf8_lossy(&bytes).to_string()),
     };
+
+    debug_log(
+        &app,
+        if status.is_success() {
+            LogLevel::Info
+        } else {
+            LogLevel::Warn
+        },
+        &format!(
+            "plugin_http_request 完成: plugin={} method={} url={} status={} body_bytes={}",
+            id,
+            method_str,
+            url,
+            status,
+            bytes.len()
+        ),
+    );
 
     Ok(HttpResponseDto {
         status: status.as_u16(),
@@ -1111,10 +1274,10 @@ mod tests {
     #[test]
     fn test_validate_plugin_id_rejects_path_traversal() {
         let cases = [
-            "foo/../bar",        // Unix 风格上跳
-            "..",                // 纯上跳
-            "prefix..suffix",    // 中间含 ..（Windows 也能被误用）
-            "foo\\..\\bar",      // Windows 风格上跳
+            "foo/../bar",     // Unix 风格上跳
+            "..",             // 纯上跳
+            "prefix..suffix", // 中间含 ..（Windows 也能被误用）
+            "foo\\..\\bar",   // Windows 风格上跳
         ];
         for c in cases.iter() {
             assert!(
@@ -1128,10 +1291,10 @@ mod tests {
     #[test]
     fn test_validate_plugin_id_rejects_path_separators() {
         let cases = [
-            "a/b",               // Unix 分隔符
-            "a\\b\\c",           // Windows 分隔符
-            "/absolute",         // 根路径起点
-            "\\\\unc\\share",    // UNC 前缀片段
+            "a/b",            // Unix 分隔符
+            "a\\b\\c",        // Windows 分隔符
+            "/absolute",      // 根路径起点
+            "\\\\unc\\share", // UNC 前缀片段
         ];
         for c in cases.iter() {
             assert!(
@@ -1146,9 +1309,9 @@ mod tests {
     fn test_validate_plugin_id_rejects_colon() {
         // NTFS 冒号 = ADS（备用数据流），会导致 CreateDirectory 报 ERROR_INVALID_NAME (123)
         let cases = [
-            "C:plugin",          // 盘符式
-            "stream:data",       // ADS 式
-            "plugin:v1",         // 版本号误用
+            "C:plugin",    // 盘符式
+            "stream:data", // ADS 式
+            "plugin:v1",   // 版本号误用
         ];
         for c in cases.iter() {
             assert!(
