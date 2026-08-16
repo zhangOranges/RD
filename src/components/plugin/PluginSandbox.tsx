@@ -673,11 +673,11 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
                 if (!old || !old.parentElement) return;
                 const newIf = document.createElement('iframe');
                 newIf.src = src;
-                // 与 <iframe sandbox="..."> 属性保持一致：allow-same-origin 审计结论保持不启用
-                // 见下方 sandbox 属性注释详情。
+                // 与 <iframe sandbox="..."> 属性保持一致
                 newIf.sandbox.add('allow-scripts');
                 newIf.sandbox.add('allow-popups');
                 newIf.sandbox.add('allow-downloads');
+                newIf.sandbox.add('allow-same-origin');
                 newIf.setAttribute('title', `plugin-${pluginId}`);
                 newIf.style.width = '100%';
                 newIf.style.height = '100%';
@@ -707,24 +707,20 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         ref={iframeRef}
         title={`plugin-${pluginId}`}
         src={src}
-        // [P0-1 allow-same-origin 审计结论：保持「不加 allow-same-origin」]
+        // [allow-same-origin 审计补充]
         //
-        //  1) 当前 src 是 data:text/html;charset=utf-8,...（见 buildPluginIframeSrc），
-        //     本身就是 opaque unique origin；即便设置 allow-same-origin，data URL
-        //     在 HTML 规范里仍然是 opaque，加了也没有实际收益。
-        //  2) 如果未来切到 file:/// 或 http(s)://<host>/ 方案作为插件加载源：
-        //     - 不带 allow-same-origin → iframe 依然是 opaque origin，无法
-        //       直接访问主程序同源的 localStorage / cookie / indexedDB，也
-        //       无法发起带凭据的 fetch（主程序数据完全由 postMessage / SDK
-        //       显式暴露，最小权限）；
-        //     - 加上 allow-same-origin → file:// 场景下多插件 iframe 与主
-        //       程序很可能被浏览器视为「同源」，任何插件被攻破即可直接读写
-        //       主程序全部本地存储；http(s) 场景下同源策略大幅放宽。
-        //  3) 综合风险面：保持 allow-same-origin 不启用，是目前最保守、安全
-        //     的默认配置。如某一天确实需要它（例如共享 SharedWorker 或直读
-        //     主程序 CSS 变量的样式计算），必须先做安全审查，并同步收紧
-        //     SDK 暴露面 + 主程序 webPreferences 隔离策略。
-        sandbox="allow-scripts allow-popups allow-downloads"
+        //  当前 src 是 data:text/html;charset=utf-8,...（见 buildPluginIframeSrc），
+        //  data URL 在 HTML 规范里始终是 opaque origin，加 allow-same-origin
+        //  不会让插件 iframe 本身获得任何真实 origin，无法访问主程序的
+        //  localStorage / cookie / indexedDB。
+        //
+        //  但允许插件内嵌套的外部网页（<iframe src="http://...">）保留自身
+        //  origin，使 localStorage / cookie / indexedDB 正常工作。这是嵌入
+        //  第三方 Web 应用（如监控面板、管理后台）的必要条件。
+        //
+        //  安全性：嵌套 iframe 的 origin 与主程序不同，受同源策略保护，无法
+        //  跨域访问主程序资源。若未来切到 file:/// 加载方案需重新评估。
+        sandbox="allow-scripts allow-popups allow-downloads allow-same-origin"
         style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
       />
     </div>
