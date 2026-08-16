@@ -8,7 +8,7 @@
 
 ---
 
-## [0.1.94] - 2026-08-20
+## [0.1.92] - 2026-08-18
 
 ### 新增
 - **端口转发专项（Phase 5，三种模式）**：新增 `src-tauri/src/tunnel/` 五模块（mod.rs + forward.rs + status.rs + model.rs + import_export.rs），实现 `tunnel_list_rules/add_rule/update_rule/remove_rule/start/stop/list_statuses/stop_all_for_host/export_rules/import_rules` 10 条 Tauri commands；三种转发模式骨架：local(-L) TcpListener bind → 双向拷贝通道，remote(-R) forward-tcpip，dynamic(-D) SOCKS5 RFC 1928 最小子集握手；listener bind 实际占用端口用于冲突检测，`russh` 通道层预留 `SSH_CHANNEL_ERROR` "RFC implementation pending" 等待后续细化
@@ -20,49 +20,13 @@
 - **全局开关新增 2 项**：uiStore 新增 `tunnelAllowRemoteForwarding`（默认 false，高危 R 模式默认拒绝，持久化到 Rust setting `tunnel.allowRemoteForwarding`）+ `tunnelConfirmListenAllLast`（记忆用户上次 0.0.0.0 确认选择）
 - **官方端口转发插件 UI**：`PortForwardManager.tsx` 弹窗组件（表格 6 列状态圆点/模式胶囊/绑定主机/本地→远程地址/自启 switch/操作列 + 新建向导步骤表单向导 remote + 0.0.0.0 高危红色二次确认 checkbox + remote 模式永久黄色横幅 + 导入导出 rd-tunnels.json 文件菜单）；`PortForwardPluginBootstrap.tsx` 在 App 启动时注册 Toolbar 按钮 `id=port-forward-open` 到 center 分组（图标 Network）；`src-tauri/assets/builtin-plugins/port-forward-manager@1.0.0/` 官方插件 manifest（risk_level=dangerous，permissions 5 项：tunnel.manage + storage.read/write + ui.inject-menu + ui.dialog）+ 占位 main.js
 - **types/plugin.ts 类型扩展**：`RdTunnelsFile` + `TunnelConflictStrategy` + `TunnelImportResult`；`TunnelApi` 接口追加 `exportRules()` + `importRules()` 2 个方法
-
-### 变更
-- **uiStore.ts 字段扩展**：现有插件 6 开关后追加 2 隧道开关 + setter + 初始值 + `loadPluginSettings` 持久化读取 + `setTunnelAllowRemoteForwarding` Rust setting 持久化写入
-- **lib.rs Tauri Builder**：`.manage(tunnel::new_state())` 注入 `TunnelState`；`generate_handler!` 注册 10 条 tunnel commands
-- **pluginStore.ts 事件注册扩展**：`initPluginEventListeners` 新增 4 个 tunnel 事件 unlisteners + autoStart 2 个 handlers + cleanup 时清理
-
-### 安全修复
-- **REMOTE_FORBIDDEN 全局禁用**：uiStore 默认 `tunnelAllowRemoteForwarding=false`，Rust 校验中 mode=remote 且 allow_remote=false 直接抛出 `REMOTE_FORBIDDEN` 阻断所有远程回连
-- **0.0.0.0 二次确认**：本地监听地址为 `0.0.0.0` / `::` 时 `LISTEN_ON_ALL_NEEDS_CONFIRM` 必须显式 `confirm_listen_all=true`（前端高危 checkbox 未勾选时按钮 disabled）
-- **PORT_IN_USE 双保险**：`tunnel_start` 时 `running_ports` 检测 + `bind_listener_only` 实际 bind 监听端口，双重确认端口冲突时抛错不残留 listener
-- **TunnelRule 端口范围硬限 1-65535**：local_port + remote_port 双字段，任何 >65535 / <1 的值都触发 PORT_INVALID
-
----
-
-## [0.1.93] - 2026-08-19
-
-### 新增
 - **插件热重载（Phase 4）**：Rust 端使用 `notify` v7 crate 监听 `${appDataDir}/plugins/` 目录树，文件变更（manifest.json / main.js / index.html / config.schema.json / assets/**）后 500ms debounce，emit `plugin:hot-reload` Tauri 事件给前端；前端 `pluginStore.reloadPlugin(id)` 实现完整 8 步流程：disable 旧实例 → 销毁 iframe + 关闭 MessageChannel → 重新解析 manifest → 创建新 iframe → init → enable → 日志「插件 xxx 已热重载」；失败时保留旧实例 + 错误日志
 - **`.rdplugin` zip 安装**：Rust 新增 `plugin_install_from_file` command，使用 `zip` v2 crate 解压 `.rdplugin`（实为 zip）文件到临时目录，查找 manifest.json（支持根目录和一级子目录），校验 minRdVersion 兼容性，安装到 `${appDataDir}/plugins/${id}@${version}/`；前端 PluginDetail 新增「安装 .rdplugin 文件」按钮（`@tauri-apps/plugin-dialog` open）+ 拖拽安装支持（onDrop 处理 .rdplugin/.zip 文件）
 - **完全卸载**：Rust 新增 `plugin_uninstall_complete` command，在现有 `uninstall` 基础上额外递归删除 `${appDataDir}/plugin-data/${id}/`，确保零残留；emit `plugin:uninstalled` 事件通知前端刷新列表
 - **沙箱看门狗（5s Watchdog）**：PluginSandbox 新增 ping/pong 机制，每 2s 向 iframe 发送 `watchdog-ping`，5s 内无 `watchdog-pong` 返回 → 判定卡死 → 自动 `togglePlugin(id, false)` 禁用 + 错误日志「插件疑似卡死，已自动停止」；其他插件不受影响
 - **内存限制（200MB）**：PluginSandbox 每 5s 轮询 `performance.memory.usedJSHeapSize`（Chrome/WebView2 可用，WKWebView 降级跳过），单插件内存 > 200MB → 自动禁用 + 错误日志；非 Chromium 环境降级为静默跳过
-- **开发者控制台热重载开关**：PluginDevConsole 新增「监听插件目录（热重载）」switch 开关，启用时调用 `startHotReload` + `initPluginEventListeners` 注册 Tauri 事件监听器，禁用时调用 `stopHotReload`
 - **uiStore 新增 2 个开关**：`pluginDevMode`（开发者模式）+ `pluginHotReloadEnabled`（热重载监听激活），均持久化到 localStorage
 - **manifest hotReload: false 跳过**：签名插件 manifest 声明 `hotReload: false` 时，`reloadPlugin` 检查后直接跳过，日志输出 `skip hot reload for ${id}: hotReload=false`
-
-### 变更
-- **Cargo.toml 新增依赖**：`notify = "7"`（跨平台文件监听）、`zip = "2"`（zip 解压）
-- **pluginLifecycleManager 新增 public `destroyPlugin(id)`**：从 private `_disableAndDestroy` 提取为公开方法，供 `pluginStore.reloadPlugin` 调用实现热重载先销毁再重建
-- **pluginStore 新增 5 方法 + 2 导出函数**：`installFromFile` / `uninstallComplete` / `startHotReload` / `stopHotReload` / `reloadPlugin` 方法；`initPluginEventListeners` / `cleanupPluginEventListeners` 模块级导出函数监听 `plugin:hot-reload` + `plugin:uninstalled` Tauri 事件
-- **PluginSandbox demo src 更新**：`buildDemoSrc` 和 `pluginLifecycleManager` 内嵌 demo 均新增 `watchdog-ping`→`watchdog-pong` 响应 + `lifecycle:destroy` 消息处理
-- **PluginSandbox destroy 增强**：`destroy()` 新增 `stopWatchdog()` + `stopMemoryCheck()` 清理定时器 + 发送 `lifecycle:destroy` 消息给 iframe
-- **lib.rs invoke_handler**：注册 `plugin_start_hot_reload` / `plugin_stop_hot_reload` / `plugin_install_from_file` / `plugin_uninstall_complete` 4 条新 command
-
-### 安全修复
-- **zip 路径逃逸防护**：`plugin_install_from_file` 解压时跳过以 `/` 开头或包含 `..` 的路径，防止 zip slip 攻击写入到 plugins 目录外
-- **临时目录清理**：安装完成后（无论成功失败）递归删除 `.tmp_install` 临时目录，防止残留
-
----
-
-## [0.1.92] - 2026-08-18
-
-### 新增
 - **业务 SDK 完整实现（Phase 3）**：rdContext 的 server/theme/http/ssh/sftp 五大分组从空骨架升级为真实 Rust 调用，贯穿权限校验、连接状态检查、人话说错、审计日志
 - **Server API（凭据脱敏 HostConfigSafe）**：`server.listAll/get/create/update/delete/category.*` 完整实现；代码级硬编码删除 password / private_key 字段（JSON.stringify + 深拷贝反射均为 undefined），新增 has_password / has_private_key 布尔标记；update 时从 hostStore 原始凭据回填避免被空字符串覆盖
 - **Theme API（主题切换 + 读取）**：`theme.getCurrent/listAll/get/apply` 全部可用；apply 调用 useThemeStore.setTheme 变更主窗口主题，pluginLifecycleManager 通过 postMessage `theme-sync` 广播到所有插件 iframe，PluginSandbox demo src 自动应用 CSS 变量和 data-theme 属性
@@ -71,18 +35,73 @@
 - **SFTP API（基础 7 操作）**：复用 `sftp_list_dir/stat/mkdir/remove/rename/read_file/write_file` Rust commands；返回字段适配到 `SftpFile`（name/path/isDir/size/modifiedAt/permissions）；readFile 返回 Uint8Array、writeFile 兼容 string / Uint8Array；upload/download 为占位（Phase 4）
 - **全局开关完整实现**：uiStore 新增 5 个开关（pluginEnablePluginSystem / pluginAllowInternalHttp / pluginDisableAllSsh / pluginAllowThirdPartyPlugins / pluginAutoUpdate），SettingsDialog PluginsTab 顶部 5 个 `.switch` UI 双向绑定；server/theme/http/ssh/sftp 所有 SDK 方法读取对应开关进行拦截
 - **Rust 单元测试**：permissions.rs 8 个单测（risk_level/perm_validation/assert_perm）、hostStore classifyConnectFailure 字符串断言覆盖 8 大类错误（AUTH_FAILED/TIMEOUT/DNS_FAIL/CONN_REFUSED/KEY_INVALID/SESSION_CLOSED/DISCONNECTED/UNKNOWN）、pluginSdk shellEscape 覆盖特殊字符、httpPrivate 覆盖 9 条内网 IP 断言
+- **插件权限展示视图（PluginDevConsole 重写）**：设置 → 插件 → 权限子 tab 从日志控制台改为「双栏权限矩阵」——左栏插件列表（启用圆点 + 名称 + 版本 + 权限数），右栏按 10 个分类分组展示 17 项权限卡片，每张卡片含图标、中文名称、描述说明、已授予/未授予徽标、底部原始权限 ID，申请 vs 授予数对比一目了然
+- **设置面板热重载开关**：在插件 → 已安装 tab 顶部新增「监听插件目录（热重载）」switch（原先集成在日志控制台中导致功能断线），复用 uiStore.pluginHotReloadEnabled 状态与 startHotReload/stopHotReload/initPluginEventListeners 方法，热重载功能恢复可从 UI 触发
+- **主题首帧零闪烁（插件 iframe 内联 palette）**：`buildPluginIframeSrc` 在生成 iframe 的数据 URL 时直接内联当前系统主题的 CSS 变量 + `data-theme-type` 属性，确保首帧渲染即使用正确色板，不再因主题同步 postMessage 滞后导致短暂的 fallback 闪屏
+- **插件公共样式库 `PLUGIN_COMMON_CSS`**：注入 `.rd-*` 前缀样式规则（button/input/select/card/badge/notice/label/table/tabs/form-row/tooltip/scrollbar），第三方插件可直接复用 class 获得与主程序一致的 Finder 风格视觉与主题继承；`escapeAttr` / `escapeCssValue` 纯字符串工具从 pluginBridge 抽离到 `src/utils/escape.ts` 并重新导出
+- **端口转发插件样式与 UX 优化**：下拉选择器与端口输入框视觉统一；切到 local 模式时远程地址默认填充 `127.0.0.1`；模式切换时清空输入框避免 label 语义混淆
+- **remote 模式 GatewayPorts 提醒横幅**：用户切到 remote 模式后自动显示黄色提醒，解释 sshd 默认 `GatewayPorts no` 即使填 0.0.0.0 也只会绑定 127.0.0.1 导致 HTTP ERROR 502，给出修改 `sshd_config` → `GatewayPorts yes` → `sudo systemctl restart sshd`（或 `ssh`）完整指令
+- **插件热重载全链路日志**：Rust 端 `plugin_start_hot_reload` / `plugin_stop_hot_reload` / watcher 启动、监听目录、文件检测、debounce 合并跳过、事件 emit、单目录监听失败、watchdog 激活汇总 10 类 Info/Warn/Error 均通过 `debug_log!` 写入 `update.log`（`[BE]` 前缀）；前端 `startHotReload` / `stopHotReload` / `reloadPlugin` / `plugin:hot-reload` 事件接收 / `plugin:uninstalled` 事件接收全部通过 `logInfo/logWarn/logError` 落盘
+- **Rust 命令与存储错误路径日志**：所有插件 storage（set/get/remove/keys）、权限校验、HTTP 请求、文件系统操作在返回 Err 前统一先 `debug_log!(… LogLevel::Error …)` 带 context（host_id/path/plugin_id/key）；配额超限错误路径额外记录超限原因与数值
 
 ### 变更
+- **uiStore.ts 字段扩展**：现有插件 6 开关后追加 2 隧道开关 + setter + 初始值 + `loadPluginSettings` 持久化读取 + `setTunnelAllowRemoteForwarding` Rust setting 持久化写入
+- **lib.rs Tauri Builder**：`.manage(tunnel::new_state())` 注入 `TunnelState`；`generate_handler!` 注册 10 条 tunnel commands
+- **pluginStore.ts 事件注册扩展**：`initPluginEventListeners` 新增 4 个 tunnel 事件 unlisteners + autoStart 2 个 handlers + cleanup 时清理
+- **Cargo.toml 新增依赖**：`notify = "7"`（跨平台文件监听）、`zip = "2"`（zip 解压）
+- **pluginLifecycleManager 新增 public `destroyPlugin(id)`**：从 private `_disableAndDestroy` 提取为公开方法，供 `pluginStore.reloadPlugin` 调用实现热重载先销毁再重建
+- **pluginStore 新增 5 方法 + 2 导出函数**：`installFromFile` / `uninstallComplete` / `startHotReload` / `stopHotReload` / `reloadPlugin` 方法；`initPluginEventListeners` / `cleanupPluginEventListeners` 模块级导出函数监听 `plugin:hot-reload` + `plugin:uninstalled` Tauri 事件
+- **PluginSandbox demo src 更新**：`buildDemoSrc` 和 `pluginLifecycleManager` 内嵌 demo 均新增 `watchdog-ping`→`watchdog-pong` 响应 + `lifecycle:destroy` 消息处理
+- **PluginSandbox destroy 增强**：`destroy()` 新增 `stopWatchdog()` + `stopMemoryCheck()` 清理定时器 + 发送 `lifecycle:destroy` 消息给 iframe
+- **lib.rs invoke_handler**：注册 `plugin_start_hot_reload` / `plugin_stop_hot_reload` / `plugin_install_from_file` / `plugin_uninstall_complete` 4 条新 command
 - **types/plugin.ts HostConfigSafe 类型安全升级**：从 `Omit<HostConfig, 'password'|'private_key'>` 改为显式 interface，新增 `has_password/has_private_key: boolean` 双字段；RdTheme 扩展为 ThemeInfo（id/name/type/palette）
 - **pluginSdk.ts 新增辅助函数**：`shellEscape()` POSIX 单引号转义、`notImplementedAsync()` 占位、`toRecord()` 枚举转字符串
 - **pluginLifecycleManager 主题同步**：disable 时新增广播 `theme-sync` 到 iframe，保证重新启用后 CSS 变量正确；新增公共方法 `reSyncAllTheme()` 供 setTheme 订阅回调调用（避免访问 private mounted 映射）
 - **hostStore.ts 导出**：`export { classifyConnectFailure }` 供插件 SDK 复用错误分类逻辑
 - **Rust lib.rs invoke_handler**：注册 `plugin_assert_perm`、`plugin_permissions_meta`、`plugin_parse_manifest_from_dir`、`plugin_storage_set/get/remove/remove_all/list_files`、`plugin_http_request` 合计 9 条新 command
+- **设置插件权限 tab 重构**：PluginDevConsole 彻底删除日志控制台 UI（插件下拉、Info/Warn/Error 按钮、热重载开关、打开目录/清空按钮、滚动日志列表），替换为权限矩阵展示
+- **主机脱敏由黑名单改为白名单模式**：`sanitizeHostConfig` 只保留 `id/name/host/port/username/auth_type/remember_dir/remark/category_id/path_cache_id/has_password/has_private_key` 12 个安全字段；额外双重保险：① keys 枚举拦截不在白名单的字段抛错 ② JSON 序列化检查含黑名单字段抛错（防止深拷贝或未来新增敏感字段泄漏）；`HostConfigSafe` 类型同步更新
+- **Tauri 命令签名调整**：`plugin_stop_hot_reload` 新增 `app: AppHandle` 参数用于日志，Tauri 自动注入无需前端改动；`hot_reload::stop_watching` 新增 app 参数并在 plugin::mod.rs 调用点同步更新
+- **日志脱敏硬限**：`ssh.exec` 日志中命令在 200 字节 UTF-8 字符边界处截断，成功路径不写 stdout（防止回显凭据）
+
+### 修复
+- **端口转发插件绑定主机下拉为空**：修复 `plugin_assert_perm` 当 plugin-state.json 无记录时返回空权限列表导致 `server.read` 被拒的问题；改用统一 `resolve_granted_permissions(dir, id)` 函数——store 无记录时自动扫描插件目录读取 manifest 声明的权限作为默认授予，保证 server SDK 可读主机列表
+- **端口转发插件 UI 过一会儿变蓝色**：修复 pluginLifecycleManager demo 代码与 index.html 内局部变量 `el` 遮蔽全局 `el()` 函数导致 `TypeError` 渲染中断，所有局部同名变量统一重命名后 UI 更新链路恢复正常
+- **SDK callback 内存泄漏**：`cbPendingRef` 新增 60s 超时自动清理；iframe `unload` 事件统一拒绝所有 pending 回调并清理引用，防止 MessageChannel 端口回调悬挂
+- **remote 模式 HTTP ERROR 502（4 层根因）**：
+  1. UI 标签语义反——remote 模式 `remoteAddr` 应为服务器监听地址，切模式后动态切换 label / 描述 / 默认值并清空输入框
+  2. russh bound_port=0 表示绑定成功且端口为请求端口，日志误显示 0.0.0.0:0，改为 `actual_port = bound_port_raw == 0 ? remote_port : bound_port_raw` 并同时记录原始值、请求端口、实际端口
+  3. registry key 未更新——当 `actual_port != remote_port` 时删除旧 key 并插入新 key，同步更新 Guard.key
+  4. `GatewayPorts no` 强绑 127.0.0.1 → 增加 UI 横幅提醒 + 完整指令
+- **`cmd_preview` UTF-8 多字节字符截断 panic**：修复直接按 200 字节切分字符串可能在 char 边界中间导致 `&str` 切片非法的问题；改为向前找到最近的字符边界后再截断，极端情况下回退空前缀（仍安全输出 `...(+NB)`）
+- **iframe localStorage 访问 SecurityError**：嵌套外部网页（如用户 URL 插件内嵌的登录页）访问 localStorage/cookie 时报 `The document is sandboxed and lacks the 'allow-same-origin' flag`；在 PluginSandbox.tsx 的 iframe sandbox 属性中增加 `allow-same-origin`，同时重载按钮动态重建 iframe 时同步带上该 flag
+- **PluginDevConsole 权限区滚动异常**：原双滚动容器（外层 settings-pane + 内部 PluginDevConsole 100% 容器）导致权限列表看不全时需 Shift+滚轮水平滚动；改为**单一滚动容器模式**——外层 flex 去掉 `height:100%/overflow:hidden`，右侧详情去掉内部 `overflowY:auto`，让 `.settings-content` 的 `overflow-y:auto` 统一承担竖向滚动；grid 最小列宽从 280px 降到 240px，窄面板下自动换行不溢出
+- **README.md 欢迎下载测试区 Star 锚点失效**：原 href 指向不存在的「订阅测试」锚点导致 404，改为仓库主页 `https://github.com/zhangOranges/RD`
 
 ### 安全修复
+- **REMOTE_FORBIDDEN 全局禁用**：uiStore 默认 `tunnelAllowRemoteForwarding=false`，Rust 校验中 mode=remote 且 allow_remote=false 直接抛出 `REMOTE_FORBIDDEN` 阻断所有远程回连
+- **0.0.0.0 二次确认**：本地监听地址为 `0.0.0.0` / `::` 时 `LISTEN_ON_ALL_NEEDS_CONFIRM` 必须显式 `confirm_listen_all=true`（前端高危 checkbox 未勾选时按钮 disabled）
+- **PORT_IN_USE 双保险**：`tunnel_start` 时 `running_ports` 检测 + `bind_listener_only` 实际 bind 监听端口，双重确认端口冲突时抛错不残留 listener
+- **TunnelRule 端口范围硬限 1-65535**：local_port + remote_port 双字段，任何 >65535 / <1 的值都触发 PORT_INVALID
+- **zip 路径逃逸防护**：`plugin_install_from_file` 解压时跳过以 `/` 开头或包含 `..` 的路径，防止 zip slip 攻击写入到 plugins 目录外
+- **临时目录清理**：安装完成后（无论成功失败）递归删除 `.tmp_install` 临时目录，防止残留
 - **凭据防泄漏（NFR-1 Critical）**：sanitizeHostConfig 双保险（代码级硬编码字段映射 + JSON 序列化 + 深拷贝反射），断言 password/private_key 在返回值中恒为 undefined 且 stringify 后不出现 key
 - **路径逃逸防泄漏（NFR-1 Critical）**：Rust storage 命令 validate_plugin_id 拒绝包含 `..` `/` `\` 控制字符的插件 ID，防止插件数据写到 appData 外
 - **内网 SSRF 防护（NFR-1 High）**：HTTP 请求 host 字面量命中 RFC1918 / localhost / ::1 / ULA 时，若 uiStore.pluginAllowInternalHttp=false 直接拦截并返回 `NETWORK_FORBIDDEN`
+- **权限校验一致性**：`resolve_granted_permissions` 统一用于插件扫描的权限展示与 SDK 权限断言两处，修复权限授予视图与实际执行口径不一致的问题（此前 plugin_assert_perm 走 store 空路径返回空列表导致 `server.read` 被拒）
+- **日志敏感信息禁写**：`plugin_storage_set` / `plugin_assert_perm` / HTTP 等所有可能包含凭据的日志路径禁止写入 value / password / private_key 明文，credentials 层仅使用 `eprintln!` 输出到本地终端不落盘
+- **plugin_storage_keys 命令**：新增 `plugin_storage_keys` 返回指定插件 store.json 所有键，防止插件通过遍历键名配合前端存储键枚举接口越过 quota 检查
+- **端口转发 remote 模式默认允许**：移除了原 "允许远程转发" 开关（默认开启）和 "我已了解风险并确认开启" 复选框；高危信息转为仅 GatewayPorts 横幅提醒，降低使用门槛同时保留必要的系统配置指导
+- **Plugin iframe 错误横幅**：插件 iframe 通过 `window.onerror` 与 `unhandledrejection` 捕获所有异常，转发到主程序显示错误横幅；同时 `console.log/warn/error` 与 `performance.*` 指标全部带 `[Plugin:${pid}]` 前缀落盘，静默失败变可视化可排查
+
+### 代码质量
+- **新增单元测试**：`hostSafe.test.ts` 覆盖白名单构造、双重保险抛错、has_password/has_private_key 布尔标记正确性；`exec.test.rs` 中 `cmd_preview` 新增 ASCII 截断、UTF-8 多字节回退字符边界、空字符串、正好 200B / 199B / 201B 等 5 条测试；`escape.test.ts` 覆盖 HTML 与 CSS 注入逃逸场景
+- **代码覆盖率**：Rust 端使用 `cargo tarpaulin` / TypeScript 端使用 `c8` 扫描，所有可达代码路径均有覆盖；不可达分支（极端 quota 超限 fallback、权限双保险抛错）保留注释说明
+
+### 基础设施
+- **`.gitignore` 追加覆盖率产物忽略**：根目录与 `src-tauri/` 目录均追加 `coverage/`、`.nyc_output/`、`lcov.info`、`*.profraw`、`*.profdata`，覆盖率生成文件不再会被误提交
+- **README.md 徽章补齐**：新增 Current Version 徽章、CI Status 徽章、Release Build Status 徽章；License/Stars/Issues 三个徽章统一 `labelColor=0b1020` 与深色主题；徽章全部分行以便维护
+- **README.md 插件系统章节**：新增「🧩 插件系统」独立章节，覆盖架构隔离（iframe 沙箱 / 权限声明 / 存储配额 / 看门狗 + 内存限额）、能力暴露表、安装方式、内置端口转发插件示例、调试与排查链路；目录新增「插件」锚点链接
 
 ---
 

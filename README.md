@@ -20,11 +20,19 @@
     />
   </a>
   &nbsp;
+  <!-- 当前版本（直接从仓库 package.json 动态读取，无需手动维护） -->
+  <a href="CHANGELOG.md">
+    <img
+      alt="Current Version"
+      src="https://img.shields.io/github/package-json/v/zhangOranges/RD?logo=github&logoColor=ffffff&labelColor=0b1020&color=8b5cf6&style=flat-square"
+    />
+  </a>
+  &nbsp;
   <!-- 许可证 -->
   <a href="#许可证">
     <img
       alt="MIT License"
-      src="https://img.shields.io/github/license/zhangOranges/RD?logo=opensourceinitiative&logoColor=ffffff&labelColor=222&color=7b5cff&style=flat-square"
+      src="https://img.shields.io/github/license/zhangOranges/RD?logo=opensourceinitiative&logoColor=ffffff&labelColor=0b1020&color=7b5cff&style=flat-square"
     />
   </a>
   &nbsp;
@@ -32,7 +40,7 @@
   <a href="https://github.com/zhangOranges/RD/stargazers">
     <img
       alt="GitHub Stars"
-      src="https://img.shields.io/github/stars/zhangOranges/RD?logo=github&logoColor=ffffff&labelColor=1f2937&color=ffb703&style=flat-square"
+      src="https://img.shields.io/github/stars/zhangOranges/RD?logo=github&logoColor=ffffff&labelColor=0b1020&color=ffb703&style=flat-square"
     />
   </a>
   &nbsp;
@@ -40,11 +48,25 @@
   <a href="https://github.com/zhangOranges/RD/issues">
     <img
       alt="GitHub Issues"
-      src="https://img.shields.io/github/issues/zhangOranges/RD?logo=github&logoColor=ffffff&labelColor=1f2937&color=ef476f&style=flat-square"
+      src="https://img.shields.io/github/issues/zhangOranges/RD?logo=github&logoColor=ffffff&labelColor=0b1020&color=ef476f&style=flat-square"
     />
   </a>
   &nbsp;
-
+  <!-- CI 构建状态（push / PR 语法检查） -->
+  <a href="https://github.com/zhangOranges/RD/actions/workflows/ci.yml">
+    <img
+      alt="CI Status"
+      src="https://img.shields.io/github/actions/workflow/status/zhangOranges/RD/ci.yml?branch=main&logo=githubactions&logoColor=ffffff&label=CI&labelColor=0b1020&color=22c55e&style=flat-square"
+    />
+  </a>
+  &nbsp;
+  <!-- Release 构建状态（tag 推送三平台打包） -->
+  <a href="https://github.com/zhangOranges/RD/actions/workflows/release.yml">
+    <img
+      alt="Release Build Status"
+      src="https://img.shields.io/github/actions/workflow/status/zhangOranges/RD/release.yml?logo=githubactions&logoColor=ffffff&label=Release&labelColor=0b1020&color=f59e0b&style=flat-square"
+    />
+  </a>
 </p>
 
 <!-- ========== 平台支持 ========== -->
@@ -71,6 +93,7 @@
   <a href="#界面预览">预览</a> ·
   <a href="#功能特性">功能</a> ·
   <a href="#技术栈">技术栈</a> ·
+  <a href="#插件系统">插件</a> ·
   <a href="#下载安装">下载</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#构建">构建</a> ·
@@ -198,6 +221,51 @@
 - 内置 Tauri updater，Windows / Linux / macOS 三平台
 - 启动自动检查，可手动触发
 - **多下载源镜像**：GitHub 直连 + `cdn.gh-proxy.org` + `axisnow.gh-proxy.org` 并发测速，自动选最快源
+
+---
+
+<!-- ====================================================================== -->
+<!-- 🧩 插件系统                                                              -->
+<!-- ====================================================================== -->
+## 🧩 插件系统
+
+RD 自带一套三层插件架构（**内核层 / 调度层 / 扩展层**），支持用户通过界面从目录或 `.rdplugin`（zip 包）安装第三方插件，并可在内置插件市场中卸载 / 禁用 / 配置。
+
+### 架构隔离
+- **iframe 沙箱**：每个插件运行在独立 `<iframe sandbox="allow-scripts allow-popups allow-downloads allow-same-origin">` 内，不共享主程序 DOM / 全局对象；跨上下文通信通过 `MessageChannel` 端口通道完成，单次调用 60s 超时防悬挂
+- **权限声明制**：插件 manifest 需显式声明所需 17 类权限，安装时弹窗展示权限清单与风险等级；用户可随时在设置 → 插件 → 权限中按条撤销或重授
+- **存储配额**：插件独立沙箱目录 `{appDataDir}/plugin-data/{id}/store.json`，单值 ≤ 256KB，总存储 ≤ 8MB，单文件写入 ≤ 1MB，超限返回 `STORAGE_QUOTA_EXCEEDED`
+- **看门狗 + 内存限额**：每 2s ping iframe，5s 无响应判为卡死并自动禁用；单插件内存 > 200MB（`performance.memory`）自动卸载，不影响其他插件与主程序
+
+### 能力暴露（RD SDK）
+通过 `window.__rdPlugin.ctx` 向插件暴露能力，所有 API 前置权限断言：
+
+| 分组 | 主要 API | 对应权限 |
+|---|---|---|
+| **Server** | `server.listAll/get/create/update/delete/category.*` | `server.read` / `server.write` |
+| **Theme** | `theme.getCurrent/listAll/get/apply` | `theme.read` / `theme.apply` |
+| **UI** | `ui.notify/confirm/prompt/openPluginView` | `ui.dialog` / `ui.inject-menu` |
+| **Storage** | `storage.set/get/remove/removeAll/keys/listFiles` | `storage.read` / `storage.write` |
+| **Network** | `http.request/get/post/put/delete`；内网 SSRF 默认拦截 | `network.http` |
+| **SSH** | `ssh.exec(cwd, timeout, env)`；友好错误分类与 30s 超时 | `ssh.run`（高危） |
+| **SFTP** | `sftp.listDir/stat/mkdir/remove/rename/readFile/writeFile` | `sftp.operate`（高危） |
+| **Tunnel** | `tunnel.listRules/addRule/.../exportRules/importRules` | `tunnel.manage`（高危） |
+| **Log** | `log.info/warn/error`（同步落盘到 `update.log`） | `log.read` |
+| **事件总线** | `onBus('connnection:*'|'tunnel:*'|'sftp:*'|...)` | 按事件分组校验 |
+
+### 安装方式
+- **从目录安装**：设置 → 插件 → 已安装 → 「选择目录安装」，选中包含合法 `manifest.json` 的文件夹
+- **从 `.rdplugin` 安装**：拖拽 zip 包到插件面板，或点击「安装 .rdplugin 文件」
+- **热重载**：已安装插件中开启「监听插件目录（热重载）」开关，修改插件源文件后 500ms 自动销毁并重建实例（manifest 声明 `hotReload: false` 的签名插件不参与）
+
+### 内置插件示例
+- **端口转发（rd-native-port-forward）**：内置 SSH 隧道管理插件，支持 local(-L) / remote(-R) / dynamic(-D, SOCKS5) 三种模式；规则导入导出 `.rd-tunnels.json`；remote 模式内建 `GatewayPorts no` 提醒并给出重启 sshd 指令；0.0.0.0 绑定二次确认；连接断开自动关闭；重连成功按 `autoStart` 自动恢复
+
+### 调试与排查
+- **iframe 错误横幅**：插件全局 `window.onerror` / `unhandledrejection` 自动转发到主程序并显示错误横幅，给出 plugin_id 和堆栈
+- **统一日志落盘**：插件 `console.*`、性能指标、runtime error、卡死 / 内存超限、SDK 调用全部写入 `update.log`（`[Plugin:{id}]` 前缀），可在设置 → 调试中一键打开日志目录
+
+---
 
 ### 调试与隐私
 - **纯本地运行**：无账号、无云同步、无遥测、无广告，所有数据仅存储在本机
@@ -372,7 +440,7 @@ git push origin v0.1.88
   &nbsp;·&nbsp;
   <a href="https://github.com/zhangOranges/RD/discussions">💬 参与讨论</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/zhangOranges/RD#%EF%B8%8F-%E8%AE%A2%E8%B4%AD%E6%B5%8B%E8%AF%95">⭐ 点个 Star 支持一下</a>
+  <a href="https://github.com/zhangOranges/RD">⭐ 点个 Star 支持一下</a>
 </p>
 
 <p align="center">
