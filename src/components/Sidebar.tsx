@@ -15,14 +15,11 @@ import {
   Power,
   PowerOff,
   Copy,
-  FolderTree,
-  KeyRound,
-  Puzzle,
   Search,
   AlertTriangle,
 } from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
-import { useUIStore, type ToolType } from '../store/uiStore';
+import { useUIStore } from '../store/uiStore';
 import { matchShortcut } from '../store/shortcutStore';
 import { useToastStore } from './Toast';
 import { HostDialog } from './HostDialog';
@@ -54,11 +51,9 @@ export function Sidebar() {
   const toggleCategory = useHostStore((s) => s.toggleCategory);
   const pushToast = useToastStore((s) => s.push);
 
-  // UI store：搜索框、工具菜单、打码模式
+  // UI store：搜索框、打码模式
   const sidebarSearch = useUIStore((s) => s.sidebarSearch);
   const setSidebarSearch = useUIStore((s) => s.setSidebarSearch);
-  const activeTool = useUIStore((s) => s.activeTool);
-  const setActiveTool = useUIStore((s) => s.setActiveTool);
   const maskMode = useUIStore((s) => s.maskMode);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -166,13 +161,6 @@ export function Sidebar() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
-
-  // ========== 工具菜单配置 ==========
-  const tools: { id: ToolType; label: string; icon: typeof FolderTree }[] = [
-    { id: 'sftp', label: 'SFTP', icon: FolderTree },
-    { id: 'keys', label: '密钥管理', icon: KeyRound },
-    { id: 'plugins', label: '插件中心', icon: Puzzle },
-  ];
 
   // ========== 底部连接信息概览（已移至右上角 ServerInfo） ==========
 
@@ -799,25 +787,6 @@ export function Sidebar() {
           </button>
         </div>
       )}
-
-      {/* ========== 工具菜单 ========== */}
-      <div className="sidebar-tools">
-        {tools.map((t) => {
-          const Icon = t.icon;
-          const active = activeTool === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              className={`sidebar-tool-item ${active ? 'active' : ''}`}
-              onClick={() => setActiveTool(t.id)}
-            >
-              <Icon size={14} />
-              <span>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
 
       {/* ========== 统一右键菜单（通过 Portal 挂载到 body，避免 sidebar 的 backdrop-filter
            导致 position:fixed 失效及 overflow:hidden 裁剪） ========== */}
