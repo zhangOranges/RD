@@ -6,7 +6,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
-import { usePluginStore } from '../store/pluginStore';
+import { usePluginStore, initPluginEventListeners } from '../store/pluginStore';
 import { PluginInstallDialog } from './plugin/PluginInstallDialog';
 import { PluginDevConsole } from './plugin/PluginDevConsole';
 import { PluginDetail } from './plugin/PluginDetail';
@@ -601,6 +601,22 @@ export function SettingsDialog() {
   const [installDialog, setInstallDialog] = useState<{ manifest: PluginManifest; dirPath: string } | null>(null);
   const plugins = usePluginStore((s) => s.plugins);
   const loadPlugins = usePluginStore((s) => s.loadPlugins);
+  const pluginHotReloadEnabled = useUIStore((s) => s.pluginHotReloadEnabled);
+  const setPluginHotReloadEnabled = useUIStore((s) => s.setPluginHotReloadEnabled);
+
+  /** 热重载开关切换 */
+  const handleToggleHotReload = useCallback(
+    async (v: boolean) => {
+      setPluginHotReloadEnabled(v);
+      if (v) {
+        await usePluginStore.getState().startHotReload();
+        await initPluginEventListeners();
+      } else {
+        await usePluginStore.getState().stopHotReload();
+      }
+    },
+    [setPluginHotReloadEnabled],
+  );
 
   /** 安装确认弹窗：用户确认权限后执行实际安装 */
   const handleInstallConfirm = useCallback(
@@ -1186,6 +1202,23 @@ export function SettingsDialog() {
                       >
                         选择目录安装
                       </button>
+                    </div>
+                    <div className="settings-row">
+                      <div className="settings-row-main">
+                        <div className="settings-row-label">监听插件目录（热重载）</div>
+                        <div className="settings-row-desc">开启后自动监听插件文件变更，修改后无需重启即可生效</div>
+                      </div>
+                      <label className="form-switch">
+                        <input
+                          type="checkbox"
+                          checked={pluginHotReloadEnabled}
+                          onChange={(e) => void handleToggleHotReload(e.target.checked)}
+                        />
+                        <span className="form-switch-track" aria-hidden="true" />
+                        <span className="form-switch-label">
+                          {pluginHotReloadEnabled ? '已开启' : '已关闭'}
+                        </span>
+                      </label>
                     </div>
                     <PluginDetail />
                   </>

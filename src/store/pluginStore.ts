@@ -5,7 +5,7 @@ import type { PluginManifest, PluginCategory, TunnelErrorCode, TunnelStatus } fr
 import { pluginLifecycleManager } from '../utils/pluginLifecycleManager';
 import { kernelEventBus } from '../utils/eventBus';
 import { mapStatusDto } from '../utils/pluginSdk';
-import { logWarn } from '../utils/log';
+import { logInfo, logWarn, logError } from '../utils/log';
 import { usePluginUiStore } from './pluginUiStore';
 
 export interface PluginInfo {
@@ -252,29 +252,36 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   },
 
   startHotReload: async () => {
+    logInfo('[pluginStore] startHotReload start');
     try {
       await invoke('plugin_start_hot_reload');
+      logInfo('[pluginStore] startHotReload complete: 已通知后端启动文件监听');
     } catch (e) {
-      console.warn('[pluginStore] startHotReload 失败', e);
+      logWarn(`[pluginStore] startHotReload 失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 
   stopHotReload: async () => {
+    logInfo('[pluginStore] stopHotReload start');
     try {
       await invoke('plugin_stop_hot_reload');
+      logInfo('[pluginStore] stopHotReload complete: 已通知后端停止文件监听');
     } catch (e) {
-      console.warn('[pluginStore] stopHotReload 失败', e);
+      logWarn(`[pluginStore] stopHotReload 失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 
   reloadPlugin: async (pluginId) => {
+    logInfo(`[pluginStore] reloadPlugin start: plugin=${pluginId}`);
     const plugin = get().getPlugin(pluginId);
     if (!plugin) {
-      console.warn(`[pluginStore] reloadPlugin: 插件不存在 ${pluginId}`);
+      logWarn(`[pluginStore] reloadPlugin 跳过: 插件不存在 plugin=${pluginId}`);
       return false;
     }
     if (!plugin.manifest.hotReload) {
-      console.log(`[pluginStore] skip hot reload for ${pluginId}: hotReload=false`);
+      logInfo(
+        `[pluginStore] reloadPlugin 跳过: 插件声明 hotReload=false, plugin=${pluginId}`,
+      );
       return false;
     }
 
@@ -300,19 +307,19 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
       }
 
       // Step 6: 日志
+      logInfo(
+        `[pluginStore] reloadPlugin complete: plugin=${pluginId}, name=${updated.name}, wasEnabled=${wasEnabled}`,
+      );
       usePluginUiStore
         .getState()
         .addLog(pluginId, 'info', `插件 ${updated.name} 已热重载`);
       return true;
     } catch (e) {
-      console.error(`[pluginStore] reloadPlugin 失败 ${pluginId}:`, e);
+      const msg = e instanceof Error ? e.message : String(e);
+      logError(`[pluginStore] reloadPlugin 失败 plugin=${pluginId}: ${msg}`);
       usePluginUiStore
         .getState()
-        .addLog(
-          pluginId,
-          'error',
-          `热重载失败: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        .addLog(pluginId, 'error', `热重载失败: ${msg}`);
       return false;
     }
   },
@@ -366,7 +373,7 @@ export async function initPluginEventListeners(): Promise<void> {
   if (!hotReloadUnlisten) {
     hotReloadUnlisten = await listen<string>('plugin:hot-reload', async (event) => {
       const pluginId = event.payload;
-      console.log(`[pluginStore] 收到热重载事件: ${pluginId}`);
+      logInfo(`[pluginStore] 收到 hot-reload 事件: plugin=${pluginId}, 延迟 300ms 后执行重载`);
       // 延迟 300ms 等文件写入完成
       await new Promise((r) => setTimeout(r, 300));
       await usePluginStore.getState().reloadPlugin(pluginId);
@@ -374,7 +381,7 @@ export async function initPluginEventListeners(): Promise<void> {
 
     uninstalledUnlisten = await listen<string>('plugin:uninstalled', async (event) => {
       const pluginId = event.payload;
-      console.log(`[pluginStore] 收到卸载事件: ${pluginId}`);
+      logInfo(`[pluginStore] 收到 uninstalled 事件: plugin=${pluginId}, 刷新插件列表`);
       await usePluginStore.getState().loadPlugins();
     });
   }

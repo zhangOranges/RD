@@ -15,6 +15,8 @@ use notify::{EventKind, RecursiveMode, Watcher};
 use tauri::async_runtime::spawn;
 use tauri::{AppHandle, Emitter};
 
+use crate::{debug_log, LogLevel};
+
 /// 全局 watcher 保持引用，防止 drop 后停止监听
 static WATCHER_HANDLE: Mutex<Option<notify::RecommendedWatcher>> = Mutex::new(None);
 
@@ -88,11 +90,41 @@ pub fn start_watching(app: &AppHandle, dirs: &[PathBuf]) {
         .filter(|d| d.exists() && d.is_dir())
         .cloned()
         .collect();
+
+    debug_log(
+        app,
+        LogLevel::Info,
+        &format!(
+            "hot_reload start: 请求监听 {} 个目录, 实际有效 {} 个. 请求列表: [{}]",
+            dirs.len(),
+            valid_dirs.len(),
+            dirs.iter()
+                .map(|p| format!("'{}' (exists={})", p.display(), p.exists() && p.is_dir()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    );
+
     if valid_dirs.is_empty() {
         // 至少保证原行为：若第一个（运行时）目录不存在则创建它。
         if let Some(plugins_dir) = dirs.first() {
-            let _ = std::fs::create_dir_all(plugins_dir);
+            if let Err(e) = std::fs::create_dir_all(plugins_dir) {
+                debug_log(
+                    app,
+                    LogLevel::Error,
+                    &format!(
+                        "hot_reload 创建运行时插件目录失败: path={}, err={}",
+                        plugins_dir.display(),
+                        e
+                    ),
+                );
+            }
         }
+        debug_log(
+            app,
+            LogLevel::Warn,
+            "hot_reload: 所有监听目录均不存在/无效，未启动任何 watcher",
+        );
         return;
     }
 
@@ -117,6 +149,22 @@ pub fn start_watching(app: &AppHandle, dirs: &[PathBuf]) {
                 return;
             };
 
+            let changed_paths: Vec<String> = event
+                .paths
+                .iter()
+                .map(|p| format!("{}", p.display()))
+                .collect();
+            debug_log(
+                &app_handle,
+                LogLevel::Info,
+                &format!(
+                    "hot_reload detect: plugin={}, kind={:?}, files=[{}]",
+                    pid,
+                    event.kind,
+                    changed_paths.join(", ")
+                ),
+            );
+
             // debounce：检查上次变更时间
             let now = Instant::now();
             let should_fire = {
@@ -136,6 +184,11 @@ pub fn start_watching(app: &AppHandle, dirs: &[PathBuf]) {
             };
 
             if !should_fire {
+                debug_log(
+                    &app_handle,
+                    LogLevel::Info,
+                    &format!("hot_reload debounce skip: plugin={}, 合并到后续批次", pid),
+                );
                 return;
             }
 
@@ -143,32 +196,81 @@ pub fn start_watching(app: &AppHandle, dirs: &[PathBuf]) {
             let app_clone = app_handle.clone();
             spawn(async move {
                 tokio::time::sleep(Duration::from_millis(DEBOUNCE_MS)).await;
+                debug_log(
+                    &app_clone,
+                    LogLevel::Info,
+                    &format!(
+                        "hot_reload emit: plugin={}, 发送 plugin:hot-reload 事件",
+                        pid
+                    ),
+                );
                 let _ = app_clone.emit("plugin:hot-reload", &pid);
             });
+        } else if let Err(e) = res {
+            eprintln!("[hot_reload] watcher 事件错误: {}", e);
         }
     });
 
     match watcher {
         Ok(mut w) => {
             // 对每个有效目录做递归监听；同一个 watcher 可以 watch 多个目录
+            let mut failed: Vec<String> = Vec::new();
             for dir in &valid_dirs {
                 if let Err(e) = w.watch(dir, RecursiveMode::Recursive) {
-                    eprintln!("[hot_reload] 监听目录 {} 失败: {}", dir.display(), e);
+                    let msg = format!("监听目录 {} 失败: {}", dir.display(), e);
+                    eprintln!("[hot_reload] {}", msg);
+                    debug_log(app, LogLevel::Warn, &format!("hot_reload {}", msg));
+                    failed.push(format!("'{}'", dir.display()));
                 }
             }
 
             // 替换旧 watcher
-            let mut guard = WATCHER_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
-            *guard = Some(w);
+            {
+                let mut guard = WATCHER_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
+                *guard = Some(w);
+            }
+
+            let success_count = valid_dirs.len() - failed.len();
+            debug_log(
+                app,
+                if failed.is_empty() {
+                    LogLevel::Info
+                } else {
+                    LogLevel::Warn
+                },
+                &format!(
+                    "hot_reload watcher 已激活: 成功监听 {} 个目录 (共 {} 个). 失败目录: [{}]",
+                    success_count,
+                    valid_dirs.len(),
+                    if failed.is_empty() {
+                        "无".to_string()
+                    } else {
+                        failed.join(", ")
+                    }
+                ),
+            );
         }
         Err(e) => {
-            eprintln!("[hot_reload] 启动文件监听失败: {}", e);
+            let msg = format!("启动文件监听失败: {}", e);
+            eprintln!("[hot_reload] {}", msg);
+            debug_log(app, LogLevel::Error, &format!("hot_reload {}", msg));
         }
     }
 }
 
 /// 停止文件监听
-pub fn stop_watching() {
-    let mut guard = WATCHER_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
-    *guard = None;
+pub fn stop_watching(app: &AppHandle) {
+    let prev = {
+        let mut guard = WATCHER_HANDLE.lock().unwrap_or_else(|e| e.into_inner());
+        guard.take()
+    };
+    if prev.is_some() {
+        debug_log(
+            app,
+            LogLevel::Info,
+            "hot_reload stop: 已停止文件监听, watcher 已释放",
+        );
+    } else {
+        debug_log(app, LogLevel::Info, "hot_reload stop: 无活跃 watcher, 跳过");
+    }
 }

@@ -181,7 +181,18 @@ pub async fn plugin_start_hot_reload(
     app: tauri::AppHandle,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), String> {
-    let app_data_dir = resolve_app_data_dir(Some(&app), Some(&state))?;
+    debug_log(&app, LogLevel::Info, "plugin_start_hot_reload start");
+    let app_data_dir = match resolve_app_data_dir(Some(&app), Some(&state)) {
+        Ok(p) => p,
+        Err(e) => {
+            debug_log(
+                &app,
+                LogLevel::Error,
+                &format!("plugin_start_hot_reload 解析 app_data_dir 失败: {}", e),
+            );
+            return Err(e);
+        }
+    };
     let runtime_plugins_dir = app_data_dir.join("plugins");
 
     // CARGO_MANIFEST_DIR 编译期解析为 Cargo.toml 绝对路径（即 .../remote/src-tauri），
@@ -197,13 +208,23 @@ pub async fn plugin_start_hot_reload(
     }
 
     hot_reload::start_watching(&app, &watch_dirs);
+    debug_log(
+        &app,
+        LogLevel::Info,
+        &format!(
+            "plugin_start_hot_reload complete: watch_dirs_count={}",
+            watch_dirs.len()
+        ),
+    );
     Ok(())
 }
 
 /// 停止插件目录文件监听
 #[tauri::command]
-pub async fn plugin_stop_hot_reload() -> Result<(), String> {
-    hot_reload::stop_watching();
+pub async fn plugin_stop_hot_reload(app: tauri::AppHandle) -> Result<(), String> {
+    debug_log(&app, LogLevel::Info, "plugin_stop_hot_reload start");
+    hot_reload::stop_watching(&app);
+    debug_log(&app, LogLevel::Info, "plugin_stop_hot_reload complete");
     Ok(())
 }
 
