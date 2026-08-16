@@ -1192,7 +1192,7 @@ export function SettingsDialog() {
                 )}
                 {pluginSubTab === 'market' && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 16px', color: 'var(--color-text-muted)', fontSize: 13, textAlign: 'center', lineHeight: 1.7 }}>
-                    Phase 1 不接入插件市场，后续版本将开放插件下载与一键安装。
+                    目前不接入插件市场，后续版本将开放插件下载与一键安装。
                   </div>
                 )}
                 {pluginSubTab === 'permissions' && (
