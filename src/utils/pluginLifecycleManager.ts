@@ -80,12 +80,26 @@ async function resolveIframeSrc(pluginId: string, fallback: string): Promise<str
   }
 }
 
-/** demo iframe 内容（插件 index.html 缺失/加载失败时的占位） */
+/** demo iframe 内容（插件 index.html 缺失/加载失败时的占位）。
+ *  同时内联初始主题 CSS 变量 + data-theme / data-theme-type，
+ *  与 buildPluginIframeSrc 的真实路径保持一致的首帧无闪屏行为。 */
 function buildDemoSrc(pluginId: string): string {
+  const info = typeof window !== 'undefined' ? getCurrentThemeInfo() : null;
+  const themeAttrs = info
+    ? `data-theme="${attr(info.id)}" data-theme-type="${attr(info.type)}"`
+    : '';
+  const vars: string[] = [];
+  if (info?.palette && typeof info.palette === 'object') {
+    for (const [k, v] of Object.entries(info.palette)) {
+      if (!k.startsWith('--')) continue;
+      vars.push(`${k}:${cssVal(String(v))};`);
+    }
+  }
+  const styleTag = vars.length ? `<style>:root{${vars.join('')}}<\/style>` : '';
   return (
     'data:text/html;charset=utf-8,' +
     encodeURIComponent(
-      `<html><body><script>
+      `<html ${themeAttrs}><head>${styleTag}<\/head><body><script>
         window.addEventListener('message', (ev) => {
           const d = ev.data;
           if (!d || !d.__rd_plugin) return;
@@ -96,6 +110,7 @@ function buildDemoSrc(pluginId: string): string {
               }
             }
             if (d.themeId) document.documentElement.setAttribute('data-theme', String(d.themeId));
+            if (d.themeType) document.documentElement.setAttribute('data-theme-type', String(d.themeType));
             return;
           }
           if (d.type === 'watchdog-ping') {
@@ -111,9 +126,16 @@ function buildDemoSrc(pluginId: string): string {
           }
         });
         window.parent.postMessage({ __rd_plugin_ready: true, id: ${JSON.stringify(pluginId)} }, '*');
-      <\/script></body></html>`,
+      <\/script><div style="padding:24px;color:var(--text-secondary,#9a9aa2);font-family:system-ui">插件界面加载失败，请检查插件文件完整性。</div></body></html>`,
     )
   );
+}
+function attr(s: string) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function cssVal(s: string) {
+  return String(s).replace(/\\/g, '\\\\').replace(/\n/g, '\\A ').replace(/\r/g, '\\D ')
+    .replace(/"/g, '\\"').replace(/'/g, "\\'").replace(/;/g, '\\;').replace(/}/g, '\\}');
 }
 
 class PluginLifecycleManager {

@@ -22,6 +22,8 @@
  * 无需关心桥接细节——这是给第三方插件开发者的标准接口。
  */
 
+import { getCurrentThemeInfo } from '../store/themeStore';
+
 /** 注入版 SDK 桥脚本（会被插到插件 index.html 的 </head> 前）。 */
 export const PLUGIN_BRIDGE_SCRIPT = `(function(){
   var pending = {}, seq = 0;              // sdk-invoke 调用（callId -> {res,rej}）
@@ -198,6 +200,13 @@ export const PLUGIN_BRIDGE_SCRIPT = `(function(){
 
 /**
  * 把 SDK 桥脚本注入到插件 index.html 中，并返回可用于 iframe src 的 data URL。
+ * 为消除首帧闪屏，同时内联当前主题的 CSS 变量和 data-theme / data-theme-type 属性：
+ *  - 在 <html> 上挂 data-theme / data-theme-type，使 :root[data-theme-type="light"]
+ *    等 CSS 选择器在 HTML 解析到 body 前就生效；
+ *  - 在 <head> 中注入 <style>:root{ --bg-content:xxx; ... }</style>，body 第一次
+ *    绘制时就用当前主题色，而非 CSS fallback 硬编码色（之前用户看到的"过一会变蓝"
+ *    就是因为 CSS var() 未定义时 fallback 为 accent #3b82f6 蓝色）。
+ *
  * @param html 插件 index.html 原始内容（来自 Rust plugin_resolve_src）
  * @param pluginId 插件 id（注入到桥脚本，用于 ready 通知）
  */
@@ -210,9 +219,90 @@ export function buildPluginIframeSrc(html: string, pluginId: string): string {
     /__RD_PLUGIN_ID__/g,
     JSON.stringify(pluginId),
   );
-  const tag = `<script>${bridge}<\/script>`;
-  const injected = html.includes('</head>')
-    ? html.replace('</head>', `${tag}</head>`)
-    : `${tag}${html}`;
+
+  // ---- 1. 构造初始主题样式 + 属性（消除首帧闪屏） ----
+  const themeInfo =
+    typeof window !== 'undefined'
+      ? getCurrentThemeInfo()
+      : null; // SSR / 测试环境降级为空（此时 iframe 也不会被展示）
+  const themeAttrs: string[] = [];
+  if (themeInfo) {
+    themeAttrs.push(`data-theme="${escapeAttr(themeInfo.id)}"`);
+    themeAttrs.push(`data-theme-type="${escapeAttr(themeInfo.type)}"`);
+  }
+  let paletteStyle = '';
+  if (themeInfo && themeInfo.palette && typeof themeInfo.palette === 'object') {
+    const vars: string[] = [];
+    for (const [k, v] of Object.entries(themeInfo.palette)) {
+      const key = String(k);
+      // 仅注入合法的 CSS 变量名（以 -- 开头），避免把 palette 里混入的
+      // 非 var 字段（如 id 字符串）写进样式导致 CSS 解析异常。
+      if (!key.startsWith('--')) continue;
+      vars.push(`${key}:${escapeCssValue(String(v))};`);
+    }
+    if (vars.length) {
+      paletteStyle = `<style>:root{${vars.join('')}}<\/style>`;
+    }
+  }
+
+  // ---- 2. 拼注入内容（顺序：<style> 先，<script> 桥后，都放 </head> 前）----
+  // 这样 CSS 变量先于 body 解析就位；桥脚本先于插件自己的 <script> 执行，
+  // 确保 window.__rdPlugin 在插件代码读取前已存在。
+  const tag = `${paletteStyle}<script>${bridge}<\/script>`;
+
+  // ---- 3. 给 <html> 根标签补 data-theme / data-theme-type 属性 ----
+  // 匹配 <html（可能已有属性，如 <html lang="zh">），在末尾注入两个 data- 属性。
+  let injected = html;
+  if (themeAttrs.length) {
+    const htmlTagRegex = /<html(\s[^>]*)?>/i;
+    const htmlMatch = injected.match(htmlTagRegex);
+    if (htmlMatch) {
+      const existingAttrs = htmlMatch[1] ?? '';
+      // 避免重复注入（如果插件本身已经写了 data-theme）——用我们的值覆盖，确保同步
+      const cleaned = existingAttrs
+        .replace(/\sdata-theme\s*=\s*"[^"]*"/gi, '')
+        .replace(/\sdata-theme\s*=\s*'[^']*'/gi, '')
+        .replace(/\sdata-theme-type\s*=\s*"[^"]*"/gi, '')
+        .replace(/\sdata-theme-type\s*=\s*'[^']*'/gi, '');
+      const replacement = `<html${cleaned} ${themeAttrs.join(' ')}>`;
+      injected = injected.replace(htmlTagRegex, replacement);
+    } else {
+      // 插件没有 <html> 标签（极简 HTML）：在最前面包一层
+      injected = `<html ${themeAttrs.join(' ')}>${injected}</html>`;
+    }
+  }
+
+  injected = injected.includes('</head>')
+    ? injected.replace('</head>', `${tag}</head>`)
+    : `${tag}${injected}`;
+
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(injected);
+}
+
+/** HTML 属性值转义（双引号内容），仅处理最低必要字符避免 XSS / 解析断裂 */
+function escapeAttr(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/**
+ * CSS 属性值转义：在 `:root{--x:<value>}` 中注入时，防止
+ *   - `;}` 闭合注入
+ *   - 换行/回车导致 CSS 解析断开
+ *   - 反斜杠破坏后续声明
+ * 合法值本身（#rrggbb、rgba(...)、url("...") 等）经过此函数后保持语义不变，
+ * 因为只对真正的 CSS 控制字符做转义。
+ */
+function escapeCssValue(s: string): string {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\A ')
+    .replace(/\r/g, '\\D ')
+    .replace(/"/g, '\\"')
+    .replace(/'/g, "\\'")
+    .replace(/;/g, '\\;')
+    .replace(/}/g, '\\}');
 }
