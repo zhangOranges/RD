@@ -6,6 +6,16 @@ use serde::Serialize;
 use super::{SshError, SshState};
 use crate::{debug_log, LogLevel};
 
+/// 日志脱敏：把命令截断到 200 字节内（避免 echo $PASSWORD、token 参数等泄漏到日志）。
+fn cmd_preview(cmd: &str) -> String {
+    const MAX_CMD_LEN: usize = 200;
+    if cmd.len() <= MAX_CMD_LEN {
+        cmd.to_string()
+    } else {
+        format!("{}...(+{}B)", &cmd[..MAX_CMD_LEN], cmd.len() - MAX_CMD_LEN)
+    }
+}
+
 /// Execute a command on the remote server and return its stdout.
 /// Intended for short-lived commands (server stats, etc.).
 pub async fn ssh_exec_raw(
@@ -42,7 +52,9 @@ pub async fn ssh_exec_raw(
                 LogLevel::Error,
                 &format!(
                     "ssh_exec_raw exec 失败: host_id={} cmd={} - {}",
-                    host_id, command, err
+                    host_id,
+                    cmd_preview(command),
+                    err
                 ),
             );
         }
@@ -79,7 +91,9 @@ pub async fn ssh_exec_raw(
                 LogLevel::Warn,
                 &format!(
                     "ssh_exec_raw 非零退出: host_id={} cmd={} - code {}",
-                    host_id, command, exit_code
+                    host_id,
+                    cmd_preview(command),
+                    exit_code
                 ),
             );
         }

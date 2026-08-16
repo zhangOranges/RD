@@ -1,4 +1,4 @@
-import { useImperativeHandle, useLayoutEffect, useRef, forwardRef } from 'react';
+import { useImperativeHandle, useLayoutEffect, useRef, useState, forwardRef } from 'react';
 import type { PluginManifest, RDContext, RdEventMap } from '../../types/plugin';
 import { kernelEventBus } from '../../utils/eventBus';
 import { usePluginStore } from '../../store/pluginStore';
@@ -141,6 +141,8 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
   const memoryCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
   /** 最近一次收到 pong 的时间戳 */
   const lastPongRef = useRef<number>(Date.now());
+  /** 插件异常信息（JS 报错横幅）：null=无错误，string=最新一条（多行），可点击关闭 */
+  const [pluginError, setPluginError] = useState<null | { kind: string; message: string; src: string; line: number; col: number; stack: string; ts: number }>(null);
 
   /**
    * 等待 iframe 加载并注册好生命周期处理器（上限 10s）。
@@ -194,6 +196,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         if (iframeRef.current?.parentElement) iframeRef.current.remove();
         iframeRef.current = null;
         loadedRef.current = false;
+        setPluginError(null);
       },
       getOwner: () => ownerRef.current,
       forwardEvent: (event, args) => {
@@ -235,13 +238,38 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
      * 主侧 pack：把函数替换为 `{ __rd_cb: id }` 占位（函数注册为本地回调，
      * 调用时发 sdk-callback 到 iframe）。与 pluginBridge 的 pack 语义一致。
      */
+    // 主侧发起远程调用 → 进入 cbPendingRef 等待 callback-result；统一包装：
+    //  - 60s 超时自动 reject（防止 iframe 崩溃后内存泄漏）
+    //  - resolve/reject 后自动清理 Map
+    const makePendingCall = (cid: string, send: () => void) => {
+      return new Promise<unknown>((res, rej) => {
+        let settled = false;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const done = (kind: 'res' | 'rej', value: unknown) => {
+          if (settled) return;
+          settled = true;
+          if (timer) { clearTimeout(timer); timer = null; }
+          cbPendingRef.current.delete(cid);
+          if (kind === 'res') res(value); else rej(value as Error);
+        };
+        cbPendingRef.current.set(cid, {
+          res: (v) => done('res', v),
+          rej: (e) => done('rej', e),
+        });
+        timer = setTimeout(() => {
+          done('rej', new Error('CALLBACK_PENDING_TIMEOUT: 插件响应超时（60s）'));
+        }, 60_000);
+        try { send(); } catch (e) {
+          done('rej', e instanceof Error ? e : new Error(String(e)));
+        }
+      });
+    };
     const packForFrame = (value: unknown): unknown => {
       if (typeof value === 'function') {
         const id = 'mc' + (++cbSeqRef.current);
         callbacksRef.current.set(id, (...a: unknown[]) => {
           const cid = 'mc' + (++cbSeqRef.current);
-          return new Promise<unknown>((res, rej) => {
-            cbPendingRef.current.set(cid, { res, rej });
+          return makePendingCall(cid, () => {
             iframeRef.current?.contentWindow?.postMessage(
               { __rd_plugin: true, type: 'sdk-callback', cbId: id, callId: cid, args: a.map(packForFrame) },
               '*',
@@ -282,8 +310,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         if (local) return local;
         const remote = (...a: unknown[]) => {
           const cid = 'mc' + (++cbSeqRef.current);
-          return new Promise<unknown>((res, rej) => {
-            cbPendingRef.current.set(cid, { res, rej });
+          return makePendingCall(cid, () => {
             iframeRef.current?.contentWindow?.postMessage(
               { __rd_plugin: true, type: 'sdk-callback', cbId: id, callId: cid, args: a.map(packForFrame) },
               '*',
@@ -399,6 +426,55 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         return;
       }
 
+      // 插件 JS 全局异常（window.onerror / unhandledrejection）：写入日志 + 展示横幅
+      if (data.type === 'plugin-error') {
+        const kind = String(data.kind || 'error');
+        const message = String(data.message || '');
+        const src = String(data.src || '');
+        const line = Number(data.line || 0);
+        const col = Number(data.col || 0);
+        const stack = String(data.stack || '');
+        const ts = Date.now();
+        usePluginUiStore.getState().addLog(pluginId, 'error',
+          `插件${kind === 'unhandledrejection' ? '未捕获 Promise' : ''}错误: ${message}` +
+          (src ? ` （${src}:${line}:${col}）` : line ? ` （:${line}:${col}）` : '') +
+          (stack ? '\n' + stack : ''));
+        setPluginError({ kind, message, src, line, col, stack, ts });
+        return;
+      }
+
+      // 插件 console.* 转发：写入日志面板（同时插件 iframe 自己的 devtools 仍可看到）
+      if (data.type === 'plugin-console') {
+        const levelRaw = String(data.level || 'info');
+        const level: 'info' | 'warn' | 'error' =
+          levelRaw === 'warn' ? 'warn' : levelRaw === 'error' ? 'error' : 'info';
+        const rawLevel = String(data.rawLevel || level);
+        const message = String(data.message ?? '');
+        usePluginUiStore
+          .getState()
+          .addLog(
+            pluginId,
+            level,
+            rawLevel !== level ? `[console.${rawLevel}] ${message}` : message,
+          );
+        return;
+      }
+
+      // 插件 performance.mark / performance.measure 转发：
+      // 以 info 级别写入日志面板，方便排查「插件初始化慢在哪段」。
+      if (data.type === 'plugin-performance') {
+        const name = String(data.name || '');
+        const entryType = String(data.entryType || 'perf');
+        const startTime = Number(data.startTime ?? 0);
+        const duration = Number(data.duration ?? 0);
+        const msg =
+          entryType === 'measure'
+            ? `[perf:measure] ${name}: ${duration}ms （start +${startTime}ms）`
+            : `[perf:mark] ${name} @ +${startTime}ms`;
+        usePluginUiStore.getState().addLog(pluginId, 'info', msg);
+        return;
+      }
+
       if (data.type === 'bus-on') {
         const event = data.event as keyof RdEventMap;
         const listenerId = data.listenerId as number;
@@ -506,6 +582,12 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
     window.addEventListener('message', onMsg);
     return () => {
       window.removeEventListener('message', onMsg);
+      // iframe 卸载：遍历 cbPendingRef 中还在等 reply 的 callId，全部 reject（防止 Promise hang）
+      const pending = Array.from(cbPendingRef.current.entries());
+      cbPendingRef.current.clear();
+      for (const [, p] of pending) {
+        try { p.rej(new Error('PLUGIN_UNLOADED: 插件已卸载或组件销毁')); } catch { /* promise 没 catch 时屏蔽 */ }
+      }
       if (watchdogRef.current) {
         clearInterval(watchdogRef.current);
         watchdogRef.current = null;
@@ -518,12 +600,124 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
   }, [onReady, pluginId]);
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {pluginError && (
+        <div
+          role="alert"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            padding: '8px 14px',
+            background: 'linear-gradient(180deg, #fef2f2, #fee2e2)',
+            color: '#991b1b',
+            borderBottom: '1px solid #fecaca',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            fontSize: 13,
+            lineHeight: 1.5,
+            display: 'flex',
+            gap: 10,
+            alignItems: 'flex-start',
+          }}
+        >
+          <span aria-hidden style={{ flexShrink: 0, marginTop: 1, fontSize: 16 }}>⚠️</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              插件运行时{pluginError.kind === 'unhandledrejection' ? '异步异常（未捕获 Promise）' : '错误'}
+            </div>
+            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {pluginError.message}
+              {pluginError.src
+                ? `\n位置: ${pluginError.src}:${pluginError.line}:${pluginError.col}`
+                : pluginError.line
+                  ? `\n位置: :${pluginError.line}:${pluginError.col}`
+                  : ''}
+              {pluginError.stack ? `\n${pluginError.stack}` : ''}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
+            <button
+              type="button"
+              onClick={() => setPluginError(null)}
+              title="关闭错误提示"
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid #fecaca',
+                background: '#fff',
+                color: '#991b1b',
+                cursor: 'pointer',
+                fontSize: 12,
+              }}
+            >
+              关闭
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPluginError(null);
+                // 通过 reload iframe src 触发重挂载；
+                // useLayoutEffect 的 cleanup(destroy + removeEventListener) + new src=相同 dataUrl 会触发浏览器重新 parse
+                // 对 data URL，必须强制变更 src 才能保证重建；这里用替换 iframe 节点的方法
+                const old = iframeRef.current;
+                if (!old || !old.parentElement) return;
+                const newIf = document.createElement('iframe');
+                newIf.src = src;
+                // 与 <iframe sandbox="..."> 属性保持一致：allow-same-origin 审计结论保持不启用
+                // 见下方 sandbox 属性注释详情。
+                newIf.sandbox.add('allow-scripts');
+                newIf.sandbox.add('allow-popups');
+                newIf.sandbox.add('allow-downloads');
+                newIf.setAttribute('title', `plugin-${pluginId}`);
+                newIf.style.width = '100%';
+                newIf.style.height = '100%';
+                newIf.style.border = '0';
+                old.parentElement.insertBefore(newIf, old);
+                old.parentElement.removeChild(old);
+                (iframeRef as React.MutableRefObject<HTMLIFrameElement | null>).current = newIf;
+                loadedRef.current = false;
+              }}
+              title="重新加载插件（尝试恢复）"
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: '1px solid #d1d5db',
+                background: '#ffffff',
+                color: '#111827',
+                cursor: 'pointer',
+                fontSize: 12,
+              }}
+            >
+              重启插件
+            </button>
+          </div>
+        </div>
+      )}
       <iframe
         ref={iframeRef}
         title={`plugin-${pluginId}`}
         src={src}
+        // [P0-1 allow-same-origin 审计结论：保持「不加 allow-same-origin」]
+        //
+        //  1) 当前 src 是 data:text/html;charset=utf-8,...（见 buildPluginIframeSrc），
+        //     本身就是 opaque unique origin；即便设置 allow-same-origin，data URL
+        //     在 HTML 规范里仍然是 opaque，加了也没有实际收益。
+        //  2) 如果未来切到 file:/// 或 http(s)://<host>/ 方案作为插件加载源：
+        //     - 不带 allow-same-origin → iframe 依然是 opaque origin，无法
+        //       直接访问主程序同源的 localStorage / cookie / indexedDB，也
+        //       无法发起带凭据的 fetch（主程序数据完全由 postMessage / SDK
+        //       显式暴露，最小权限）；
+        //     - 加上 allow-same-origin → file:// 场景下多插件 iframe 与主
+        //       程序很可能被浏览器视为「同源」，任何插件被攻破即可直接读写
+        //       主程序全部本地存储；http(s) 场景下同源策略大幅放宽。
+        //  3) 综合风险面：保持 allow-same-origin 不启用，是目前最保守、安全
+        //     的默认配置。如某一天确实需要它（例如共享 SharedWorker 或直读
+        //     主程序 CSS 变量的样式计算），必须先做安全审查，并同步收紧
+        //     SDK 暴露面 + 主程序 webPreferences 隔离策略。
         sandbox="allow-scripts allow-popups allow-downloads"
+        style={{ width: '100%', height: '100%', border: 0, display: 'block' }}
       />
     </div>
   );

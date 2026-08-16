@@ -744,6 +744,7 @@ pub fn run() {
             plugin::plugin_storage_set,
             plugin::plugin_storage_get,
             plugin::plugin_storage_remove,
+            plugin::plugin_storage_keys,
             plugin::plugin_storage_remove_all,
             plugin::plugin_storage_list_files,
             plugin::plugin_assert_perm,

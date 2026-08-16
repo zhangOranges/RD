@@ -289,8 +289,7 @@ export function createRDContext(opts: {
       },
       keys: async (): Promise<string[]> => {
         await assertPermission(opts.pluginId, 'storage.read');
-        // Phase 2 简化：Rust 端无 plugin_storage_keys 命令，返回空数组占位
-        return [];
+        return await invoke<string[]>('plugin_storage_keys', { pid: opts.pluginId });
       },
       clear: async (): Promise<void> => {
         await assertPermission(opts.pluginId, 'storage.write');
@@ -334,6 +333,7 @@ export function createRDContext(opts: {
             invoke<string>('ssh_exec', { hostId, command: finalCmd }),
             timeoutPromise,
           ]);
+          // 成功路径 stdout 不落日志：仅在返回值携带（前端可见），避免敏感输出进入日志
           return { success: true, output: stdout, exitCode: 0 };
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -341,7 +341,16 @@ export function createRDContext(opts: {
             return { success: false, output: msg, exitCode: -1 };
           }
           const friendly = classifyConnectFailure(msg);
-          logWarn(`[plugin:${opts.pluginId}] ssh.exec 失败: ${friendly.headline} - ${msg}`);
+          // 失败日志脱敏：避免（哪怕是）命令 stdout/stderr 片段被打到日志里
+          // 1) 截断原始错误信息到 300 字符；
+          // 2) 遮蔽常见可能带 stdout 的片段（stdout: / stderr: / raw output: 等）
+          let logMsg = msg.length > 300 ? msg.slice(0, 300) + `...(+${msg.length - 300}B)` : msg;
+          logMsg = logMsg.replace(
+            /((?:stdout|stderr|raw[_\- ]?output)\s*[:=]\s*)([^\n]{8,})/gi,
+            (_m, prefix: string, body: string) =>
+              `${prefix}<redacted len=${body.length}>`,
+          );
+          logWarn(`[plugin:${opts.pluginId}] ssh.exec 失败: ${friendly.headline} - ${logMsg}`);
           const outputHuman = `${friendly.headline}\n建议：${friendly.suggestion}\n（原始错误：${msg}）`;
           const match = /code (\d+)/.exec(msg);
           const exitCode = match ? Number(match[1]) : 1;

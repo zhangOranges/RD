@@ -1,9 +1,13 @@
 //! 插件热重载文件监听。
 //!
-//! 使用 notify crate 监听 `${appDataDir}/plugins/` 目录树，
+//! 使用 notify crate 监听多个目录：
+//!  1. `${appDataDir}/plugins/` — 用户安装后的运行目录（用户侧插件、内置插件副本）
+//!  2. `{src-tauri}/resources/plugins/` — 开发模式下内置插件源目录（开发者直接改源文件即可触发，
+//!     无需手动 copy 或重启主程序）
+//!
 //! 文件变更后 500ms debounce，emit `plugin:hot-reload` 事件给前端。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -21,18 +25,21 @@ static LAST_CHANGE: Mutex<Option<Instant>> = Mutex::new(None);
 const DEBOUNCE_MS: u64 = 500;
 
 /// 从变更路径中提取插件 ID
-/// 路径形如 `.../plugins/plugin-id@1.0.0/main.js`
-fn extract_plugin_id(path: &std::path::Path) -> Option<String> {
+/// 路径形如：
+///   - `.../plugins/plugin-id@1.0.0/main.js`       (运行时安装目录：含 @version)
+///   - `.../resources/plugins/plugin-id/index.html` (开发模式源目录：不带 @version)
+fn extract_plugin_id(path: &Path) -> Option<String> {
     // 向上查找包含 `plugins` 的路径段
     let components: Vec<_> = path.components().collect();
     for (i, comp) in components.iter().enumerate() {
         if comp.as_os_str() == "plugins" {
             if let Some(next) = components.get(i + 1) {
                 let dir_name = next.as_os_str().to_string_lossy().to_string();
-                // plugin-id@1.0.0 → plugin-id
+                // plugin-id@1.0.0 → plugin-id（支持运行时安装路径）
                 if let Some(idx) = dir_name.find('@') {
                     return Some(dir_name[..idx].to_string());
                 }
+                // resources/plugins/plugin-id/ → 直接返回目录名（源目录）
                 return Some(dir_name);
             }
         }
@@ -41,7 +48,7 @@ fn extract_plugin_id(path: &std::path::Path) -> Option<String> {
 }
 
 /// 检查是否是需要监听的文件
-fn is_watched_file(path: &std::path::Path) -> bool {
+fn is_watched_file(path: &Path) -> bool {
     if path.is_dir() {
         return false;
     }
@@ -49,8 +56,14 @@ fn is_watched_file(path: &std::path::Path) -> bool {
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
-    // 监听这些文件
-    if file_name == "manifest.json" || file_name == "main.js" || file_name == "index.html" {
+    // 监听这些文件：插件的关键入口
+    if file_name == "manifest.json"
+        || file_name == "main.js"
+        || file_name == "ui.js"
+        || file_name == "index.html"
+        || file_name == "ui.css"
+        || file_name == "icon.svg"
+    {
         return true;
     }
     // assets 目录下的文件
@@ -64,10 +77,23 @@ fn is_watched_file(path: &std::path::Path) -> bool {
     false
 }
 
-/// 启动文件监听
-pub fn start_watching(app: &AppHandle, plugins_dir: PathBuf) {
-    if !plugins_dir.exists() {
-        let _ = std::fs::create_dir_all(&plugins_dir);
+/// 启动文件监听。可传入多个目录（如运行时目录 + 开发模式源目录），
+/// 一个 watcher 实例对所有目录做递归监听。
+///
+/// 不存在的目录会跳过（不创建），避免生产环境下 `src-tauri/resources/plugins/` 路径没意义时
+/// 创建一个空目录污染文件系统。
+pub fn start_watching(app: &AppHandle, dirs: &[PathBuf]) {
+    let valid_dirs: Vec<PathBuf> = dirs
+        .iter()
+        .filter(|d| d.exists() && d.is_dir())
+        .cloned()
+        .collect();
+    if valid_dirs.is_empty() {
+        // 至少保证原行为：若第一个（运行时）目录不存在则创建它。
+        if let Some(plugins_dir) = dirs.first() {
+            let _ = std::fs::create_dir_all(plugins_dir);
+        }
+        return;
     }
 
     let app_handle = app.clone();
@@ -124,7 +150,16 @@ pub fn start_watching(app: &AppHandle, plugins_dir: PathBuf) {
 
     match watcher {
         Ok(mut w) => {
-            let _ = w.watch(&plugins_dir, RecursiveMode::Recursive);
+            // 对每个有效目录做递归监听；同一个 watcher 可以 watch 多个目录
+            for dir in &valid_dirs {
+                if let Err(e) = w.watch(dir, RecursiveMode::Recursive) {
+                    eprintln!(
+                        "[hot_reload] 监听目录 {} 失败: {}",
+                        dir.display(),
+                        e
+                    );
+                }
+            }
 
             // 替换旧 watcher
             let mut guard = WATCHER_HANDLE.lock().unwrap_or_else(|e| e.into_inner());

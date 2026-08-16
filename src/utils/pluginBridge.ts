@@ -24,12 +24,363 @@
 
 import { getCurrentThemeInfo } from '../store/themeStore';
 
+/**
+ * 插件公共样式库（随桥脚本一起注入到每个插件 iframe 的 <head> 内）。
+ *
+ * 目标：
+ *  - 给所有内置/第三方插件提供一套"和主程序视觉一致"的基础 CSS：reset、按钮、表单、switch、表格、菜单、
+ *    tag / mono / 警示条等，避免每个插件都复制粘贴一遍 base 样式。
+ *  - class 命名以 `.rd-` 前缀为主（如 `.rd-btn`、`.rd-form-input`），避免污染插件作者自己的私有样式；
+ *    同时给早期通用名（`.btn` / `.form-input` 等）保留等价别名，兼容 rd-native-port-forward 这批
+ *    已在内置插件目录里写好的 HTML（不用全量改 class 名，保持稳定）。
+ *  - 颜色 / 尺寸 / 间距一律用主程序同步过来的 CSS 变量，找不到时 fallback 到主程序"默认深色主题"的同值，
+ *    保证 iframe 没收到 theme-sync 前（首帧）也不会闪屏。
+ */
+export const PLUGIN_COMMON_CSS = `
+/* ===== RD Plugin Common Styles (injected by bridge) ===== */
+:root { color-scheme: dark; }
+:root[data-theme-type="light"] { color-scheme: light; }
+
+/* reset */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  color: var(--text-primary, #e4e4e7);
+  background: var(--bg-content, #14161a);
+  overflow: hidden;
+  user-select: none;
+}
+input, select, textarea, button { font-family: inherit; }
+a { color: inherit; }
+
+/* layout helpers */
+.rd-fill, #app { display: flex; flex-direction: column; height: 100%; width: 100%; }
+
+/* ---- buttons ---- */
+.rd-btn, .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--divider, rgba(127,127,127,0.25));
+  background: var(--bg-input, rgba(127,127,127,0.12));
+  color: var(--text-primary, #e4e4e7);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+  white-space: nowrap;
+}
+.rd-btn:hover, .btn:hover { background: var(--hover, rgba(127,127,127,0.2)); }
+.rd-btn:active, .btn:active { transform: translateY(1px); }
+.rd-btn:disabled, .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.rd-btn-primary, .btn-primary {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: var(--text-on-accent, #fff);
+}
+.rd-btn-primary:hover, .btn-primary:hover {
+  filter: brightness(1.08);
+  background: var(--accent, #3b82f6);
+}
+.rd-btn-danger, .btn-danger { color: var(--danger, #ef4444); }
+.rd-btn-danger:hover, .btn-danger:hover {
+  background: color-mix(in srgb, var(--danger, #ef4444) 12%, transparent);
+}
+.rd-btn-ghost, .btn-ghost { background: transparent; }
+
+/* ---- form controls ---- */
+.rd-form-input, .rd-form-select, .rd-form-textarea,
+.form-input, .form-select, .form-textarea {
+  background: var(--bg-input, rgba(127,127,127,0.12));
+  border: 1px solid var(--divider, rgba(127,127,127,0.25));
+  border-radius: 6px;
+  color: var(--text-primary, #e4e4e7);
+  font-size: 12.5px;
+  padding: 5px 9px;
+  outline: none;
+}
+.rd-form-input:focus, .rd-form-select:focus, .rd-form-textarea:focus,
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+  border-color: var(--accent, #3b82f6);
+}
+.rd-form-textarea, .form-textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
+
+.rd-form-select, .form-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='none' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5l3 3 3-3'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px 12px;
+  cursor: pointer;
+  background-color: var(--bg-input, rgba(127,127,127,0.12));
+}
+.rd-form-select:hover, .form-select:hover {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='none' stroke='%23cbd5e1' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5l3 3 3-3'/></svg>");
+}
+.rd-form-select option, .form-select option {
+  background: var(--bg-content, #1a1a1f);
+  color: var(--text-primary, #e4e4e7);
+}
+
+/* ---- switch ---- */
+.rd-switch-label, .pf-switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #b0b0b8);
+  cursor: pointer;
+  user-select: none;
+}
+.rd-switch, .pf-switch { position: relative; width: 30px; height: 16px; flex: 0 0 auto; }
+.rd-switch input, .pf-switch input { opacity: 0; width: 0; height: 0; }
+.rd-switch-track, .pf-switch-track {
+  position: absolute; inset: 0;
+  border-radius: 8px;
+  background: var(--divider, rgba(127,127,127,0.3));
+  transition: background 0.15s ease;
+}
+.rd-switch-track::after, .pf-switch-track::after {
+  content: '';
+  position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+.rd-switch.on .rd-switch-track, .rd-switch:has(input:checked) .rd-switch-track,
+.rd-switch input:checked + .rd-switch-track,
+.pf-switch.on .pf-switch-track, .pf-switch:has(input:checked) .pf-switch-track,
+.pf-switch input:checked + .pf-switch-track { background: var(--accent, #3b82f6); }
+.rd-switch.on .rd-switch-track::after, .rd-switch:has(input:checked) .rd-switch-track::after,
+.rd-switch input:checked + .rd-switch-track::after,
+.pf-switch.on .pf-switch-track::after, .pf-switch:has(input:checked) .pf-switch-track::after,
+.pf-switch input:checked + .pf-switch-track::after { transform: translateX(14px); }
+.rd-switch input:disabled + .rd-switch-track,
+.pf-switch input:disabled + .pf-switch-track { opacity: 0.5; }
+
+/* ---- dropdown menu ---- */
+.rd-menu-wrap, .pf-menu-wrap { position: relative; }
+.rd-menu, .pf-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  min-width: 168px;
+  background: var(--bg-content, #14161a);
+  border: 1px solid var(--divider, rgba(127,127,127,0.25));
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.rd-menu-item, .pf-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary, #e4e4e7);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.rd-menu-item:hover, .pf-menu-item:hover { background: var(--hover, rgba(127,127,127,0.2)); }
+
+/* ---- warn / danger banner ---- */
+.rd-banner-warn, .pf-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+}
+.rd-banner-danger, .pf-warn.danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--danger, #ef4444);
+}
+
+/* ---- table ---- */
+.rd-table, .pf-table { width: 100%; border-collapse: collapse; }
+.rd-table th, .pf-table th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-tertiary, #9a9aa2);
+  border-bottom: 1px solid var(--divider, rgba(127,127,127,0.25));
+  white-space: nowrap;
+}
+.rd-table td, .pf-table td {
+  padding: 9px 10px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--divider-soft, rgba(127,127,127,0.1));
+  vertical-align: middle;
+}
+.rd-table tr:hover td, .pf-table tr:hover td { background: var(--hover, rgba(127,127,127,0.08)); }
+
+/* ---- status pill / dot ---- */
+.rd-pill, .pf-mode-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+}
+.rd-dot, .pf-dot { display: inline-flex; align-items: center; gap: 6px; }
+.rd-dot i, .pf-dot i {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+  background: var(--text-tertiary, #9a9aa2); opacity: 0.4;
+}
+.rd-dot i.running, .pf-dot i.running {
+  background: #22c55e; opacity: 1; box-shadow: 0 0 0 2px rgba(34,197,94,0.15);
+}
+.rd-dot i.error, .pf-dot i.error { background: #ef4444; opacity: 1; }
+.rd-dot i.starting, .pf-dot i.starting { background: #f59e0b; opacity: 1; }
+
+/* ---- typography helpers ---- */
+.rd-mono, .pf-mono {
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+}
+.rd-muted { color: var(--text-tertiary, #9a9aa2); }
+.rd-sub, .pf-sub { font-size: 11px; color: var(--text-tertiary, #9a9aa2); }
+.rd-empty, .pf-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-tertiary, #9a9aa2);
+  font-size: 13px;
+}
+
+/* ---- card / panel ---- */
+.rd-card, .pf-form {
+  border-radius: 10px;
+  background: var(--bg-input, rgba(127,127,127,0.06));
+  border: 1px solid var(--divider, rgba(127,127,127,0.25));
+  padding: 16px;
+}
+`;
+
 /** 注入版 SDK 桥脚本（会被插到插件 index.html 的 </head> 前）。 */
 export const PLUGIN_BRIDGE_SCRIPT = `(function(){
   var pending = {}, seq = 0;              // sdk-invoke 调用（callId -> {res,rej}）
   var cbPending = {};                     // 远程回调调用（callId -> {res,rej}）
   var callbacks = {}, cbSeq = 0;          // 本地回调（cbId -> fn）
   function post(msg){ window.parent.postMessage(Object.assign({__rd_plugin:true}, msg), '*'); }
+
+  // ---- 捕获插件 JS 全局异常，转发给主程序展示错误横幅 ----
+  // window.onerror：拦截同步错误（语法错、ReferenceError、插件未定义变量等）
+  //   第 5 个参数 errObj 非标准但所有主流浏览器支持，优先取它的 stack
+  window.onerror = function(msg, src, line, col, err){
+    post({
+      type: 'plugin-error',
+      kind: 'error',
+      message: String(msg),
+      src: src || '',
+      line: line || 0,
+      col: col || 0,
+      stack: (err && err.stack) ? String(err.stack) : ''
+    });
+  };
+  // unhandledrejection：拦截 Promise 未捕获 reject（如 async 函数内部抛错没 await catch）
+  window.addEventListener('unhandledrejection', function(ev){
+    var reason = ev.reason;
+    var msg, stack = '';
+    if (reason instanceof Error) { msg = reason.message; stack = reason.stack || ''; }
+    else if (reason && typeof reason === 'object' && typeof reason.message === 'string') { msg = reason.message; stack = reason.stack || ''; }
+    else { try { msg = JSON.stringify(reason); } catch(_) { msg = String(reason); } }
+    post({
+      type: 'plugin-error',
+      kind: 'unhandledrejection',
+      message: msg,
+      src: '',
+      line: 0,
+      col: 0,
+      stack: typeof stack === 'string' ? stack : ''
+    });
+  });
+
+  // ---- 转发 console.* 到主程序插件日志面板 ----
+  //   - 原样保留 console 对开发者工具可见（通过 apply 调用原方法）；
+  //   - 同时把参数格式化（截断长度）后 post 给主程序，主程序 addLog 展示。
+  (function hookConsole(){
+    var orig = {};
+    var levels = ['log', 'info', 'debug', 'warn', 'error'];
+    function mapLevel(l){ return (l === 'warn') ? 'warn' : (l === 'error' ? 'error' : 'info'); }
+    function fmtArg(a){
+      if (a === void 0) return 'undefined';
+      if (a === null) return 'null';
+      if (typeof a === 'string') { return a.length > 2000 ? a.slice(0,2000) + '...(+len=' + (a.length-2000) + ')' : a; }
+      if (typeof a === 'number' || typeof a === 'boolean') { return String(a); }
+      try {
+        var s = JSON.stringify(a);
+        if (s.length > 2000) return s.slice(0,2000) + '...(+len=' + (s.length-2000) + ')';
+        return s;
+      } catch(_) { return String(a); }
+    }
+    for (var i = 0; i < levels.length; i++) {
+      (function(l){
+        var fn = (typeof console !== 'undefined' && console[l]) || function(){};
+        orig[l] = fn;
+        console[l] = function(){
+          var args = Array.prototype.slice.call(arguments);
+          try { orig[l].apply(console, args); } catch(_) {}
+          var text;
+          try { text = args.map(fmtArg).join(' '); } catch(_) { text = '[console format error]'; }
+          post({
+            type: 'plugin-console',
+            level: mapLevel(l),
+            rawLevel: l,
+            message: text,
+            ts: Date.now()
+          });
+        };
+      })(levels[i]);
+    }
+  })();
+
+  // ---- 转发 performance.mark / performance.measure 到主程序插件日志面板 ----
+  //   - 使用 PerformanceObserver 异步观察，不会阻塞插件业务代码；
+  //   - 只带元信息（name / entryType / startTime / duration），不带任何用户 payload。
+  (function hookPerf(){
+    try {
+      if (typeof PerformanceObserver !== 'function') return;
+      var obs = new PerformanceObserver(function(list){
+        var entries = list.getEntries ? list.getEntries() : [];
+        for (var i = 0; i < entries.length; i++) {
+          var e = entries[i];
+          post({
+            type: 'plugin-performance',
+            name: String(e.name || ''),
+            entryType: String(e.entryType || ''),
+            startTime: typeof e.startTime === 'number' ? Math.round(e.startTime) : 0,
+            duration: typeof e.duration === 'number' ? Math.round(e.duration) : 0,
+            ts: Date.now()
+          });
+        }
+      });
+      obs.observe({ entryTypes: ['mark', 'measure'] });
+    } catch(_) {
+      // 非关键路径：失败静默即可（老 webview 不支持 PerformanceObserver）
+    }
+  })();
 
   // 把函数替换为 {__rd_cb: id} 占位，注册到本地 callbacks
   function pack(v){
@@ -246,9 +597,13 @@ export function buildPluginIframeSrc(html: string, pluginId: string): string {
   }
 
   // ---- 2. 拼注入内容（顺序：<style> 先，<script> 桥后，都放 </head> 前）----
-  // 这样 CSS 变量先于 body 解析就位；桥脚本先于插件自己的 <script> 执行，
-  // 确保 window.__rdPlugin 在插件代码读取前已存在。
-  const tag = `${paletteStyle}<script>${bridge}<\/script>`;
+  // paletteStyle：当前主题的 CSS 变量，保证首帧颜色不闪
+  // commonStyle：PLUGIN_COMMON_CSS 公共样式库（按钮/表单/switch/表格等），
+  //   给所有插件一套和主程序视觉一致的 base class（含 .rd-* 前缀 + 旧别名）
+  // <script> 桥：SDK 调用代理 + 异常/console 转发
+  // 执行顺序保证：CSS 变量 → 公共样式 → 桥脚本 → 插件自己的 <style>/<script>
+  const commonStyle = `<style>${PLUGIN_COMMON_CSS}<\/style>`;
+  const tag = `${paletteStyle}${commonStyle}<script>${bridge}<\/script>`;
 
   // ---- 3. 给 <html> 根标签补 data-theme / data-theme-type 属性 ----
   // 匹配 <html（可能已有属性，如 <html lang="zh">），在末尾注入两个 data- 属性。

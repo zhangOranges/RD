@@ -167,14 +167,36 @@ pub fn plugin_install_from_dir(
 }
 
 /// 启动插件目录文件监听（热重载）
+///
+/// 同时监听两个目录：
+///  1. 运行时安装目录 `app_data_dir/plugins/` — 用户侧插件、内置插件安装后的工作副本
+///  2. 开发模式源目录 `{CARGO_MANIFEST_DIR}/resources/plugins/`
+///     —— Cargo.toml 所在目录（src-tauri）下的 resources/plugins。
+///     只在开发模式（该路径实际存在）时生效；打包后 src-tauri 目录不存在，会被跳过，
+///     不会造成空目录创建失败或报错。
+///
+/// 前端收到 `plugin:hot-reload` 事件后可以刷新 iframe / 重新安装对应内置插件。
 #[tauri::command]
 pub async fn plugin_start_hot_reload(
     app: tauri::AppHandle,
     state: tauri::State<'_, PluginState>,
 ) -> Result<(), String> {
-    let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
-    let plugins_dir = dir.join("plugins");
-    hot_reload::start_watching(&app, plugins_dir);
+    let app_data_dir = resolve_app_data_dir(Some(&app), Some(&state))?;
+    let runtime_plugins_dir = app_data_dir.join("plugins");
+
+    // CARGO_MANIFEST_DIR 编译期解析为 Cargo.toml 绝对路径（即 .../remote/src-tauri），
+    // 只在开发构建时有效；生产环境（cargo build --release）下同样会把路径写死，
+    // 但我们在 start_watching 内部会检查路径存在性 → 不存在就跳过，所以不会出错。
+    let dev_source_dir: Option<std::path::PathBuf> = option_env!("CARGO_MANIFEST_DIR")
+        .map(std::path::PathBuf::from)
+        .map(|p| p.join("resources").join("plugins"));
+
+    let mut watch_dirs: Vec<std::path::PathBuf> = vec![runtime_plugins_dir];
+    if let Some(dev) = dev_source_dir {
+        watch_dirs.push(dev);
+    }
+
+    hot_reload::start_watching(&app, &watch_dirs);
     Ok(())
 }
 
@@ -522,14 +544,18 @@ fn resolve_builtin_src_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
         .find(|c| c.join("manifest.json").exists())
 }
 
-/// 首次启动注册内置插件（幂等 + 自愈）：
+/// 首次启动注册内置插件（幂等 + 自愈 + 回滚）：
 /// - 未安装 → 从应用资源目录复制内置插件目录并安装
-/// - 已安装但界面入口缺失、或版本与随包资源不一致 → 卸载后重新安装
-///   （覆盖早期资源 glob 未拷贝嵌套目录导致的安装不完整，以及插件随版本升级）
+/// - 已安装但界面入口缺失、或版本与随包资源不一致 →
+///   ① 先 rename 备份旧目录 + 快照 store 条目 → ② 卸载旧版 → ③ 安装新版；
+///   若 ③ 失败则把备份 rename 回来 + 恢复 store 条目，避免「升级过程中断导致内置插件彻底没入口」。
 pub fn plugin_ensure_builtin(
     app: &tauri::AppHandle,
     state: &tauri::State<'_, PluginState>,
 ) -> Result<(), String> {
+    use crate::plugin::store::{load_store, save_store, PluginStoreItem};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     let app_dir = resolve_app_data_dir(Some(app), Some(state))?;
 
     let src_dir = resolve_builtin_src_dir(app)
@@ -539,50 +565,184 @@ pub fn plugin_ensure_builtin(
         .ok()
         .map(|m| m.version.clone());
 
-    let existing = manager::scan(&app_dir)?;
-    if let Some(p) = existing.iter().find(|p| p.manifest.id == BUILTIN_PLUGIN_ID) {
-        let entry = p
-            .manifest
-            .index_html
-            .clone()
-            .unwrap_or_else(|| p.manifest.entry.clone());
-        let dir = app_dir
-            .join("plugins")
-            .join(format!("{}@{}", p.manifest.id, p.manifest.version));
-        let entry_ok = dir.join(&entry).exists();
-        let version_ok = src_version
-            .as_ref()
-            .map(|v| v == &p.manifest.version)
-            .unwrap_or(true);
-        if entry_ok && version_ok {
-            return Ok(());
-        }
-        debug_log(
-            app,
-            LogLevel::Warn,
-            &format!(
-                "内置插件需更新/修复（entry_ok={}, installed_v={}, src_v={:?}），重新安装",
-                entry_ok, p.manifest.version, src_version
-            ),
-        );
-        manager::uninstall(&app_dir, BUILTIN_PLUGIN_ID)?;
+    /// 升级过程中的备份元信息：rename 后的旧目录路径 + store 条目快照
+    struct UpgradeBackup {
+        backup_dir: PathBuf,
+        original_dir: PathBuf,
+        store_item: Option<PluginStoreItem>,
     }
 
-    let manifest = manager::install_from_dir(&app_dir, &src_dir)?;
-    debug_log(
-        app,
-        LogLevel::Info,
-        &format!(
-            "内置插件已注册: {} v{} (来源 {})",
-            manifest.id,
-            manifest.version,
-            src_dir.display()
-        ),
-    );
+    impl UpgradeBackup {
+        /// 丢弃备份：安装成功后清理
+        fn discard(self) {
+            if self.backup_dir.exists() {
+                let _ = std::fs::remove_dir_all(&self.backup_dir);
+            }
+        }
+        /// 回滚：把备份目录 rename 回原名，并把 store 条目写回
+        fn restore(self, app_data_dir: &Path) -> Result<(), String> {
+            // 1) 若「新安装半截」导致 original_dir 存在，先移除以免 rename 冲突
+            if self.original_dir.exists() {
+                let _ = std::fs::remove_dir_all(&self.original_dir);
+            }
+            // 2) 备份目录 → 原目录
+            if self.backup_dir.exists() {
+                std::fs::rename(&self.backup_dir, &self.original_dir).map_err(|e| {
+                    format!(
+                        "回滚插件目录失败 {} -> {}: {}",
+                        self.backup_dir.display(),
+                        self.original_dir.display(),
+                        e
+                    )
+                })?;
+            }
+            // 3) 恢复 store 条目（先移除已写入的新 id 条目，再插入旧条目快照）
+            let mut items = load_store(app_data_dir).unwrap_or_default();
+            items.retain(|i| i.id != BUILTIN_PLUGIN_ID);
+            if let Some(s) = self.store_item {
+                items.push(s);
+            }
+            save_store(app_data_dir, &items)?;
+            Ok(())
+        }
+    }
+
+    let existing = manager::scan(&app_dir)?;
+    let backup: Option<UpgradeBackup> =
+        if let Some(p) = existing.iter().find(|p| p.manifest.id == BUILTIN_PLUGIN_ID) {
+            let entry = p
+                .manifest
+                .index_html
+                .clone()
+                .unwrap_or_else(|| p.manifest.entry.clone());
+            let dir = app_dir
+                .join("plugins")
+                .join(format!("{}@{}", p.manifest.id, p.manifest.version));
+            let entry_ok = dir.join(&entry).exists();
+            let version_ok = src_version
+                .as_ref()
+                .map(|v| v == &p.manifest.version)
+                .unwrap_or(true);
+            if entry_ok && version_ok {
+                return Ok(());
+            }
+            debug_log(
+                app,
+                LogLevel::Warn,
+                &format!(
+                    "内置插件需更新/修复（entry_ok={}, installed_v={}, src_v={:?}），重新安装",
+                    entry_ok, p.manifest.version, src_version
+                ),
+            );
+
+            // ===== 升级前备份（O(1) rename，不是整目录复制） =====
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let backup_dir = app_dir.join("plugins").join(format!(
+                "{}@{}._backup_{}",
+                p.manifest.id, p.manifest.version, ts
+            ));
+            let store_item_snapshot: Option<PluginStoreItem> =
+                load_store(&app_dir)
+                    .ok()
+                    .and_then(|items| {
+                        items.into_iter().find(|s| s.id == BUILTIN_PLUGIN_ID)
+                    });
+            if dir.exists() {
+                std::fs::rename(&dir, &backup_dir).map_err(|e| {
+                    format!(
+                        "备份旧插件目录失败 {} -> {}: {}",
+                        dir.display(),
+                        backup_dir.display(),
+                        e
+                    )
+                })?;
+            }
+            // 备份完后，手动移除 store 条目（不再调用 manager::uninstall，
+            // 因为它会 rm -rf 目录；而目录已经被我们 rename 走了）
+            {
+                let mut items = load_store(&app_dir).unwrap_or_default();
+                items.retain(|i| i.id != BUILTIN_PLUGIN_ID);
+                save_store(&app_dir, &items)?;
+            }
+            Some(UpgradeBackup {
+                backup_dir,
+                original_dir: dir,
+                store_item: store_item_snapshot,
+            })
+        } else {
+            None
+        };
+
+    // ===== 安装新版 =====
+    let install_result = manager::install_from_dir(&app_dir, &src_dir);
+    match (&install_result, backup) {
+        (Ok(manifest), Some(bk)) => {
+            // 成功 → 丢弃备份
+            bk.discard();
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "内置插件已升级/修复: {} v{} (来源 {})",
+                    manifest.id,
+                    manifest.version,
+                    src_dir.display()
+                ),
+            );
+        }
+        (Ok(manifest), None) => {
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!(
+                    "内置插件已注册: {} v{} (来源 {})",
+                    manifest.id,
+                    manifest.version,
+                    src_dir.display()
+                ),
+            );
+        }
+        (Err(e), Some(bk)) => {
+            // 失败 → 回滚
+            debug_log(
+                app,
+                LogLevel::Error,
+                &format!(
+                    "内置插件安装失败，正在回滚到上一可用版本: {}",
+                    e
+                ),
+            );
+            if let Err(rb) = bk.restore(&app_dir) {
+                debug_log(app, LogLevel::Error, &format!("内置插件回滚失败: {}", rb));
+                return Err(format!(
+                    "安装失败且回滚失败: install_err={}; rollback_err={}",
+                    e, rb
+                ));
+            }
+            return Err(format!("内置插件安装失败（已回滚）: {}", e));
+        }
+        (Err(e), None) => {
+            return Err(format!("内置插件首次安装失败: {}", e));
+        }
+    }
     Ok(())
 }
 
 // ===== Plugin Storage Helpers =====
+
+/// 单个 storage key 的 value 最大字节数（JSON 字符串 UTF-8 长度）。
+/// 超过则在 plugin_storage_set 阶段直接拒绝，避免一个插件把整块 store.json 撑爆。
+const PLUGIN_STORAGE_MAX_VALUE_BYTES: usize = 256 * 1024; // 256 KiB
+
+/// 单个插件 store.json 总文件大小上限。
+/// 超过则 set 被拒绝，让插件自己清存储，避免主程序 app_data_dir 被无限写满。
+const PLUGIN_STORAGE_MAX_TOTAL_BYTES: u64 = 8 * 1024 * 1024; // 8 MiB
+
+/// 单个插件文件存储（非 store.json，list_files 返回的那些）的单文件大小上限。
+const PLUGIN_STORAGE_MAX_FILE_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
 
 fn validate_plugin_id(pid: &str) -> Result<(), String> {
     // 冒号是 Windows NTFS 保留字符（ADS 分隔符），目录名含冒号会导致 os error 123
@@ -626,7 +786,16 @@ fn save_store_json(
     let store_path = dir.join("store.json");
     let json =
         serde_json::to_string_pretty(map).map_err(|e| format!("序列化 store.json 失败: {}", e))?;
-    std::fs::write(&store_path, json).map_err(|e| format!("写入 store.json 失败: {}", e))
+    // 先写临时文件 + rename，避免中途断电把 store.json 写坏（半写状态）
+    let tmp_path = store_path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, &json).map_err(|e| format!("写入 store.json.tmp 失败: {}", e))?;
+    std::fs::rename(&tmp_path, &store_path)
+        .map_err(|e| format!("rename store.json.tmp -> store.json 失败: {}", e))
+}
+
+/// 计算当前 store.json 序列化后的字节数（用于配额判断）
+fn store_json_size(map: &serde_json::Map<String, serde_json::Value>) -> usize {
+    serde_json::to_vec(map).map(|v| v.len()).unwrap_or(0)
 }
 
 // ===== Plugin Storage Commands =====
@@ -644,9 +813,28 @@ pub fn plugin_storage_set(
     if k.contains("..") || k.contains('/') || k.contains('\\') {
         return Err("INVALID_KEY".to_string());
     }
+    // ① value 级配额：单个 value 序列化字节 ≤ 256KB
+    let value_bytes = serde_json::to_vec(&v)
+        .map_err(|e| format!("序列化存储值失败: {}", e))?;
+    if value_bytes.len() > PLUGIN_STORAGE_MAX_VALUE_BYTES {
+        return Err(format!(
+            "STORAGE_VALUE_TOO_LARGE: key={} size={}B max={}B",
+            k,
+            value_bytes.len(),
+            PLUGIN_STORAGE_MAX_VALUE_BYTES
+        ));
+    }
     let data_dir = plugin_data_dir(&dir, &pid)?;
     let mut map = load_store_json(&data_dir);
     map.insert(k, v);
+    // ② total 级配额：整份 store.json ≤ 8MB（含所有 key）
+    let total = store_json_size(&map) as u64;
+    if total > PLUGIN_STORAGE_MAX_TOTAL_BYTES {
+        return Err(format!(
+            "STORAGE_QUOTA_EXCEEDED: plugin={} total={}B max={}B",
+            pid, total, PLUGIN_STORAGE_MAX_TOTAL_BYTES
+        ));
+    }
     save_store_json(&data_dir, &map)
 }
 
@@ -678,6 +866,19 @@ pub fn plugin_storage_remove(
 }
 
 #[tauri::command]
+pub fn plugin_storage_keys(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PluginState>,
+    pid: String,
+) -> Result<Vec<String>, String> {
+    let dir = resolve_app_data_dir(Some(&app), Some(&state))?;
+    validate_plugin_id(&pid)?;
+    let data_dir = plugin_data_dir(&dir, &pid)?;
+    let map = load_store_json(&data_dir);
+    Ok(map.keys().cloned().collect())
+}
+
+#[tauri::command]
 pub fn plugin_storage_remove_all(
     app: tauri::AppHandle,
     state: tauri::State<'_, PluginState>,
@@ -703,7 +904,21 @@ pub fn plugin_storage_list_files(
     let mut files = Vec::new();
     if let Ok(read_dir) = std::fs::read_dir(&data_dir) {
         for entry in read_dir.flatten() {
-            if entry.path().is_file() {
+            let entry_path = entry.path();
+            if entry_path.is_file() {
+                // 普通文件：检查 size 是否超过 16MB（单文件配额）；超了也列出来，
+                // 但主程序可以在上传/写入路径做拦截。此处仅展示 + 打印 warning。
+                if let Ok(md) = entry_path.metadata() {
+                    let size = md.len();
+                    if size > PLUGIN_STORAGE_MAX_FILE_BYTES {
+                        eprintln!(
+                            "[plugin_storage] 文件超过单文件配额: {} size={}B max={}B",
+                            entry_path.display(),
+                            size,
+                            PLUGIN_STORAGE_MAX_FILE_BYTES
+                        );
+                    }
+                }
                 if let Some(name) = entry.file_name().to_str() {
                     files.push(name.to_string());
                 }
