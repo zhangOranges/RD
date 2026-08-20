@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText as clipboardWriteText } from '@tauri-apps/plugin-clipboard-manager';
 import { logWarn, logError } from '../utils/log';
+import { isCancelError } from '../utils/cancel';
 import {
   Folder,
   File as FileIcon,
@@ -633,18 +634,14 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               successes++;
             }
           } catch (err) {
-            const errMsg = String(err);
-            // canceled 错误: 前端取消按钮 -> sftp_cancel_transfer -> Rust 端 Err("canceled")
-            const isCanceled =
-              errMsg === 'canceled' ||
-              errMsg.startsWith('canceled') ||
-              errMsg.includes('canceled');
-            if (isCanceled) {
+            if (isCancelError(err)) {
               // 不打错误 toast；UI 状态已经由 Rust emit 的 canceled 事件同步
             } else {
               errors++;
               logError(`upload failed: ${remotePath} ${String(err)}`);
-              pushToast('error', `${item.relPath}: ${errMsg}`);
+              pushToast('error', `${item.relPath}: ${String(err)}`);
+              // 清理远端残留的不完整文件（大小校验失败时后端已删除，这里兜底其他错误）
+              invoke('sftp_remove_file', { hostId, path: remotePath }).catch(() => {});
             }
           }
         }

@@ -22,7 +22,7 @@ use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags};
 use serde::Serialize;
 use tauri::Emitter;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::ssh::SshState;
 use crate::{debug_log, LogLevel};
@@ -534,6 +534,37 @@ pub async fn sftp_resolve_path(
                 return Err(mapped.into());
             }
         }
+    }
+}
+
+/// 判断分片上传是否已完成。
+///
+/// 空文件（total_bytes=0）也算完成 —— 之前用 `transferred >= total_bytes && total_bytes > 0`
+/// 会导致 0 字节文件永远收不到 "completed" 事件，任务卡在 running。
+fn is_upload_complete(transferred: u64, total_bytes: u64) -> bool {
+    transferred >= total_bytes
+}
+
+/// 远端文件大小校验结果。
+#[derive(Debug)]
+enum SizeCheckResult {
+    /// 大小匹配
+    Match,
+    /// 大小不匹配（期望 vs 实际）
+    Mismatch { expected: u64, actual: u64 },
+    /// 服务器未返回 size（fstat 返回 None），无法校验
+    Unknown,
+}
+
+/// 校验远端文件大小是否与预期一致。
+fn check_remote_size(remote_size: Option<u64>, total_bytes: u64) -> SizeCheckResult {
+    match remote_size {
+        Some(actual) if actual != total_bytes => SizeCheckResult::Mismatch {
+            expected: total_bytes,
+            actual,
+        },
+        Some(_) => SizeCheckResult::Match,
+        None => SizeCheckResult::Unknown,
     }
 }
 
@@ -1212,8 +1243,14 @@ pub async fn sftp_download_dir(
 /// 分片上传文件（前端 Blob.slice() 分块 -> 逐片 invoke 到这里）。
 ///
 /// - 首片 (`is_first == true`): 使用 `CREATE | TRUNCATE | WRITE` 打开文件，写入首片。
-/// - 后续片: 使用 `CREATE | WRITE | APPEND` 追加；不截断不覆盖。
+/// - 后续片: 使用 `CREATE | WRITE` 打开，通过 `seek(bytes_offset)` 定位后写入。
+///   不使用 APPEND 模式：避免写入中途失败重试时把整片数据追加到已部分写入的
+///   文件尾部，导致数据重复和内容错位。改为显式 offset 写入后，重试是幂等的
+///   —— seek 到同一 offset 覆盖写入，不会引入重复字节。
 /// - 每片写完都通过 `transfer-progress` 事件上报当前累计字节。
+/// - 写完后调用 `flush()` 等待所有 pending write ack 确认，确保：
+///   (1) 写入失败能被检测到从而触发重试；
+///   (2) 若服务器支持 fsync@openssh.com 则同步落盘。
 /// - 支持取消: 每次调用前都会检查 `CANCELLED_TASKS`，命中则返回错误并清理。
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -1253,7 +1290,10 @@ pub async fn sftp_upload_chunk(
         let flags = if is_first {
             OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE
         } else {
-            OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::APPEND
+            // 不使用 APPEND：改用 seek(bytes_offset) 显式定位写入位置。
+            // 这样写入失败重试时，seek 到同一 offset 覆盖写入，是幂等的，
+            // 不会把整片数据追加到已部分写入的文件尾部导致数据重复。
+            OpenFlags::CREATE | OpenFlags::WRITE
         };
         match sftp.open_with_flags(path.clone(), flags).await {
             Ok(mut file) => {
@@ -1272,11 +1312,81 @@ pub async fn sftp_upload_chunk(
                     let _ = app_handle.emit("transfer-progress", &evt);
                     return Err("canceled".to_string());
                 }
-                match file.write_all(&data).await {
+                // seek(offset) + write_all + flush 统一处理：
+                // 任一步失败都走同一套重试逻辑。flush 会 drain 所有
+                // pending write ack —— 不调用 flush 的话 write_all 返回
+                // Ok 并不保证服务器已确认写入，失败无法被检测到。
+                let write_result = async {
+                    use std::io::SeekFrom;
+                    file.seek(SeekFrom::Start(bytes_offset)).await?;
+                    file.write_all(&data).await?;
+                    file.flush().await
+                }
+                .await;
+                match write_result {
                     Ok(_) => {
-                        drop(file);
                         let transferred = bytes_offset + data.len() as u64;
-                        let is_completed = transferred >= total_bytes && total_bytes > 0;
+                        let is_completed = is_upload_complete(transferred, total_bytes);
+
+                        // 最后一片写完后校验远端文件大小，防止静默丢数据
+                        if is_completed {
+                            match file.metadata().await {
+                                Ok(attrs) => match check_remote_size(attrs.size, total_bytes) {
+                                    SizeCheckResult::Mismatch { expected, actual } => {
+                                        let err_msg = format!(
+                                            "上传完成但远端文件大小不匹配: 期望 {} 字节, 实际 {} 字节",
+                                            expected, actual
+                                        );
+                                        debug_log(
+                                            &app_handle,
+                                            LogLevel::Error,
+                                            &format!(
+                                                "sftp_upload_chunk 大小校验失败: host_id={} {} - {}",
+                                                host_id, path, err_msg
+                                            ),
+                                        );
+                                        drop(file);
+                                        // 删除不完整的远端文件，避免残留脏数据
+                                        let _ = sftp.remove_file(path.clone()).await;
+                                        let evt = TransferProgressEvent {
+                                            task_id: task_id.clone(),
+                                            kind: "upload".to_string(),
+                                            name,
+                                            bytes_transferred: transferred,
+                                            total_bytes,
+                                            status: "error".to_string(),
+                                            message: Some(err_msg.clone()),
+                                        };
+                                        let _ = app_handle.emit("transfer-progress", &evt);
+                                        return Err(err_msg);
+                                    }
+                                    SizeCheckResult::Match => { /* 大小匹配，正常通过 */ }
+                                    SizeCheckResult::Unknown => {
+                                        debug_log(
+                                            &app_handle,
+                                            LogLevel::Warn,
+                                            &format!(
+                                                "sftp_upload_chunk: 远端未返回文件大小，跳过校验: {}",
+                                                path
+                                            ),
+                                        );
+                                    }
+                                },
+                                Err(e) => {
+                                    // metadata 调用失败：无法校验，记录警告但不阻断上传
+                                    debug_log(
+                                        &app_handle,
+                                        LogLevel::Warn,
+                                        &format!(
+                                            "sftp_upload_chunk: 无法获取远端文件大小进行校验: {} - {}",
+                                            path, e
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+
+                        drop(file);
                         if is_completed {
                             debug_log(
                                 &app_handle,
@@ -1374,4 +1484,112 @@ pub async fn sftp_upload_chunk(
 pub fn sftp_cancel_transfer(task_id: String) -> Result<(), String> {
     mark_task_cancelled(&task_id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- is_upload_complete ----
+
+    #[test]
+    fn test_is_upload_complete_empty_file() {
+        // 空文件：transferred=0, total_bytes=0 → 必须返回 true
+        // 修复前 `total_bytes > 0` 条件导致空文件永不完成
+        assert!(is_upload_complete(0, 0));
+    }
+
+    #[test]
+    fn test_is_upload_complete_last_chunk() {
+        assert!(is_upload_complete(100, 100));
+        assert!(is_upload_complete(256 * 1024, 256 * 1024));
+    }
+
+    #[test]
+    fn test_is_upload_complete_intermediate_chunk() {
+        assert!(!is_upload_complete(256 * 1024, 1024 * 1024));
+        assert!(!is_upload_complete(0, 100));
+    }
+
+    // ---- check_remote_size ----
+
+    #[test]
+    fn test_check_remote_size_match() {
+        assert!(matches!(check_remote_size(Some(100), 100), SizeCheckResult::Match));
+        // 空文件也算匹配
+        assert!(matches!(check_remote_size(Some(0), 0), SizeCheckResult::Match));
+    }
+
+    #[test]
+    fn test_check_remote_size_mismatch() {
+        match check_remote_size(Some(99), 100) {
+            SizeCheckResult::Mismatch { expected, actual } => {
+                assert_eq!(expected, 100);
+                assert_eq!(actual, 99);
+            }
+            other => panic!("expected Mismatch, got {:?}", other),
+        }
+        // 空文件但远端有数据
+        match check_remote_size(Some(50), 0) {
+            SizeCheckResult::Mismatch { expected, actual } => {
+                assert_eq!(expected, 0);
+                assert_eq!(actual, 50);
+            }
+            other => panic!("expected Mismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_check_remote_size_unknown() {
+        assert!(matches!(check_remote_size(None, 100), SizeCheckResult::Unknown));
+        assert!(matches!(check_remote_size(None, 0), SizeCheckResult::Unknown));
+    }
+
+    // ---- mkdir_p_helper ----
+
+    #[test]
+    fn test_mkdir_p_helper_empty() {
+        assert_eq!(mkdir_p_helper(""), Vec::<String>::new());
+        assert_eq!(mkdir_p_helper("/"), Vec::<String>::new());
+        assert_eq!(mkdir_p_helper("///"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_mkdir_p_helper_simple_relative() {
+        assert_eq!(mkdir_p_helper("foo"), vec!["foo"]);
+    }
+
+    #[test]
+    fn test_mkdir_p_helper_simple_absolute() {
+        assert_eq!(mkdir_p_helper("/foo"), vec!["/foo"]);
+    }
+
+    #[test]
+    fn test_mkdir_p_helper_nested_relative() {
+        assert_eq!(mkdir_p_helper("foo/bar"), vec!["foo", "foo/bar"]);
+    }
+
+    #[test]
+    fn test_mkdir_p_helper_nested_absolute() {
+        assert_eq!(mkdir_p_helper("/foo/bar"), vec!["/foo", "/foo/bar"]);
+    }
+
+    #[test]
+    fn test_mkdir_p_helper_trailing_slash() {
+        assert_eq!(mkdir_p_helper("foo/"), vec!["foo"]);
+        assert_eq!(mkdir_p_helper("/foo/"), vec!["/foo"]);
+    }
+
+    #[test]
+    fn test_mkdir_p_helper_double_slash() {
+        assert_eq!(mkdir_p_helper("foo//bar"), vec!["foo", "foo/bar"]);
+    }
+
+    #[test]
+    fn test_mkdir_p_helper_deeply_nested() {
+        assert_eq!(
+            mkdir_p_helper("/a/b/c/d"),
+            vec!["/a", "/a/b", "/a/b/c", "/a/b/c/d"]
+        );
+    }
 }

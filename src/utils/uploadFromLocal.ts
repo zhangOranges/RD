@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { joinLocalPath, type LocalFileEntry } from '../store/localFileStore';
 import { useTransferStore, genTaskId } from '../store/transferStore';
 import { logWarn, logError } from '../utils/log';
+import { joinRemotePath } from './path';
+import { isCancelError } from './cancel';
 
 export interface LocalFlatItem {
   relPath: string;
@@ -17,7 +19,10 @@ export async function walkLocalDir(
   relBase: string,
   out: LocalFlatItem[],
 ): Promise<void> {
-  const entries = await invoke<LocalFileEntry[]>('list_local_dir', { path: dirFullPath }).catch(() => []);
+  const entries = await invoke<LocalFileEntry[]>('list_local_dir', { path: dirFullPath }).catch((e) => {
+    logWarn(`读取子目录失败，已跳过: ${dirFullPath} - ${String(e)}`);
+    return [];
+  });
   for (const e of entries) {
     const childRel = relBase ? `${relBase}/${e.name}` : e.name;
     const childFull = joinLocalPath(dirFullPath, e.name);
@@ -110,12 +115,8 @@ export async function readLocalFileChunked(
   }
 }
 
-/** 远程 POSIX 路径拼接（只负责拼 "当前目录 / 相对路径"，简单处理） */
-export function joinRemotePath(base: string, rel: string): string {
-  if (!base) return `/${rel.replace(/^\//, '')}`;
-  const b = base.endsWith('/') ? base : `${base}/`;
-  return b + rel.replace(/^\//, '');
-}
+/** 重新导出，保持现有 import 兼容 */
+export { joinRemotePath } from './path';
 
 export type OverrideChoice = 'skip' | 'overwrite' | 'ask';
 
@@ -212,13 +213,12 @@ async function uploadFolderCompressed(
     useTransferStore.getState().setTaskStatus(taskId, 'completed', { name: folderName });
     return true;
   } catch (err) {
-    const msg = String(err);
-    if (msg === '__canceled__' || msg.startsWith('canceled')) {
+    if (isCancelError(err)) {
       cancelTransferTask(taskId);
       pushToast('info', `已取消上传：${folderName}`);
     } else {
-      logError(`文件夹上传失败: ${folderName} - ${msg}`);
-      pushToast('error', `文件夹上传失败：${folderName} - ${msg}`);
+      logError(`文件夹上传失败: ${folderName} - ${String(err)}`);
+      pushToast('error', `文件夹上传失败：${folderName} - ${String(err)}`);
       cancelTransferTask(taskId);
     }
     return false;
@@ -414,14 +414,15 @@ export async function uploadLocalItemsToRemote(
         successes++;
       }
     } catch (err) {
-      const msg = String(err);
-      if (msg === '__canceled__' || msg === 'canceled' || msg.startsWith('canceled')) {
+      if (isCancelError(err)) {
         errors++;
       } else {
         errors++;
         logError(`upload failed: ${remotePath} ${String(err)}`);
-        pushToast('error', `${item.relPath}: ${msg}`);
+        pushToast('error', `${item.relPath}: ${String(err)}`);
         if (uploadTaskId) cancelTransferTask(uploadTaskId);
+        // 清理远端残留的不完整文件（大小校验失败时后端已删除，这里兜底其他错误）
+        invoke('sftp_remove_file', { hostId, path: remotePath }).catch(() => {});
       }
     }
   }
