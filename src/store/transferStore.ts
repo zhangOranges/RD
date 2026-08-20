@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
+import { formatFileSize } from '../utils/format';
 import type {
   TransferProgressPayload,
   TransferStatus,
@@ -85,17 +86,12 @@ export function genTaskId(): string {
 }
 
 /** 格式化字节大小（在 store 内集中处理，避免各处重复写）。 */
+/**
+ * @deprecated 使用 `formatFileSize` from `../utils/format` 替代。
+ * 保留此导出以兼容旧调用方。
+ */
 export function formatBytes(bytes: number): string {
-  if (bytes < 0 || !isFinite(bytes)) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  if (i === 0) return `${Math.round(v)} ${units[i]}`;
-  return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+  return formatFileSize(bytes);
 }
 
 /** 格式化速度：B/s、KB/s、MB/s、GB/s。 */

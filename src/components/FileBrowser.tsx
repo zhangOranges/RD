@@ -1434,14 +1434,14 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
         <span className="remote-pane-stats-left">
           <span>{stats.folders} 个文件夹, {stats.files} 个文件</span>
           <span className="remote-pane-stats-sep">|</span>
-          <span>{formatSize(stats.totalSize)}</span>
+          <span>{formatFileSize(stats.totalSize)}</span>
           {selectedNames.size > 0 && (
             <>
               <span className="remote-pane-stats-sep">|</span>
               <span style={{ color: 'var(--accent)' }}>
                 已选 {selectedNames.size} 项
                 {stats.selectedSize > 0 && (
-                  <span> · {formatSize(stats.selectedSize)}</span>
+                  <span> · {formatFileSize(stats.selectedSize)}</span>
                 )}
               </span>
             </>
@@ -1806,7 +1806,7 @@ function VirtualList(props: VirtualListProps) {
               </span>
               {/* 大小 */}
               <span className="remote-pane-cell remote-pane-cell-size">
-                {entry.is_dir ? '—' : formatSize(entry.size)}
+                {entry.is_dir ? '—' : formatFileSize(entry.size)}
               </span>
               {/* 类型 */}
               <span className="remote-pane-cell remote-pane-cell-type">
@@ -1901,18 +1901,7 @@ function typeLabel(entry: FileEntry): string {
   return '文件';
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  if (i === 0) return `${v} ${units[i]}`;
-  return `${v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
-}
+import { formatFileSize } from '../utils/format';
 
 function formatDate(ts: number): string {
   if (!ts) return '—';

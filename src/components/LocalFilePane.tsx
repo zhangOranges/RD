@@ -28,12 +28,7 @@ const ROW_HEIGHT = 26;
 // ---------- 工具函数 ----------
 
 /** 将字节数格式化为人类可读字符串。 */
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+import { formatFileSize } from '../utils/format';
 
 /** Unix 秒级时间戳 → `YYYY-MM-DD HH:mm`。 */
 function formatTime(unixSec: number): string {
@@ -538,14 +533,14 @@ export default function LocalFilePane() {
             <span className="local-stats-sep">,</span>
             <span>{stats.fileCount} 个文件</span>
             <span className="local-stats-sep">|</span>
-            <span>{formatSize(stats.totalSize)}</span>
+            <span>{formatFileSize(stats.totalSize)}</span>
             {selectedNames.size > 0 && (
               <>
                 <span className="local-stats-sep">|</span>
                 <span style={{ color: 'var(--accent)' }}>
                   已选 {selectedNames.size} 项
                   {stats.selectedSize > 0 && (
-                    <span> · {formatSize(stats.selectedSize)}</span>
+                    <span> · {formatFileSize(stats.selectedSize)}</span>
                   )}
                 </span>
               </>

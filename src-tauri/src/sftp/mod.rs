@@ -1515,9 +1515,15 @@ mod tests {
 
     #[test]
     fn test_check_remote_size_match() {
-        assert!(matches!(check_remote_size(Some(100), 100), SizeCheckResult::Match));
+        assert!(matches!(
+            check_remote_size(Some(100), 100),
+            SizeCheckResult::Match
+        ));
         // 空文件也算匹配
-        assert!(matches!(check_remote_size(Some(0), 0), SizeCheckResult::Match));
+        assert!(matches!(
+            check_remote_size(Some(0), 0),
+            SizeCheckResult::Match
+        ));
     }
 
     #[test]
@@ -1541,8 +1547,14 @@ mod tests {
 
     #[test]
     fn test_check_remote_size_unknown() {
-        assert!(matches!(check_remote_size(None, 100), SizeCheckResult::Unknown));
-        assert!(matches!(check_remote_size(None, 0), SizeCheckResult::Unknown));
+        assert!(matches!(
+            check_remote_size(None, 100),
+            SizeCheckResult::Unknown
+        ));
+        assert!(matches!(
+            check_remote_size(None, 0),
+            SizeCheckResult::Unknown
+        ));
     }
 
     // ---- mkdir_p_helper ----
