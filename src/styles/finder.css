@@ -1971,6 +1971,13 @@ html[data-theme="eye-care-green"] body {
   gap: 8px;
 }
 
+.dialog-footer-center {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex: 1;
+}
+
 .is-spin {
   animation: spin 1s linear infinite;
 }

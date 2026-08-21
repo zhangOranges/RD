@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nginx 管理</title>
+<style>
+  /* ============================================================
+   * RD 内置插件：Nginx 管理（rd-native-nginx-manager）
+   * —— 基础样式由主程序注入的 PLUGIN_COMMON_CSS 提供（.rd-* / .btn / .form-* 等）
+   * —— 本文件只声明 Nginx 插件独有的布局 / 业务样式
+   * —— 颜色一律使用主题 CSS 变量，自动适配深浅色
+   * —— 代码规范：统一使用 var 声明；el() 内部用局部 var e 避免遮蔽
+   * ============================================================ */
+
+  /* ---------- 顶栏 ---------- */
+  .ng-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--divider-soft, rgba(127,127,127,0.18));
+  }
+  .ng-actions { display: flex; align-items: center; gap: 8px; }
+  .ng-header .form-select { min-width: 180px; height: 30px; line-height: 1.2; padding: 4px 10px; box-sizing: border-box; }
+
+  /* ---------- Tab 栏 ---------- */
+  .ng-tabs {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 2px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--divider-soft, rgba(127,127,127,0.18));
+  }
+  .ng-tab {
+    appearance: none;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-tertiary, #9a9aa2);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 9px 14px;
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+  .ng-tab:hover { color: var(--text-primary, #e4e4e7); }
+  .ng-tab.active {
+    color: var(--accent, #3b82f6);
+    border-bottom-color: var(--accent, #3b82f6);
+  }
+
+  /* ---------- 通用面板 ---------- */
+  .ng-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px; }
+  .ng-panel { display: none; }
+  .ng-panel.active { display: flex; flex-direction: column; gap: 12px; }
+  .ng-section-title { font-size: 12.5px; font-weight: 600; color: var(--text-secondary, #b4b4bc); margin: 0; }
+  .ng-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .ng-row .form-input, .ng-row .form-select { height: 30px; line-height: 1.2; padding: 4px 10px; box-sizing: border-box; }
+  .ng-row .form-input { flex: 1 1 200px; min-width: 140px; }
+  .ng-label { font-size: 12px; font-weight: 500; color: var(--text-secondary, #b4b4bc); white-space: nowrap; }
+  .ng-grow { flex: 1 1 auto; }
+
+  /* ---------- 状态卡片 ---------- */
+  .ng-status-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--bg-soft, rgba(127,127,127,0.06));
+    border: 1px solid var(--divider-soft, rgba(127,127,127,0.18));
+  }
+  .ng-status-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--text-tertiary, #6b7280);
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 12%, transparent);
+  }
+  .ng-status-dot.active { background: #22c55e; color: #22c55e; }
+  .ng-status-dot.inactive { background: #71717a; color: #71717a; }
+  .ng-status-dot.failed { background: #ef4444; color: #ef4444; }
+  .ng-status-dot.unknown { background: #a1a1aa; color: #a1a1aa; }
+  .ng-status-text { font-size: 14px; font-weight: 600; }
+  .ng-status-sub { font-size: 11.5px; color: var(--text-tertiary, #9a9aa2); }
+
+  /* ---------- 信息网格 ---------- */
+  .ng-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+  }
+  .ng-info {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--bg-soft, rgba(127,127,127,0.06));
+    border: 1px solid var(--divider-soft, rgba(127,127,127,0.14));
+  }
+  .ng-info-label { font-size: 11px; color: var(--text-tertiary, #9a9aa2); margin-bottom: 4px; }
+  .ng-info-value { font-size: 13.5px; font-weight: 600; color: var(--text-primary, #e4e4e7); word-break: break-all; }
+  .ng-info-value.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  /* ---------- 输出区 ---------- */
+  .ng-output {
+    flex: 1 1 auto;
+    min-height: 120px;
+    max-height: 50vh;
+    overflow: auto;
+    margin: 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--bg-content, #0d0f13);
+    border: 1px solid var(--divider-soft, rgba(127,127,127,0.18));
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--text-secondary, #b4b4bc);
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+  }
+  .ng-output.empty { color: var(--text-tertiary, #6b7280); font-style: italic; }
+
+  /* ---------- 表格 ---------- */
+  .ng-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .ng-table thead th {
+    text-align: left; padding: 7px 10px; font-weight: 600; font-size: 11.5px;
+    color: var(--text-tertiary, #9a9aa2);
+    border-bottom: 1px solid var(--divider-soft, rgba(127,127,127,0.18));
+    white-space: nowrap;
+  }
+  .ng-table tbody tr { border-bottom: 1px solid var(--divider-soft, rgba(127,127,127,0.08)); }
+  .ng-table tbody tr:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); }
+  .ng-table tbody td { padding: 6px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ng-table tbody td.wrap { white-space: normal; word-break: break-all; }
+
+  /* ---------- 空状态 / 加载 ---------- */
+  .ng-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 40px 0; gap: 8px; color: var(--text-tertiary, #9a9aa2); font-size: 13px;
+  }
+  .ng-empty-icon { font-size: 28px; opacity: 0.5; }
+
+  /* ---------- 提示框 ---------- */
+  .ng-notice {
+    padding: 9px 12px; border-radius: 8px; font-size: 11.5px; line-height: 1.6;
+    background: color-mix(in srgb, var(--warn, #f59e0b) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warn, #f59e0b) 30%, transparent);
+    color: var(--text-secondary, #b4b4bc);
+  }
+  .ng-notice code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 1px 5px; border-radius: 3px; font-size: 11px;
+    background: var(--bg-soft, rgba(127,127,127,0.15));
+    color: var(--text-primary, #e4e4e7);
+  }
+  /* 等待连接提示条 */
+  .ng-wait {
+    padding: 12px 16px; border-radius: 8px; font-size: 12.5px; line-height: 1.6;
+    background: color-mix(in srgb, var(--info, #3b82f6) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--info, #3b82f6) 25%, transparent);
+    color: var(--text-secondary, #b4b4bc);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .ng-wait-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--text-tertiary, #6b7280);
+    animation: ng-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes ng-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+  .ng-wait strong { color: var(--text-primary, #e4e4e7); font-weight: 600; }
+
+  /* 按钮间距修正 */
+  .ng-ops { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body style="display:flex;flex-direction:column;height:100vh;margin:0;">
+
+<!-- ========== 顶栏 ========== -->
+<div class="ng-header">
+  <div class="ng-sub" style="font-size:14px;font-weight:600;">Nginx 管理</div>
+  <div class="ng-actions">
+    <select class="form-select" id="hostSelect" title="目标主机（默认当前会话，可切换）"></select>
+    <button class="btn" id="btnRefresh" title="刷新当前 Tab 数据">刷新</button>
+  </div>
+</div>
+
+<!-- ========== Tab 栏 ========== -->
+<div class="ng-tabs" id="tabBar"></div>
+
+<!-- ========== 内容区 ========== -->
+<div class="ng-body" id="tabBody">
+
+  <!-- ===== Tab 1: 服务控制 ===== -->
+  <div class="ng-panel" id="panel-service">
+    <div class="ng-wait" id="waitService" style="display:none;">
+      <span class="ng-wait-dot"></span>
+      <div><strong>等待主机连接</strong> 请先在左侧连接 SSH 主机，连接成功后将自动刷新 Nginx 状态。</div>
+    </div>
+    <div class="ng-status-card">
+      <span class="ng-status-dot unknown" id="svcDot"></span>
+      <div>
+        <div class="ng-status-text" id="svcText">未知</div>
+        <div class="ng-status-sub" id="svcSub">点击「查询状态」获取 Nginx 运行状态</div>
+      </div>
+      <div class="ng-grow"></div>
+      <button class="btn" id="btnSvcStatus">查询状态</button>
+    </div>
+
+    <div class="ng-ops">
+      <button class="btn btn-primary" id="btnStart" title="systemctl start nginx">启动</button>
+      <button class="btn" id="btnStop" title="systemctl stop nginx">停止</button>
+      <button class="btn" id="btnRestart" title="systemctl restart nginx">重启</button>
+      <button class="btn" id="btnReload" title="systemctl reload nginx / nginx -s reload">重载</button>
+    </div>
+
+    <div class="ng-notice">
+      服务控制通过 <code>systemctl</code> 执行。若命令返回权限错误，请确保该 SSH 主机用户对 <code>systemctl</code> 具备免密 <code>sudo</code> 或以 root 身份登录。
+    </div>
+
+    <pre class="ng-output empty" id="svcOutput">— 暂无输出 —</pre>
+  </div>
+
+  <!-- ===== Tab 2: 状态监控 ===== -->
+  <div class="ng-panel" id="panel-status">
+    <div class="ng-wait" id="waitStatus" style="display:none;">
+      <span class="ng-wait-dot"></span>
+      <div><strong>等待主机连接</strong> 请先在左侧连接 SSH 主机，连接成功后将自动刷新 Nginx 状态。</div>
+    </div>
+    <div class="ng-grid" id="statusGrid">
+      <div class="ng-info"><div class="ng-info-label">版本</div><div class="ng-info-value mono" id="stVersion">—</div></div>
+      <div class="ng-info"><div class="ng-info-label">运行状态</div><div class="ng-info-value" id="stActive">—</div></div>
+      <div class="ng-info"><div class="ng-info-label">主进程 PID</div><div class="ng-info-value mono" id="stMainPid">—</div></div>
+      <div class="ng-info"><div class="ng-info-label">Worker 进程数</div><div class="ng-info-value mono" id="stWorkers">—</div></div>
+      <div class="ng-info"><div class="ng-info-label">编译参数</div><div class="ng-info-value mono" id="stBuilt" style="font-size:10.5px;white-space:normal;">—</div></div>
+      <div class="ng-info"><div class="ng-info-label">开机自启</div><div class="ng-info-value" id="stEnabled">—</div></div>
+    </div>
+
+    <div>
+      <h3 class="ng-section-title">监听端口</h3>
+      <div class="ng-table-wrap" style="overflow:auto;">
+        <table class="ng-table" id="listenTable">
+          <thead><tr><th>协议</th><th>本地地址:端口</th><th>进程</th></tr></thead>
+          <tbody id="listenBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Tab 3: 日志查看 ===== -->
+  <div class="ng-panel" id="panel-log">
+    <div class="ng-wait" id="waitLog" style="display:none;">
+      <span class="ng-wait-dot"></span>
+      <div><strong>等待主机连接</strong> 请先在左侧连接 SSH 主机，连接成功后将自动刷新 Nginx 状态。</div>
+    </div>
+    <div class="ng-row">
+      <span class="ng-label">类型</span>
+      <select class="form-select" id="logType" style="min-width:130px;">
+        <option value="access">access.log</option>
+        <option value="error">error.log</option>
+      </select>
+      <span class="ng-label">路径</span>
+      <input class="form-input" id="logPath" type="text" placeholder="/var/log/nginx/access.log" />
+      <span class="ng-label">行数</span>
+      <input class="form-input" id="logLines" type="number" min="10" max="5000" value="200" style="flex:0 0 90px;min-width:90px;" />
+      <button class="btn btn-primary" id="btnLogView">查看</button>
+      <button class="btn" id="btnLogTail">刷新</button>
+    </div>
+    <pre class="ng-output empty" id="logOutput">— 选择日志并点击查看 —</pre>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ====== 初始化顺序：R / ctx / PLUGIN_ID 必须在所有函数声明之前 ======
+  var R = window.__rdPlugin;
+  var ctx = R.ctx;
+  var PLUGIN_ID = R.getPluginId();
+
+  // ====== 常量 ======
+  var DEFAULT_ACCESS_LOG = '/var/log/nginx/access.log';
+  var DEFAULT_ERROR_LOG = '/var/log/nginx/error.log';
+
+  var TABS = [
+    { id: 'service', label: '服务控制' },
+    { id: 'status', label: '状态监控' },
+    { id: 'log', label: '日志查看' }
+  ];
+
+  // ====== 工具函数（统一 var / 局部 e） ======
+  var el = function (id) { return document.getElementById(id); };
+  var errMsg = function (e) { return (e && e.message) || String(e); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  function log(level, msg) {
+    try { ctx.log[level]('[' + PLUGIN_ID + '] ' + msg); } catch (e) { /* ignore */ }
+  }
+  function notify(kind, msg) {
+    try { ctx.ui.notify(kind, msg); } catch (e) { /* ignore */ }
+  }
+  function elNew(tag, props, children) {
+    var e = document.createElement(tag);
+    if (props) {
+      for (var k in props) {
+        if (k === 'class') e.className = props[k];
+        else if (k === 'style' && typeof props[k] === 'object') Object.assign(e.style, props[k]);
+        else e[k] = props[k];
+      }
+    }
+    if (children) {
+      (Array.isArray(children) ? children : [children]).forEach(function (c) {
+        if (c == null) return;
+        e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+      });
+    }
+    return e;
+  }
+  // 用 storage 记忆路径配置（可选能力，缺失时静默降级）
+  async function kvGet(key, fallback) {
+    try { var v = await ctx.storage.get(key); return v == null ? fallback : v; }
+    catch (e) { return fallback; }
+  }
+  async function kvSet(key, value) {
+    try { await ctx.storage.set(key, value); } catch (e) { /* ignore */ }
+  }
+
+  // ====== 状态 ======
+  var state = {
+    hosts: [],
+    hostStates: {},
+    hostId: '',
+    activeTab: 'service',
+    busy: false,
+    ready: false,
+  };
+  var busUnsubs = [];
+  var viewIsOpen = false;
+
+  // ====== DOM ======
+  var hostSelect = el('hostSelect');
+  var tabBar = el('tabBar');
+  var tabBody = el('tabBody');
+
+  // ====== SSH 执行封装 ======
+  // 统一执行命令，返回 { success, output, exitCode }
+  async function runCmd(cmd, timeoutMs) {
+    if (!state.hostId) throw new Error('未选择主机');
+    var st = state.hostStates[state.hostId];
+    if (st !== 'connected') throw new Error('主机未连接（' + (st || 'disconnected') + '）');
+    return await ctx.ssh.exec(state.hostId, cmd, { timeoutMs: timeoutMs || 30000 });
+  }
+
+  // ====== 主机列表 ======
+  async function loadHosts() {
+    try {
+      var all = await ctx.server.listAll();
+      var states = await Promise.all(all.map(function (h) {
+        return ctx.server.getConnectionState(h.id).catch(function () { return 'disconnected'; });
+      }));
+      state.hosts = all;
+      state.hostStates = {};
+      all.forEach(function (h, i) { state.hostStates[h.id] = states[i] || 'disconnected'; });
+
+      // 默认主机：取首个已连接主机（无已连接主机时留空，等待 connection:success 事件）
+      var selId = null;
+      for (var i = 0; i < all.length; i++) {
+        if (state.hostStates[all[i].id] === 'connected') { selId = all[i].id; break; }
+      }
+      // 若原已选中且仍有效则保留
+      if (state.hostId && state.hostStates[state.hostId] === 'connected') {
+        selId = state.hostId;
+      }
+      state.hostId = selId || '';
+
+      renderHostSelect();
+      log('info', '主机列表加载: total=' + all.length + ', current=' + state.hostId);
+    } catch (e) {
+      log('warn', '加载主机列表失败: ' + errMsg(e));
+      notify('error', '加载主机列表失败：' + errMsg(e));
+    }
+  }
+
+  function renderHostSelect() {
+    var prev = state.hostId;
+    var html = '<option value="">请选择主机…</option>';
+    var hasAnyConnected = false;
+    state.hosts.forEach(function (h) {
+      var st = state.hostStates[h.id] || 'disconnected';
+      var connected = st === 'connected';
+      if (connected) hasAnyConnected = true;
+      var label = esc(h.name) + ' (' + esc(h.host) + ':' + h.port + ')';
+      if (!connected) label += ' · ' + (st === 'connecting' ? '连接中' : st === 'reconnecting' ? '重连中' : '未连接');
+      html += '<option value="' + esc(h.id) + '"' + (connected ? '' : ' disabled') + '>' + label + '</option>';
+    });
+    if (!state.hosts.length) html += '<option value="" disabled>暂无主机，请先在左侧添加并连接</option>';
+    else if (!hasAnyConnected) html = '<option value="">等待主机连接…</option>' + html;
+    hostSelect.innerHTML = html;
+    if (prev && state.hostStates[prev] === 'connected') hostSelect.value = prev;
+    else hostSelect.value = '';
+  }
+
+  // ====== Tab 渲染 ======
+  function renderTabs() {
+    tabBar.innerHTML = '';
+    TABS.forEach(function (t) {
+      var b = elNew('button', {
+        class: 'ng-tab' + (state.activeTab === t.id ? ' active' : ''),
+        type: 'button',
+        onclick: function () { switchTab(t.id); }
+      }, t.label);
+      tabBar.appendChild(b);
+    });
+    switchTab(state.activeTab);
+  }
+  function switchTab(id) {
+    state.activeTab = id;
+    TABS.forEach(function (t) {
+      var btn = tabBar.querySelector('.ng-tab[data-tab="' + t.id + '"]');
+      // 通过重新绑定确保 active 切换（onclick 设置无 data-tab，这里改用 class 直接刷新）
+    });
+    // 重新渲染 Tab 高亮
+    var btns = tabBar.querySelectorAll('.ng-tab');
+    btns.forEach(function (b, i) { b.classList.toggle('active', TABS[i].id === id); });
+    // 切换面板
+    TABS.forEach(function (t) {
+      var p = el('panel-' + t.id);
+      if (p) p.classList.toggle('active', t.id === id);
+    });
+    // 进入面板时按需刷新
+    if (id === 'status') { void refreshStatus(); }
+    else if (id === 'service') { void refreshServiceStatus(); }
+  }
+
+  // ================= Tab1: 服务控制 =================
+  function setSvcDot(kind, text, sub) {
+    var dot = el('svcDot');
+    dot.className = 'ng-status-dot ' + kind;
+    el('svcText').textContent = text;
+    if (sub != null) el('svcSub').textContent = sub;
+  }
+  function setSvcOutput(s) {
+    var o = el('svcOutput');
+    o.textContent = s == null || s === '' ? '— 暂无输出 —' : s;
+    o.classList.toggle('empty', !s);
+  }
+  async function refreshServiceStatus() {
+    if (!ensureHost()) return;
+    setBusy(true);
+    try {
+      // systemctl is-active 输出 active/inactive/failed/unknown
+      var r = await runCmd('systemctl is-active nginx 2>/dev/null; echo "---"; systemctl is-enabled nginx 2>/dev/null', 12000);
+      var out = (r.output || '').trim();
+      var parts = out.split('---').map(function (s) { return s.trim(); });
+      var active = parts[0] || '';
+      var enabled = parts[1] || '';
+      var kind = 'unknown', text = '未知';
+      if (active === 'active') { kind = 'active'; text = '运行中'; }
+      else if (active === 'inactive') { kind = 'inactive'; text = '已停止'; }
+      else if (active === 'failed') { kind = 'failed'; text = '失败'; }
+      else if (active) { text = active; }
+      setSvcDot(kind, text, 'systemctl: ' + active + (enabled ? ' · 开机自启: ' + enabled : ''));
+      setSvcOutput(r.success ? out : '查询失败：' + out);
+    } catch (e) {
+      setSvcDot('unknown', '查询失败', errMsg(e));
+      setSvcOutput('查询失败：' + errMsg(e));
+    } finally { setBusy(false); }
+  }
+  async function svcAction(action) {
+    if (!ensureHost()) return;
+    if (action !== 'status') {
+      var ok = await ctx.ui.confirm('Nginx ' + action, '确定在主机上执行 nginx ' + action + ' ？');
+      if (!ok) return;
+    }
+    setBusy(true);
+    var cmd;
+    if (action === 'reload') {
+      // reload 失败回退到 nginx -s reload
+      cmd = 'systemctl reload nginx 2>/dev/null || nginx -s reload 2>&1';
+    } else {
+      cmd = 'systemctl ' + action + ' nginx 2>&1';
+    }
+    try {
+      var r = await runCmd(cmd, 30000);
+      var out = (r.output || '').trim();
+      setSvcOutput((r.success && !out ? '已执行 ' + action + '（无输出）' : out) || ('执行 ' + action + ' 完成'));
+      log('info', '服务控制: ' + action + ', success=' + r.success);
+      notify(r.success ? 'success' : 'error', 'nginx ' + action + (r.success ? ' 已执行' : ' 失败'));
+      // 操作后刷新状态
+      void refreshServiceStatus();
+    } catch (e) {
+      setSvcOutput('执行失败：' + errMsg(e));
+      notify('error', 'nginx ' + action + ' 失败：' + errMsg(e));
+      log('error', '服务控制失败: ' + action + ', err=' + errMsg(e));
+    } finally { setBusy(false); }
+  }
+
+  // ================= Tab2: 状态监控 =================
+  async function refreshStatus() {
+    if (!ensureHost()) return;
+    setBusy(true);
+    try {
+      // 一次性获取：版本、状态、主PID、worker数、编译参数、开机自启
+      var cmd = [
+        'nginx -v 2>&1',
+        'systemctl is-active nginx 2>/dev/null',
+        'systemctl show -p MainPID --value nginx 2>/dev/null',
+        'pgrep -c nginx 2>/dev/null',
+        'nginx -V 2>&1 | tail -1',
+        'systemctl is-enabled nginx 2>/dev/null'
+      ].join('\necho "---NGXSEP---";\n');
+      var r = await runCmd(cmd, 15000);
+      var parts = (r.output || '').split(/---NGXSEP---/).map(function (s) { return s.trim(); });
+      el('stVersion').textContent = parts[0] || '—';
+      el('stActive').textContent = parts[1] || '—';
+      el('stMainPid').textContent = parts[2] && parts[2] !== '0' ? parts[2] : '—';
+      el('stWorkers').textContent = parts[3] || '—';
+      el('stBuilt').textContent = parts[4] || '—';
+      el('stEnabled').textContent = parts[5] || '—';
+      // 监听端口
+      void refreshListen();
+    } catch (e) {
+      log('warn', '状态监控失败: ' + errMsg(e));
+      notify('error', '状态获取失败：' + errMsg(e));
+    } finally { setBusy(false); }
+  }
+  async function refreshListen() {
+    var body = el('listenBody');
+    body.innerHTML = '';
+    try {
+      var r = await runCmd('ss -tlnp 2>/dev/null | grep -i nginx || netstat -tlnp 2>/dev/null | grep -i nginx', 12000);
+      var out = (r.output || '').trim();
+      if (!out) {
+        body.appendChild(elNew('tr', {}, elNew('td', { colspan: 3, class: 'ng-empty' }, '未检测到 nginx 监听端口（可能需要 root 权限查看进程）')));
+        return;
+      }
+      out.split('\n').forEach(function (line) {
+        var t = line.trim();
+        if (!t) return;
+        var parts = t.split(/\s+/);
+        if (parts.length < 5) return;
+        var proto = parts[0];
+        var local = parts[4] || '';
+        var proc = parts.slice(5).join(' ') || '';
+        var cells = [proto, local, proc];
+        var tr = elNew('tr', {});
+        cells.forEach(function (c) {
+          tr.appendChild(elNew('td', { class: (c === proc ? 'wrap' : '') }, c || '—'));
+        });
+        body.appendChild(tr);
+      });
+    } catch (e) {
+      body.appendChild(elNew('tr', {}, elNew('td', { colspan: 3, class: 'ng-empty' }, '查询失败：' + errMsg(e))));
+    }
+  }
+
+  // ================= Tab3: 日志查看 =================
+  function currentLogPath() {
+    var type = el('logType').value;
+    var path = el('logPath').value.trim();
+    if (!path) path = (type === 'access') ? DEFAULT_ACCESS_LOG : DEFAULT_ERROR_LOG;
+    return path;
+  }
+  async function viewLog() {
+    if (!ensureHost()) return;
+    var path = currentLogPath();
+    var lines = parseInt(el('logLines').value, 10) || 200;
+    if (lines < 10) lines = 10;
+    if (lines > 5000) lines = 5000;
+    el('logLines').value = lines;
+    setBusy(true);
+    var o = el('logOutput');
+    o.textContent = '正在读取 ' + path + ' …';
+    o.classList.remove('empty');
+    try {
+      var r = await runCmd('tail -n ' + lines + ' ' + shellQuote(path) + ' 2>&1', 15000);
+      var out = (r.output || '').trim();
+      o.textContent = out || '（文件为空或不存在）';
+      o.classList.toggle('empty', !out);
+      void kvSet('ng.logType', el('logType').value);
+      void kvSet('ng.logPath', path);
+      void kvSet('ng.logLines', lines);
+    } catch (e) {
+      o.textContent = '读取失败：' + errMsg(e);
+      log('warn', '日志读取失败: ' + errMsg(e));
+    } finally { setBusy(false); }
+  }
+  function onLogTypeChange() {
+    var type = el('logType').value;
+    var inp = el('logPath');
+    if (!inp.value.trim() || inp.value.trim() === DEFAULT_ACCESS_LOG || inp.value.trim() === DEFAULT_ERROR_LOG) {
+      inp.value = (type === 'access') ? DEFAULT_ACCESS_LOG : DEFAULT_ERROR_LOG;
+    }
+  }
+
+  // ====== 工具：shell 引用（避免路径含空格 / 特殊字符） ======
+  function shellQuote(s) {
+    s = String(s == null ? '' : s);
+    if (s === '') return "''";
+    if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s)) return s;
+    return "'" + s.replace(/'/g, "'\\''") + "'";
+  }
+
+  // ====== 通用：主机校验 + busy ======
+  function hasConnectedHost() {
+    for (var k in state.hostStates) {
+      if (state.hostStates[k] === 'connected') return true;
+    }
+    return false;
+  }
+  function updateWaitNotice() {
+    var any = hasConnectedHost();
+    el('waitService').style.display = any ? 'none' : 'flex';
+    el('waitStatus').style.display = any ? 'none' : 'flex';
+    el('waitLog').style.display = any ? 'none' : 'flex';
+    // 无已连接主机时禁用所有操作按钮
+    var btns = tabBody.querySelectorAll('button.btn');
+    btns.forEach(function (b) { b.disabled = !any || state.busy; });
+  }
+  function ensureHost() {
+    if (!state.hostId) return false;
+    if (state.hostStates[state.hostId] !== 'connected') return false;
+    return true;
+  }
+  function setBusy(b) {
+    state.busy = b;
+    updateWaitNotice();
+  }
+
+  // ====== 事件绑定 ======
+  function bind() {
+    hostSelect.addEventListener('change', function () {
+      state.hostId = hostSelect.value;
+      // 切换主机后刷新状态提示
+      updateWaitNotice();
+      // 仅当选中的主机已连接时才刷新当前 Tab
+      if (state.hostId && state.hostStates[state.hostId] === 'connected') {
+        switchTab(state.activeTab);
+      } else {
+        log('info', '切换主机: ' + state.hostId + '，等待连接…');
+      }
+    });
+
+    // 顶栏刷新
+    el('btnRefresh').addEventListener('click', function () {
+      if (state.activeTab === 'service') void refreshServiceStatus();
+      else if (state.activeTab === 'status') void refreshStatus();
+      else if (state.activeTab === 'log') void viewLog();
+    });
+
+    // Tab1 服务控制
+    el('btnSvcStatus').addEventListener('click', function () { void refreshServiceStatus(); });
+    el('btnStart').addEventListener('click', function () { void svcAction('start'); });
+    el('btnStop').addEventListener('click', function () { void svcAction('stop'); });
+    el('btnRestart').addEventListener('click', function () { void svcAction('restart'); });
+    el('btnReload').addEventListener('click', function () { void svcAction('reload'); });
+
+    // Tab3 日志
+    el('logType').addEventListener('change', onLogTypeChange);
+    el('btnLogView').addEventListener('click', function () { void viewLog(); });
+    el('btnLogTail').addEventListener('click', function () { void viewLog(); });
+
+    // Esc 关闭视图
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { try { ctx.ui.closePluginView(); } catch (err) { /* ignore */ } }
+    });
+  }
+
+  // ====== 恢复记忆的配置 ======
+  async function restorePrefs() {
+    var logType = await kvGet('ng.logType', 'access');
+    el('logType').value = logType;
+    var logPath = await kvGet('ng.logPath', logType === 'error' ? DEFAULT_ERROR_LOG : DEFAULT_ACCESS_LOG);
+    el('logPath').value = logPath;
+    var logLines = await kvGet('ng.logLines', 200);
+    el('logLines').value = logLines;
+  }
+
+  // ====== 生命周期（完全对齐端口转发插件） ======
+  R.on({
+    init: async function () {
+      log('info', '插件初始化（init）');
+      try {
+        await ctx.ui.registerToolbarButton({
+          id: 'nginx-manager-open',
+          label: 'Nginx 管理',
+          tooltip: '通过 SSH 管理远程 Nginx：服务控制 / 状态监控 / 日志查看',
+          group: 'center',
+          onClick: function () { return ctx.ui.openPluginView(); },
+        });
+        log('info', '工具栏按钮已注册');
+      } catch (e) {
+        log('error', '注册工具栏按钮失败: ' + errMsg(e));
+      }
+    },
+    enable: async function () {
+      log('info', '插件启用（enable）');
+      // 先渲染空界面，避免 SDK 调用慢时停留在 loading
+      renderTabs();
+      state.ready = true;
+
+      // 连接成功后自动刷新当前 Tab
+      busUnsubs.push(R.onBus('connection:success', async function () {
+        log('info', '检测到主机连接成功，刷新主机列表');
+        await loadHosts();
+        if (state.hostId && state.hostStates[state.hostId] === 'connected') {
+          log('info', '主机已就绪，自动刷新当前 Tab: ' + state.activeTab);
+          switchTab(state.activeTab);
+        }
+      }));
+      busUnsubs.push(R.onBus('connection:reconnect-success', async function () {
+        log('info', '检测到主机重连成功，刷新主机列表');
+        await loadHosts();
+        if (state.hostId && state.hostStates[state.hostId] === 'connected') {
+          switchTab(state.activeTab);
+        }
+      }));
+      log('info', '已订阅事件: connection:success / reconnect-success');
+
+      await restorePrefs();
+      await loadHosts();
+      // 只有存在已连接主机时才自动刷新数据
+      if (state.hostId && state.hostStates[state.hostId] === 'connected') {
+        switchTab(state.activeTab);
+      } else {
+        log('info', '暂无已连接主机，等待 connection:success 事件…');
+        updateWaitNotice();
+      }
+    },
+    disable: async function () {
+      log('info', '插件禁用（disable）');
+      busUnsubs.forEach(function (u) { try { u(); } catch (e) { /* ignore */ } });
+      busUnsubs = [];
+      if (viewIsOpen) {
+        try { await ctx.ui.closePluginView(); } catch (e) { /* ignore */ }
+        viewIsOpen = false;
+      }
+    },
+    uninstall: async function () {
+      log('info', '插件卸载（uninstall）');
+    },
+  });
+
+  // ====== 视图打开/关闭监听（对齐端口扫描插件） ======
+  var hostRoot = document.body.parentElement;
+  if (hostRoot && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(function () {
+      var anyOpen = !hostRoot.classList.contains('rd-view-hidden');
+      var wasOpen = viewIsOpen;
+      viewIsOpen = anyOpen;
+      if (anyOpen && !wasOpen) {
+        // 视图刚打开：刷新主机列表 + 当前 Tab
+        void loadHosts().then(function () {
+          if (state.hostId && state.hostStates[state.hostId] === 'connected') {
+            switchTab(state.activeTab);
+          } else {
+            updateWaitNotice();
+          }
+        });
+      }
+    }).observe(hostRoot, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  bind();
+})();
+</script>
+</body>
+</html>

@@ -237,19 +237,42 @@ export function PluginDetail() {
                 v{plugin.version} · {plugin.category}
               </div>
             </div>
-            {/* 启用开关 */}
-            <label
-              className="form-switch"
-              onClick={(e) => e.stopPropagation()}
-              style={{ flexShrink: 0 }}
-            >
-              <input
-                type="checkbox"
-                checked={plugin.enabled}
-                onChange={(e) => void togglePlugin(plugin.id, e.target.checked)}
-              />
-              <span className="form-switch-track" aria-hidden="true" />
-            </label>
+            {/* 启用开关 + 卸载 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <label
+                className="form-switch"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  checked={plugin.enabled}
+                  onChange={(e) => void togglePlugin(plugin.id, e.target.checked)}
+                />
+                <span className="form-switch-track" aria-hidden="true" />
+              </label>
+              <button
+                type="button"
+                className="btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void uninstallPlugin(plugin.id);
+                }}
+                title="卸载插件"
+                style={{
+                  padding: '2px 6px',
+                  fontSize: 12,
+                  color: 'var(--color-danger, #ef4444)',
+                  background: 'transparent',
+                  border: '1px solid var(--color-border, rgba(127,127,127,0.18))',
+                  cursor: 'pointer',
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
           </div>
         ))}
       </div>

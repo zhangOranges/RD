@@ -49,7 +49,7 @@ export function PromptDialog({ title, message, defaultValue = '', onConfirm, onC
           />
         </div>
         <div className="dialog-footer">
-          <div className="dialog-footer-right">
+          <div className="dialog-footer-center">
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
               取消
             </button>

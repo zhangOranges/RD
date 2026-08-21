@@ -1,10 +1,10 @@
 {
-  "id": "rd-native-port-scanner",
-  "name": "端口扫描",
-  "version": "1.0.3",
+  "id": "rd-native-nginx-manager",
+  "name": "Nginx 管理",
+  "version": "1.0.4",
   "apiVersion": "v1",
   "author": "RD",
-  "description": "查询服务器开启的端口，支持 TCP/UDP 监听查看、进程详情、端口过滤与刷新。通过 ssh.exec 执行 ss/netstat 命令，解析结果以表格展示。",
+  "description": "通过 SSH 管理远程主机上的 Nginx：启停 / 重载、运行状态与版本、access & error 日志查看。",
   "category": "monitor",
   "entry": "index.html",
   "indexHtml": "index.html",
@@ -12,9 +12,12 @@
   "permissions": [
     "server.read",
     "ssh.run",
-    "ui.inject-menu",
+    "ui.dialog",
     "ui.notification",
+    "ui.inject-menu",
     "theme.read",
+    "storage.read",
+    "storage.write",
     "log.read"
   ],
   "minRdVersion": "0.1.90",

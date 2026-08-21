@@ -37,8 +37,7 @@
       "app"
     ],
     "resources": {
-      "resources/plugins/rd-native-port-forward/**/*": "plugins/rd-native-port-forward/",
-      "resources/plugins/rd-native-port-scanner/**/*": "plugins/rd-native-port-scanner/"
+      "resources/plugins/rd-native-port-forward/**/*": "plugins/rd-native-port-forward/"
     },
     "icon": [
       "icons/32x32.png",

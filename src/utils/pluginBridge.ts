@@ -392,6 +392,10 @@ export const PLUGIN_BRIDGE_SCRIPT = `(function(){
       callbacks[id] = v;
       return { __rd_cb: id };
     }
+    // TypedArray（Uint8Array / Int32Array 等）：转为普通数组并打标记，跨 postMessage 后可还原
+    if (v && typeof v === 'object' && typeof v.byteLength === 'number' && typeof v.slice === 'function') {
+      return { __rd_ta: true, ctor: v.constructor.name, data: Array.prototype.slice.call(v) };
+    }
     if (Array.isArray(v)) {
       var arr = [];
       for (var i = 0; i < v.length; i++) { try { arr.push(pack(v[i])); } catch(e){} }
@@ -406,10 +410,16 @@ export const PLUGIN_BRIDGE_SCRIPT = `(function(){
   }
   // 把 { __rd_cb: id } 还原为函数：本地已知 -> 原函数；未知 -> 远程函数
   function unpack(v){
-    if (v && typeof v === 'object' && typeof v.__rd_cb === 'string') {
+    if (v && typeof v === 'object' && v.__rd_cb) {
       var id = v.__rd_cb;
       if (callbacks[id]) return callbacks[id];
       return makeRemoteFn(id);
+    }
+    // 还原 TypedArray：根据 ctor 名重建对应类型
+    if (v && typeof v === 'object' && v.__rd_ta === true && Array.isArray(v.data)) {
+      var ctor = window[v.ctor];
+      if (typeof ctor === 'function') return new ctor(v.data);
+      return new Uint8Array(v.data);
     }
     if (Array.isArray(v)) {
       var arr = [];

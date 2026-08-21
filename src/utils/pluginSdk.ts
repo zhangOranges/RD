@@ -36,16 +36,38 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
+/** 权限 ID → 中文说明（与 PluginSandbox / permissions.rs 对齐） */
+const PERM_DESC: Record<string, string> = {
+  'network.http': '发起 HTTP/HTTPS 网络请求',
+  'storage.read': '读取插件持久化存储',
+  'storage.write': '写入插件持久化存储',
+  'file.local.read': '读取本地文件',
+  'file.local.write': '写入本地文件',
+  'server.read': '读取主机配置和连接状态',
+  'server.write': '修改主机配置',
+  'server.manage': '管理主机分类',
+  'ssh.run': '执行 SSH 命令',
+  'sftp.operate': '操作远程文件',
+  'ui.notification': '显示通知',
+  'ui.dialog': '弹出确认/输入对话框',
+  'ui.inject-menu': '注入工具栏/侧边栏菜单项',
+  'theme.read': '读取当前主题信息',
+  'tunnel.manage': '管理端口转发规则',
+  'log.read': '读取内核日志',
+  'updater.manage': '管理应用更新',
+};
+
 /**
  * 客户端层权限校验：调用 Rust 内核 `plugin_assert_perm` 检查插件是否被授予权限。
  * 与内核层共同构成双层校验：前端拦截 + 后端强制。
- * 失败时抛出 `PERMISSION_DENIED: <perm>`。
+ * 失败时抛出友好中文错误：`权限不足：缺少「xxx」权限（perm）`。
  */
 async function assertPermission(pluginId: string, perm: string): Promise<void> {
   try {
     await invoke('plugin_assert_perm', { id: pluginId, perm });
   } catch {
-    throw new Error(`PERMISSION_DENIED: ${perm}`);
+    const desc = PERM_DESC[perm] ?? perm;
+    throw new Error(`权限不足：缺少「${desc}」权限（${perm}）。请在设置 → 插件中重新安装并授予该权限。`);
   }
 }
 
@@ -315,11 +337,11 @@ export function createRDContext(opts: {
       exec: async (hostId: string, command: string, options?: SshExecOptions): Promise<CommandResult> => {
         await assertPermission(opts.pluginId, 'ssh.run');
         if (useUIStore.getState().pluginDisableAllSsh) {
-          throw new Error('PERMISSION_DENIED: ssh.run disabled by global switch');
+          throw new Error('SSH 执行已被全局开关禁用，请在设置中重新启用。');
         }
         const state = useHostStore.getState().connectionStates[hostId];
         if (state !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId} is ${state}`);
+          throw new Error(`主机未连接（当前状态：${state ?? 'unknown'}），请先连接 SSH 主机后再执行操作。`);
         }
         let finalCmd = command;
         const cwd = options?.cwd;
@@ -331,7 +353,7 @@ export function createRDContext(opts: {
         const timeoutPromise = new Promise<never>((_, rej) => {
           setTimeout(() => {
             timedOut = true;
-            rej(new Error('COMMAND_TIMEOUT: ssh exec timed out'));
+            rej(new Error('命令执行超时'));
           }, timeoutMs);
         });
         try {
@@ -390,7 +412,7 @@ export function createRDContext(opts: {
       list: async (hostId: string, path: string): Promise<SftpFile[]> => {
         await assertPermission(opts.pluginId, 'sftp.operate');
         if (useHostStore.getState().connectionStates[hostId] !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId}`);
+          throw new Error(`主机未连接，请先连接 SSH 主机后再操作远程文件。`);
         }
         const entries = await invoke<Array<Record<string, unknown>>>('sftp_list_dir', { hostId, path });
         return entries.map((e) => {
@@ -412,7 +434,7 @@ export function createRDContext(opts: {
       stat: async (hostId: string, path: string): Promise<SftpFile> => {
         await assertPermission(opts.pluginId, 'sftp.operate');
         if (useHostStore.getState().connectionStates[hostId] !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId}`);
+          throw new Error(`主机未连接，请先连接 SSH 主机后再操作远程文件。`);
         }
         const e = await invoke<Record<string, unknown>>('sftp_stat', { hostId, path });
         const name = String(e.name ?? path.split('/').pop() ?? path);
@@ -431,7 +453,7 @@ export function createRDContext(opts: {
       mkdir: async (hostId: string, path: string, recursive = false): Promise<void> => {
         await assertPermission(opts.pluginId, 'sftp.operate');
         if (useHostStore.getState().connectionStates[hostId] !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId}`);
+          throw new Error(`主机未连接，请先连接 SSH 主机后再操作远程文件。`);
         }
         try {
           await invoke('sftp_mkdir', { hostId, path });
@@ -443,7 +465,7 @@ export function createRDContext(opts: {
       remove: async (hostId: string, path: string, _recursive = false): Promise<void> => {
         await assertPermission(opts.pluginId, 'sftp.operate');
         if (useHostStore.getState().connectionStates[hostId] !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId}`);
+          throw new Error(`主机未连接，请先连接 SSH 主机后再操作远程文件。`);
         }
         await invoke('sftp_remove', { hostId, path });
       },
@@ -451,7 +473,7 @@ export function createRDContext(opts: {
       rename: async (hostId: string, oldPath: string, newPath: string): Promise<void> => {
         await assertPermission(opts.pluginId, 'sftp.operate');
         if (useHostStore.getState().connectionStates[hostId] !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId}`);
+          throw new Error(`主机未连接，请先连接 SSH 主机后再操作远程文件。`);
         }
         await invoke('sftp_rename', { hostId, oldPath, newPath });
       },
@@ -459,7 +481,7 @@ export function createRDContext(opts: {
       readFile: async (hostId: string, path: string): Promise<Uint8Array> => {
         await assertPermission(opts.pluginId, 'sftp.operate');
         if (useHostStore.getState().connectionStates[hostId] !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId}`);
+          throw new Error(`主机未连接，请先连接 SSH 主机后再操作远程文件。`);
         }
         const bytes = await invoke<number[]>('sftp_read_file', { hostId, path });
         return new Uint8Array(bytes);
@@ -468,7 +490,7 @@ export function createRDContext(opts: {
       writeFile: async (hostId: string, path: string, data: Uint8Array | string): Promise<void> => {
         await assertPermission(opts.pluginId, 'sftp.operate');
         if (useHostStore.getState().connectionStates[hostId] !== 'connected') {
-          throw new Error(`HOST_NOT_AVAILABLE: ${hostId}`);
+          throw new Error(`主机未连接，请先连接 SSH 主机后再操作远程文件。`);
         }
         const content: number[] = typeof data === 'string'
           ? Array.from(new TextEncoder().encode(data))
@@ -534,7 +556,7 @@ export function createRDContext(opts: {
       add: async (host): Promise<HostConfig> => {
         await assertPermission(opts.pluginId, 'server.write');
         if (useUIStore.getState().pluginDisableAllServerWrite) {
-          throw new Error('PERMISSION_DENIED: server.write disabled by global switch');
+          throw new Error('主机写操作已被全局开关禁用，请在设置中重新启用。');
         }
         const { password, private_key, ...base } = host;
         const cred: { type: CredentialType; value: string } | undefined =
@@ -570,7 +592,7 @@ export function createRDContext(opts: {
       update: async (hostId, patch): Promise<HostConfig> => {
         await assertPermission(opts.pluginId, 'server.write');
         if (useUIStore.getState().pluginDisableAllServerWrite) {
-          throw new Error('PERMISSION_DENIED: server.write disabled by global switch');
+          throw new Error('主机写操作已被全局开关禁用，请在设置中重新启用。');
         }
         const { password, private_key, ...base } = patch;
         const cred =
@@ -590,7 +612,7 @@ export function createRDContext(opts: {
       remove: async (hostId): Promise<void> => {
         await assertPermission(opts.pluginId, 'server.write');
         if (useUIStore.getState().pluginDisableAllServerWrite) {
-          throw new Error('PERMISSION_DENIED: server.write disabled by global switch');
+          throw new Error('主机写操作已被全局开关禁用，请在设置中重新启用。');
         }
         await useHostStore.getState().removeHost(hostId);
       },
@@ -598,7 +620,7 @@ export function createRDContext(opts: {
       addCategory: async (name, order): Promise<CategoryConfig> => {
         await assertPermission(opts.pluginId, 'server.write');
         if (useUIStore.getState().pluginDisableAllServerWrite) {
-          throw new Error('PERMISSION_DENIED: server.write disabled by global switch');
+          throw new Error('主机写操作已被全局开关禁用，请在设置中重新启用。');
         }
         const id = `cat_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         const cat: CategoryConfig = { id, name, order: order ?? 0 };
@@ -612,7 +634,7 @@ export function createRDContext(opts: {
 
       updateCategory: async (catId, patch): Promise<CategoryConfig> => {
         await assertPermission(opts.pluginId, 'server.write');
-        if (useUIStore.getState().pluginDisableAllServerWrite) throw new Error('PERMISSION_DENIED');
+        if (useUIStore.getState().pluginDisableAllServerWrite) throw new Error('主机写操作已被全局开关禁用，请在设置中重新启用。');
         const prev = useHostStore.getState().categories.find((c) => c.id === catId);
         if (!prev) throw new Error(`CATEGORY_NOT_FOUND: ${catId}`);
         const updated = { ...prev, ...patch };
@@ -626,7 +648,7 @@ export function createRDContext(opts: {
 
       removeCategory: async (catId): Promise<void> => {
         await assertPermission(opts.pluginId, 'server.write');
-        if (useUIStore.getState().pluginDisableAllServerWrite) throw new Error('PERMISSION_DENIED');
+        if (useUIStore.getState().pluginDisableAllServerWrite) throw new Error('主机写操作已被全局开关禁用，请在设置中重新启用。');
         try {
           await useHostStore.getState().deleteCategory(catId);
         } catch {

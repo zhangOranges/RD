@@ -5,6 +5,44 @@ import { usePluginStore } from '../../store/pluginStore';
 import { usePluginUiStore } from '../../store/pluginUiStore';
 import { logInfo, logWarn, logError } from '../../utils/log';
 
+/** 权限 ID → 中文说明（与 PluginInstallDialog / permissions.rs 对齐） */
+const PERMISSION_LABEL: Record<string, string> = {
+  'network.http': '发起 HTTP/HTTPS 网络请求',
+  'storage.read': '读取插件持久化存储',
+  'storage.write': '写入插件持久化存储',
+  'file.local.read': '读取本地文件',
+  'file.local.write': '写入本地文件',
+  'server.read': '读取主机配置和连接状态',
+  'server.write': '修改主机配置',
+  'server.manage': '管理主机分类',
+  'ssh.run': '执行 SSH 命令',
+  'sftp.operate': '操作远程文件',
+  'ui.notification': '显示通知',
+  'ui.dialog': '弹出确认/输入对话框',
+  'ui.inject-menu': '注入工具栏/侧边栏菜单项',
+  'theme.read': '读取当前主题信息',
+  'tunnel.manage': '管理端口转发规则',
+  'log.read': '读取内核日志',
+  'updater.manage': '管理应用更新',
+};
+
+/** 把权限拒绝错误转换成友好中文提示（兼容 SDK 层中文和后端原始格式） */
+function friendlyPermissionError(message: string): { title: string; body: string } | null {
+  // 兼容 SDK 层的中文格式："权限不足：缺少「xxx」权限（perm）..."
+  if (message.startsWith('权限不足')) {
+    return { title: '权限不足', body: message.replace(/^权限不足[：:]/, '') };
+  }
+  // 兼容后端原始格式："PERMISSION_DENIED: perm"
+  const m = message.match(/^PERMISSION_DENIED:\s*(.+)/);
+  if (!m) return null;
+  const perm = m[1].trim();
+  const desc = PERMISSION_LABEL[perm] ?? perm;
+  return {
+    title: '权限不足',
+    body: `插件缺少「${desc}」权限（${perm}）。\n请在设置 → 插件中重新安装或在开发者控制台授予该权限。`,
+  };
+}
+
 type ForwarderFn = (...args: unknown[]) => void;
 
 export interface PluginSandboxHandle {
@@ -278,6 +316,16 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         });
         return { __rd_cb: id };
       }
+      // TypedArray（Uint8Array / Int32Array 等）：转为普通数组并打标记，跨 postMessage 后可还原
+      if (
+        value &&
+        typeof value === 'object' &&
+        typeof (value as { byteLength?: number; slice?: unknown }).byteLength === 'number' &&
+        typeof (value as { slice?: unknown }).slice === 'function'
+      ) {
+        const ta = value as unknown as { constructor: { name: string }; slice: () => number[] };
+        return { __rd_ta: true, ctor: ta.constructor.name, data: Array.prototype.slice.call(ta) };
+      }
       if (Array.isArray(value)) {
         return value.map(packForFrame);
       }
@@ -319,6 +367,18 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         };
         callbacksRef.current.set(id, remote);
         return remote;
+      }
+      // 还原 TypedArray：根据 ctor 名重建对应类型
+      if (
+        value &&
+        typeof value === 'object' &&
+        (value as Record<string, unknown>).__rd_ta === true &&
+        Array.isArray((value as Record<string, unknown>).data)
+      ) {
+        const v = value as Record<string, unknown>;
+        const ctor = (window as unknown as Record<string, new (data: number[]) => unknown>)[String(v.ctor)];
+        if (typeof ctor === 'function') return new ctor(v.data as number[]);
+        return new Uint8Array(v.data as number[]);
       }
       if (Array.isArray(value)) {
         return value.map(unpackFromFrame);
@@ -435,14 +495,19 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         const col = Number(data.col || 0);
         const stack = String(data.stack || '');
         const ts = Date.now();
+        // 权限拒绝 → 友好转换
+        const permFriendly = friendlyPermissionError(message);
+        const displayMessage = permFriendly
+          ? `${permFriendly.title}\n${permFriendly.body}`
+          : message;
         const panelMsg =
-          `插件${kind === 'unhandledrejection' ? '未捕获 Promise' : ''}错误: ${message}` +
+          `插件${kind === 'unhandledrejection' ? '未捕获 Promise' : ''}错误: ${displayMessage}` +
           (src ? ` （${src}:${line}:${col}）` : line ? ` （:${line}:${col}）` : '') +
           (stack ? '\n' + stack : '');
         usePluginUiStore.getState().addLog(pluginId, 'error', panelMsg);
         // 同时落盘到 update.log（错误日志始终写入，不依赖调试开关）
         logError(`[Plugin:${pluginId}] ${kind === 'unhandledrejection' ? '[unhandledrejection] ' : ''}${message}${src ? ` @ ${src}:${line}:${col}` : ''}${stack ? `\n${stack}` : ''}`);
-        setPluginError({ kind, message, src, line, col, stack, ts });
+        setPluginError({ kind, message: displayMessage, src, line, col, stack, ts });
         return;
       }
 
@@ -633,13 +698,17 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
           <span aria-hidden style={{ flexShrink: 0, marginTop: 1, fontSize: 16 }}>⚠️</span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              插件运行时{pluginError.kind === 'unhandledrejection' ? '异步异常（未捕获 Promise）' : '错误'}
+              {pluginError.message.startsWith('权限不足')
+                ? '权限不足'
+                : `插件运行时${pluginError.kind === 'unhandledrejection' ? '异步异常（未捕获 Promise）' : '错误'}`}
             </div>
             <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {pluginError.message}
-              {pluginError.src
+              {pluginError.message.startsWith('权限不足')
+                ? pluginError.message.replace(/^权限不足\n/, '')
+                : pluginError.message}
+              {!pluginError.message.startsWith('权限不足') && pluginError.src
                 ? `\n位置: ${pluginError.src}:${pluginError.line}:${pluginError.col}`
-                : pluginError.line
+                : !pluginError.message.startsWith('权限不足') && pluginError.line
                   ? `\n位置: :${pluginError.line}:${pluginError.col}`
                   : ''}
               {pluginError.stack ? `\n${pluginError.stack}` : ''}

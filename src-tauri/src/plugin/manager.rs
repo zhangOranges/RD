@@ -215,6 +215,28 @@ pub fn install_from_dir(app_data_dir: &Path, src_dir: &Path) -> Result<PluginMan
     let target_name = format!("{}@{}", manifest.id, manifest.version);
     let target_dir = plugins_dir.join(&target_name);
 
+    // 清理同 ID 的所有旧版本目录（只保留新版本）
+    // 用 split_once('@') 精确比对，避免 "my-plugin" 误删 "my-plugin-extended"
+    let id_prefix = format!("{}@", manifest.id);
+    if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
+        for item in entries.flatten() {
+            if let Some(name) = item.file_name().to_str() {
+                if name.starts_with(&id_prefix) && name != target_name {
+                    // 进一步验证：确认这是该 ID 的旧版本（不是以该 ID 为前缀的另一个插件）
+                    // 目录名格式为 "<id>@<version>"，提取 @ 前的部分比对
+                    if let Some((dir_id, _)) = name.split_once('@') {
+                        if dir_id == manifest.id {
+                            let old_dir = item.path();
+                            if old_dir.is_dir() {
+                                let _ = std::fs::remove_dir_all(&old_dir);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if target_dir.exists() {
         std::fs::remove_dir_all(&target_dir).map_err(|e| format!("删除旧插件目录失败: {}", e))?;
     }
@@ -256,6 +278,7 @@ pub fn install_from_dir(app_data_dir: &Path, src_dir: &Path) -> Result<PluginMan
         config: serde_json::Value::Object(serde_json::Map::new()),
         load_error: None,
     };
+    // 同 ID 的旧版本记录直接替换（确保只有一条记录）
     if let Some(pos) = items.iter().position(|x| x.id == store_item.id) {
         items[pos] = store_item;
     } else {

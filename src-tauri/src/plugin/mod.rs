@@ -623,7 +623,7 @@ pub fn plugin_resolve_icon(
 
 /// 内置插件 ID 列表（随应用打包，首次启动自动注册）。
 /// 新增内置插件时只需在此数组追加 ID，并在 `resources/plugins/<id>/` 放入插件文件。
-pub const BUILTIN_PLUGIN_IDS: &[&str] = &["rd-native-port-forward", "rd-native-port-scanner"];
+pub const BUILTIN_PLUGIN_IDS: &[&str] = &["rd-native-port-forward"];
 
 /// 定位内置插件的资源源目录（打包后 → 开发调试）：
 /// 1. `resource_dir/plugins/<id>`（tauri bundle.resources 映射的目标）
