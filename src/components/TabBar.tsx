@@ -383,7 +383,7 @@ export function TabBar() {
               <span className={`tabbar-tab-addr ${maskMode ? 'mask-sensitive' : ''}`}>
                 {isReconnecting
                   ? `重连中 · ${countdownSec}s`
-                  : `${host.username}@{host.host}`}
+                  : `${host.username}@${host.host}`}
               </span>
               <button
                 type="button"
