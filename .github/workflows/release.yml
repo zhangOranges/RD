@@ -10,9 +10,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   # ============================================================
-  # 三平台构建（并行）：
+  # 四平台构建（并行）：
   #   macOS ARM64  -> .dmg / .app.tar.gz
-  #   Windows x64  -> .msi / .exe
+  #   macOS x64    -> .dmg / .app.tar.gz (Intel)
+  #   Windows x64  -> .nsis / .exe
   #   Linux   x64  -> .deb / .AppImage
   # ============================================================
   build:
@@ -26,6 +27,13 @@ jobs:
             label: macos-arm64
             updater-key: darwin-aarch64
             artifact-dir: artifacts-macos-arm64
+            bundles: dmg,app
+          # --- macOS x64 (Intel) ---
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            label: macos-x64
+            updater-key: darwin-x86_64
+            artifact-dir: artifacts-macos-x64
             bundles: dmg,app
           # --- Windows x64 ---
           - platform: windows-latest
