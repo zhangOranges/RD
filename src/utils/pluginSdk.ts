@@ -65,9 +65,15 @@ const PERM_DESC: Record<string, string> = {
 async function assertPermission(pluginId: string, perm: string): Promise<void> {
   try {
     await invoke('plugin_assert_perm', { id: pluginId, perm });
-  } catch {
-    const desc = PERM_DESC[perm] ?? perm;
-    throw new Error(`权限不足：缺少「${desc}」权限（${perm}）。请在设置 → 插件中重新安装并授予该权限。`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // 仅当内核返回 PERMISSION_DENIED 时才提示"权限不足"；
+    // 其他错误（如 store.json 损坏、序列化失败等）原样抛出，避免掩盖真实故障。
+    if (msg.includes('PERMISSION_DENIED')) {
+      const desc = PERM_DESC[perm] ?? perm;
+      throw new Error(`权限不足：缺少「${desc}」权限（${perm}）。请在设置 → 插件中重新安装并授予该权限。`);
+    }
+    throw e;
   }
 }
 
@@ -359,10 +365,12 @@ export function createRDContext(opts: {
         try {
           const logCmd = finalCmd.length > 200 ? finalCmd.slice(0, 200) + '...' : finalCmd;
           logInfo(`[plugin:${opts.pluginId}] ssh.exec ${hostId}: ${logCmd}`);
-          const stdout: string = await Promise.race([
-            invoke<string>('ssh_exec', { hostId, command: finalCmd }),
-            timeoutPromise,
-          ]);
+          // 将超时传给后端，让 Rust 在超时后取消底层 SSH channel，避免命令泄漏。
+          const invokePromise = invoke<string>('ssh_exec', { hostId, command: finalCmd, timeoutMs });
+          // 若前端 timeout 先触发，invokePromise 仍在后台运行；
+          // 挂载 catch 防止其最终 reject 时产生未处理的 Promise 拒绝。
+          invokePromise.catch(() => {});
+          const stdout: string = await Promise.race([invokePromise, timeoutPromise]);
           // 成功路径 stdout 不落日志：仅在返回值携带（前端可见），避免敏感输出进入日志
           return { success: true, output: stdout, exitCode: 0 };
         } catch (e) {
@@ -664,8 +672,8 @@ export function createRDContext(opts: {
         await assertPermission(opts.pluginId, 'server.manage');
         await useHostStore.getState().disconnectHost(hostId);
       },
-      cancelReconnect: (hostId) => {
-        void assertPermission(opts.pluginId, 'server.manage').catch(() => {});
+      cancelReconnect: async (hostId) => {
+        await assertPermission(opts.pluginId, 'server.manage');
         useHostStore.getState().cancelReconnect(hostId);
       },
     },

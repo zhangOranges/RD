@@ -399,7 +399,7 @@ export interface ServerApi {
   removeCategory(categoryId: string): Promise<void>;
   connect(hostId: string): Promise<void>;
   disconnect(hostId: string): Promise<void>;
-  cancelReconnect(hostId: string): void;
+  cancelReconnect(hostId: string): Promise<void>;
 }
 
 export interface HttpRequestOptions {

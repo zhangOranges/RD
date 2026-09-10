@@ -112,16 +112,27 @@ pub async fn ssh_exec_raw(
 
 /// Tauri command: execute a command on the remote server and return stdout.
 /// Used for folder compression/decompression during transfer.
+///
+/// `timeout_ms`（可选）：若提供，则在超时后取消底层 channel 并返回超时错误，
+/// 避免前端超时后后端命令仍在执行造成资源泄漏。
 #[tauri::command]
 pub async fn ssh_exec(
     host_id: String,
     command: String,
+    timeout_ms: Option<u64>,
     state: tauri::State<'_, SshState>,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
-    ssh_exec_raw(&state, &host_id, &command, Some(&app))
-        .await
-        .map_err(|e| e.to_string())
+    let fut = ssh_exec_raw(&state, &host_id, &command, Some(&app));
+    match timeout_ms {
+        Some(ms) if ms > 0 => {
+            match tokio::time::timeout(std::time::Duration::from_millis(ms), fut).await {
+                Ok(res) => res.map_err(|e| e.to_string()),
+                Err(_) => Err(format!("ssh_exec 超时（{}ms）：host_id={} cmd={}", ms, host_id, cmd_preview(&command))),
+            }
+        }
+        _ => fut.await.map_err(|e| e.to_string()),
+    }
 }
 
 /// Server hardware stats returned to the frontend.

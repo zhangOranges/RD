@@ -48,7 +48,7 @@ const PERM_DESC: Record<string, string> = {
 export function PluginDetail() {
   const plugins = usePluginStore((s) => s.plugins);
   const togglePlugin = usePluginStore((s) => s.togglePlugin);
-  const uninstallPlugin = usePluginStore((s) => s.uninstallPlugin);
+  const uninstallComplete = usePluginStore((s) => s.uninstallComplete);
   const setGranted = usePluginStore((s) => s.setGranted);
   const getConfig = usePluginStore((s) => s.getConfig);
   const setConfig = usePluginStore((s) => s.setConfig);
@@ -255,7 +255,7 @@ export function PluginDetail() {
                 className="btn"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void uninstallPlugin(plugin.id);
+                  void uninstallComplete(plugin.id);
                 }}
                 title="卸载插件"
                 style={{
@@ -321,7 +321,7 @@ export function PluginDetail() {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => void uninstallPlugin(selected.id)}
+              onClick={() => void uninstallComplete(selected.id)}
               style={{
                 fontSize: 12,
                 padding: '4px 10px',

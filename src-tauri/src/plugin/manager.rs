@@ -315,3 +315,103 @@ pub fn enable_disable(app_data_dir: &Path, id: &str, enabled: bool) -> Result<()
     }
     save_store(app_data_dir, &items)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn make_temp_dir() -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("rd-plugin-test-{}", now_ms()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn create_plugin_structure(app_data_dir: &Path, id: &str, version: &str) {
+        // plugins/{id}@{version}/manifest.json
+        let plugin_dir = app_data_dir.join("plugins").join(format!("{}@{}", id, version));
+        fs::create_dir_all(&plugin_dir).unwrap();
+        let manifest = serde_json::json!({
+            "id": id,
+            "name": "Test Plugin",
+            "version": version,
+            "apiVersion": "v1",
+            "author": "test",
+            "description": "test",
+            "category": "other",
+            "entry": "index.js",
+            "permissions": [],
+            "minRdVersion": "0.1.0",
+            "hotReload": false
+        });
+        fs::write(plugin_dir.join("manifest.json"), manifest.to_string()).unwrap();
+
+        // plugin-state.json
+        let items = vec![PluginStoreItem {
+            id: id.to_string(),
+            version: version.to_string(),
+            enabled: true,
+            install_time_ms: now_ms(),
+            last_load_time_ms: now_ms(),
+            granted_permissions: vec![],
+            config: serde_json::Value::Object(serde_json::Map::new()),
+            load_error: None,
+        }];
+        save_store(app_data_dir, &items).unwrap();
+
+        // plugin-data/{id}/ （插件运行时数据，卸载时应被清理）
+        let data_dir = app_data_dir.join("plugin-data").join(id);
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("user-data.json"), r#"{"key":"secret"}"#).unwrap();
+    }
+
+    #[test]
+    fn test_uninstall_removes_plugin_dir_and_store() {
+        let dir = make_temp_dir();
+        let id = "test-plugin";
+        create_plugin_structure(&dir, id, "1.0.0");
+
+        let result = uninstall(&dir, id);
+        assert!(result.is_ok(), "uninstall should succeed: {:?}", result.err());
+
+        // 插件目录应被删除
+        let plugin_dir = dir.join("plugins").join(format!("{}@1.0.0", id));
+        assert!(!plugin_dir.exists(), "plugin directory should be removed");
+
+        // store 条目应被删除
+        let items = load_store(&dir).unwrap();
+        assert!(items.iter().all(|i| i.id != id), "store entry should be removed");
+
+        // 清理临时目录
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_uninstall_does_not_clean_plugin_data_bug_4() {
+        // 高危漏洞 #4: uninstall 不清理 plugin-data/{id}/ 目录
+        // 设计文档要求卸载时清空 plugin-data，但当前实现未清理。
+        let dir = make_temp_dir();
+        let id = "test-plugin";
+        create_plugin_structure(&dir, id, "1.0.0");
+
+        let data_dir = dir.join("plugin-data").join(id);
+        assert!(data_dir.exists(), "plugin-data should exist before uninstall");
+
+        let result = uninstall(&dir, id);
+        assert!(result.is_ok());
+
+        // BUG: plugin-data/{id}/ 仍然存在，未被清理
+        // 修复后期望：assert!(!data_dir.exists(), "plugin-data should be removed after uninstall");
+        assert!(
+            data_dir.exists(),
+            "BUG #4: plugin-data 目录未被清理（当前行为），修复后此断言应改为不存在"
+        );
+        assert!(
+            data_dir.join("user-data.json").exists(),
+            "BUG #4: plugin-data 中的文件未被删除"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

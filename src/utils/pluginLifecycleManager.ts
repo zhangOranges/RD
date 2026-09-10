@@ -345,10 +345,11 @@ class PluginLifecycleManager {
     if (!m) return;
     const handle = m.handleRef.current;
     try {
+      // 仅调用 disable：uninstall 生命周期只在真正卸载时由 uninstallPlugin 触发，
+      // 避免禁用/热重载时误清空插件的 plugin-data 存储。
       if (m.enabled) await handle?.callDisable();
-      await handle?.callUninstall();
     } catch (e) {
-      console.warn(`[PluginLifecycleManager] disable/uninstall 异常 ${id}:`, e);
+      console.warn(`[PluginLifecycleManager] disable 异常 ${id}:`, e);
     } finally {
       // 清理该插件在 kernelEventBus 上的所有事件监听器（在 destroy 之前）
       try {
@@ -367,6 +368,26 @@ class PluginLifecycleManager {
       if (m.windowEl.parentNode) m.windowEl.parentNode.removeChild(m.windowEl);
       this.mounted.delete(id);
     }
+  }
+
+  /**
+   * 真正卸载插件：依次调用 disable → uninstall 生命周期，再销毁实例。
+   * 与 disable/destroy 的区别：会通知插件执行 uninstall 钩子（清理 plugin-data 等）。
+   */
+  async uninstallPlugin(id: string): Promise<void> {
+    const m = this.mounted.get(id);
+    if (!m) return;
+    const handle = m.handleRef.current;
+    try {
+      if (m.enabled) {
+        await handle?.callDisable();
+        m.enabled = false; // 标记为已禁用，避免 _disableAndDestroy 重复调用 callDisable
+      }
+      await handle?.callUninstall();
+    } catch (e) {
+      console.warn(`[PluginLifecycleManager] uninstall 生命周期异常 ${id}:`, e);
+    }
+    await this._disableAndDestroy(id);
   }
 
   getMountedIds(): string[] {

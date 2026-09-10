@@ -236,6 +236,12 @@ export const usePluginStore = create<PluginStore>((set, get) => ({
   },
 
   uninstallComplete: async (id) => {
+    // 先通知插件执行 uninstall 生命周期（清理 plugin-data 等），再由 Rust 删除目录
+    try {
+      await pluginLifecycleManager.uninstallPlugin(id);
+    } catch (e) {
+      console.warn('[pluginStore] 插件 uninstall 生命周期失败，继续清理', e);
+    }
     try {
       await invoke('plugin_uninstall_complete', { id });
     } catch (e) {
