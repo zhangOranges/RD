@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText as clipboardWriteText } from '@tauri-apps/plugin-clipboard-manager';
 import { logWarn, logError } from '../utils/log';
@@ -174,6 +176,7 @@ function walkEntry(
 }
 
 export function FileBrowser({ hostId }: FileBrowserProps) {
+  const { t } = useTranslation();
   const currentPath = useFileStore((s) => s.currentPath);
   const entries = useFileStore((s) => s.entries);
   const loading = useFileStore((s) => s.loading);
@@ -408,7 +411,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
         setDragOver(false);
         const connState = useHostStore.getState().connectionStates[hostId];
         if (connState !== 'connected') {
-          pushToast('warning', '远程未连接，请先连接主机');
+          pushToast('warning', i18n.t('content.remoteNotConnected'));
           return;
         }
         if (localPayload.items.length === 0) return;
@@ -419,7 +422,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
         const taskName =
           localPayload.items.length === 1
             ? localPayload.items[0].name
-            : `${localPayload.items.length} 项`;
+            : i18n.t('content.itemsCount', { count: localPayload.items.length });
         try {
           const { successes, skipped, errors } = await uploadLocalItemsToRemote(
             hostId,
@@ -438,13 +441,13 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             },
           );
           const msgParts: string[] = [];
-          if (successes > 0) msgParts.push(`成功 ${successes}`);
-          if (skipped > 0) msgParts.push(`跳过 ${skipped}`);
-          if (errors > 0) msgParts.push(`失败 ${errors}`);
+          if (successes > 0) msgParts.push(t('filebrowser.successCount', { count: successes }));
+          if (skipped > 0) msgParts.push(t('filebrowser.skippedCount', { count: skipped }));
+          if (errors > 0) msgParts.push(t('filebrowser.failedCount', { count: errors }));
           if (msgParts.length > 0) {
             pushToast(
               errors > 0 ? 'warning' : 'success',
-              `上传完成 - ${msgParts.join('，')}（${taskName}）`,
+              t('filebrowser.uploadComplete', { parts: msgParts.join(t('common.separator')), name: taskName }),
             );
           }
         } finally {
@@ -466,7 +469,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
       try {
         items = await collectDroppedItems(e.dataTransfer);
       } catch (err) {
-        pushToast('error', `读取拖拽文件失败: ${err}`);
+        pushToast('error', t('filebrowser.readDroppedFailed', { error: err }));
         return;
       }
       if (items.length === 0) return;
@@ -521,15 +524,15 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             } else {
               // 弹窗询问
               const choice = confirm(
-                `文件 "${item.relPath}" 已存在。\n\n是否覆盖？\n"取消" = 跳过，"确定" = 覆盖。`,
+                t('filebrowser.fileExistsOverwrite', { path: item.relPath }),
               );
               if (choice) {
                 // 覆盖，顺便问一下是否全部
-                const all = confirm('对所有后续冲突文件也执行覆盖操作？');
+                const all = confirm(t('filebrowser.overwriteAllAsk'));
                 if (all) setGlobalOverrideAndRef('overwrite');
                 needWrite = true;
               } else {
-                const skipAll = confirm('对所有后续冲突文件也执行跳过？');
+                const skipAll = confirm(t('filebrowser.skipAllAsk'));
                 if (skipAll) setGlobalOverrideAndRef('skip');
                 skipped++;
                 needWrite = false;
@@ -651,18 +654,18 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
       } finally {
         setUploading(false);
         const msgParts: string[] = [];
-        if (successes > 0) msgParts.push(`成功 ${successes}`);
-        if (skipped > 0) msgParts.push(`跳过 ${skipped}`);
-        if (errors > 0) msgParts.push(`失败 ${errors}`);
+        if (successes > 0) msgParts.push(t('filebrowser.successCount', { count: successes }));
+        if (skipped > 0) msgParts.push(t('filebrowser.skippedCount', { count: skipped }));
+        if (errors > 0) msgParts.push(t('filebrowser.failedCount', { count: errors }));
         if (msgParts.length > 0) {
           pushToast(
             errors > 0 ? 'warning' : 'success',
-            `上传完成 - ${msgParts.join('，')}`,
+            t('filebrowser.uploadCompleteSimple', { parts: msgParts.join(t('common.separator')) }),
           );
         }
       }
     },
-    [currentPath, entries, uploading, hostId, refresh, pushToast, createTransferTask, globalOverride, setGlobalOverrideAndRef, globalOverrideRef],
+    [currentPath, entries, uploading, hostId, refresh, pushToast, createTransferTask, globalOverride, setGlobalOverrideAndRef, globalOverrideRef, t],
   );
 
   // ---- 行交互 ----
@@ -678,10 +681,10 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
           viewOnly: true,
         });
       } else {
-        pushToast('info', `已选中文件：${entry.name}（暂不支持直接打开此类文件）`);
+        pushToast('info', t('filebrowser.fileSelectedNotSupported', { name: entry.name }));
       }
     },
-    [currentPath, navigate, hostId, pushToast],
+    [currentPath, navigate, hostId, pushToast, t],
   );
 
   // ---- Shift 范围选择锚点（基于 sortedEntries 的顺序） ----
@@ -830,14 +833,14 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
       : [entry];
 
     const label = multiSelected
-      ? `已选 ${toDelete.length} 项`
-      : `${entry.is_dir ? '文件夹' : '文件'}「${entry.name}」`;
+      ? t('filebrowser.selectedCount', { count: toDelete.length })
+      : t('filebrowser.itemLabel', { type: entry.is_dir ? t('filebrowser.folder') : t('filebrowser.file'), name: entry.name });
 
     openMiniDialog({
-      title: '确认删除',
-      message: `确认删除${label}？此操作不可撤销。`,
-      okLabel: '确认删除',
-      cancelLabel: '取消',
+      title: t('filebrowser.confirmDelete'),
+      message: t('filebrowser.confirmDeleteMessage', { label }),
+      okLabel: t('filebrowser.confirmDelete'),
+      cancelLabel: t('common.cancel'),
       danger: true,
       onOk: async () => {
         closeMiniDialog();
@@ -896,13 +899,13 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     const fullPath = joinPath(currentPath, entry.name);
     try {
       await clipboardWriteText(fullPath);
-      pushToast('success', `已复制路径：${fullPath}`);
+      pushToast('success', t('filebrowser.pathCopied', { path: fullPath }));
     } catch {
       try {
         await navigator.clipboard.writeText(fullPath);
-        pushToast('success', `已复制路径：${fullPath}`);
+        pushToast('success', t('filebrowser.pathCopied', { path: fullPath }));
       } catch {
-        pushToast('error', '复制路径失败');
+        pushToast('error', t('filebrowser.copyPathFailed'));
       }
     }
   }
@@ -916,7 +919,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     // 默认下载到本地面板当前打开的目录
     const localDir = useLocalFileStore.getState().currentPath;
     if (!localDir) {
-      pushToast('warning', '请先在本地面板打开一个目录');
+      pushToast('warning', t('filebrowser.openLocalDirFirst'));
       return;
     }
 
@@ -944,7 +947,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
 
       try {
         // 1. 远程压缩
-        useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${entry.name} (压缩中...)` });
+        useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${entry.name} (${i18n.t('transfer.compressing')})` });
         await invoke('ssh_exec', {
           hostId,
           command: `tar -czf "${remoteTmpPath}" -C "${currentPath}" "${entry.name}"`,
@@ -967,7 +970,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
         });
 
         // 4. 本地解压
-        useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${entry.name} (解压中...)` });
+        useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${entry.name} (${i18n.t('transfer.decompressing')})` });
         await invoke('extract_local_archive', {
           archivePath: localTarballFinalPath,
           destDir: localDir,
@@ -982,9 +985,9 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
       } catch (err) {
         const msg = String(err);
         if (msg.startsWith('Cancelled:')) {
-          pushToast('info', `已取消下载：${entry.name}`);
+          pushToast('info', t('transfer.downloadCancelled', { name: entry.name }));
         } else {
-          pushToast('error', `下载失败：${msg}`);
+          pushToast('error', t('transfer.downloadFailed', { error: msg }));
         }
       } finally {
         // 7. 清理临时文件（本地 + 远程）
@@ -1017,9 +1020,9 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
     } catch (err) {
       const msg = String(err);
       if (msg.startsWith('Cancelled:')) {
-        pushToast('info', `已取消下载：${entry.name}`);
+        pushToast('info', t('transfer.downloadCancelled', { name: entry.name }));
       } else {
-        pushToast('error', `下载失败：${msg}`);
+        pushToast('error', t('transfer.downloadFailed', { error: msg }));
       }
     }
   }
@@ -1143,7 +1146,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
         <div className="fb-drag-overlay">
           <div className="fb-drag-overlay-inner">
             <Folder size={36} strokeWidth={1.2} />
-            <div className="fb-drag-title">释放以上传到当前目录</div>
+            <div className="fb-drag-title">{t('filebrowser.releaseToUpload')}</div>
             <div className="fb-drag-subtitle">
               {currentPath ?? '/'}
             </div>
@@ -1160,7 +1163,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
 
       {/* ==================== 顶部工具栏 ==================== */}
       <div className="remote-pane-toolbar">
-        <span className="pane-label">远程: {hostName}</span>
+        <span className="pane-label">{t('filebrowser.remote')}: {hostName}</span>
 
         {editingPath ? (
           <input
@@ -1178,7 +1181,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               }
             }}
             onBlur={() => void commitPathEdit()}
-            placeholder="输入远程路径，回车跳转"
+            placeholder={t('filebrowser.pathInputPlaceholder')}
             spellCheck={false}
           />
         ) : (
@@ -1198,9 +1201,9 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                 type="button"
                 className="remote-breadcrumb-item remote-breadcrumb-empty"
                 onClick={enterPathEdit}
-                title="点击输入路径"
+                title={t('filebrowser.clickToInputPath')}
               >
-                (未打开)
+                {t('filebrowser.notOpened')}
               </button>
             )}
             {pathSegments.map((seg, idx) => {
@@ -1223,7 +1226,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                     }}
                     title={seg.path}
                   >
-                    {seg.name === '/' ? '根' : seg.name}
+                    {seg.name === '/' ? t('filebrowser.root') : seg.name}
                   </button>
                   {idx < pathSegments.length - 1 && (
                     <span className="remote-breadcrumb-sep">/</span>
@@ -1235,7 +1238,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               type="button"
               className="remote-breadcrumb-edit"
               onClick={enterPathEdit}
-              title="编辑路径"
+              title={t('filebrowser.editPath')}
             >
               <Pencil size={11} />
             </button>
@@ -1248,7 +1251,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             className="toolbar-btn icon-sm"
             onClick={() => void goBack(hostId)}
             disabled={!canGoBack}
-            title="后退"
+            title={t('filebrowser.back')}
           >
             <ChevronLeft size={14} />
           </button>
@@ -1257,7 +1260,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             className="toolbar-btn icon-sm"
             onClick={() => void goForward(hostId)}
             disabled={!canGoForward}
-            title="前进"
+            title={t('filebrowser.forward')}
           >
             <ChevronRight size={14} />
           </button>
@@ -1265,7 +1268,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             type="button"
             className="toolbar-btn icon-sm"
             onClick={() => void refresh(hostId)}
-            title="刷新"
+            title={t('filebrowser.refresh')}
           >
             <RefreshCw size={13} />
           </button>
@@ -1277,7 +1280,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
         {/* 表头 */}
         <div className="remote-pane-header" role="row">
           <HeaderCell
-            label="名称"
+            label={t('filebrowser.name')}
             sortKey="name"
             currentKey={sortKey}
             sortDir={sortDir}
@@ -1285,7 +1288,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             className="remote-pane-cell-name"
           />
           <HeaderCell
-            label="大小"
+            label={t('filebrowser.size')}
             sortKey="size"
             currentKey={sortKey}
             sortDir={sortDir}
@@ -1293,7 +1296,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             className="remote-pane-cell-size"
           />
           <HeaderCell
-            label="类型"
+            label={t('filebrowser.type')}
             sortKey="type"
             currentKey={sortKey}
             sortDir={sortDir}
@@ -1301,7 +1304,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             className="remote-pane-cell-type"
           />
           <HeaderCell
-            label="修改时间"
+            label={t('filebrowser.modified')}
             sortKey="modified"
             currentKey={sortKey}
             sortDir={sortDir}
@@ -1309,7 +1312,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             className="remote-pane-cell-modified"
           />
           <HeaderCell
-            label="权限"
+            label={t('filebrowser.permissions')}
             sortKey="permissions"
             currentKey={sortKey}
             sortDir={sortDir}
@@ -1317,7 +1320,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             className="remote-pane-cell-perms"
           />
           <HeaderCell
-            label="所有者"
+            label={t('filebrowser.owner')}
             sortKey="owner"
             currentKey={sortKey}
             sortDir={sortDir}
@@ -1355,7 +1358,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               }}
             >
               <Folder size={22} className="fb-empty-icon" />
-              <span>等待打开目录…</span>
+              <span>{t('filebrowser.waitingForDir')}</span>
             </div>
           )}
           {!loading && entries.length === 0 && currentPath && (
@@ -1366,7 +1369,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               }}
             >
               <Folder size={22} className="fb-empty-icon" />
-              <span>空目录</span>
+              <span>{t('filebrowser.emptyDir')}</span>
             </div>
           )}
 
@@ -1384,7 +1387,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                   className="fb-row-name-input remote-pane-inline-input"
                   value={inlineCreateValue}
                   onChange={(e) => setInlineCreateValue(e.target.value)}
-                  placeholder={inlineCreate.kind === 'folder' ? '新文件夹名' : '新文件名'}
+                  placeholder={inlineCreate.kind === 'folder' ? t('filebrowser.newFolderName') : t('filebrowser.newFileName')}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -1432,14 +1435,14 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
       {/* ==================== 底部统计栏 ==================== */}
       <div className="remote-pane-stats">
         <span className="remote-pane-stats-left">
-          <span>{stats.folders} 个文件夹, {stats.files} 个文件</span>
+          <span>{t('filebrowser.statsFoldersFiles', { folders: stats.folders, files: stats.files })}</span>
           <span className="remote-pane-stats-sep">|</span>
           <span>{formatFileSize(stats.totalSize)}</span>
           {selectedNames.size > 0 && (
             <>
               <span className="remote-pane-stats-sep">|</span>
               <span style={{ color: 'var(--accent)' }}>
-                已选 {selectedNames.size} 项
+                {t('filebrowser.selectedCount', { count: selectedNames.size })}
                 {stats.selectedSize > 0 && (
                   <span> · {formatFileSize(stats.selectedSize)}</span>
                 )}
@@ -1447,7 +1450,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
             </>
           )}
         </span>
-        <span className="sftp-badge" title="SFTP 加密传输">
+        <span className="sftp-badge" title={t('filebrowser.sftpEncrypted')}>
           <Lock size={10} />
           SFTP
         </span>
@@ -1478,7 +1481,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                 role="menuitem"
                 onClick={handleCtxNewFolder}
               >
-                <FolderPlus size={11} /> 新建文件夹
+                <FolderPlus size={11} /> {t('filebrowser.newFolder')}
               </button>
               <button
                 className="host-menu-item"
@@ -1486,7 +1489,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                 role="menuitem"
                 onClick={handleCtxNewFile}
               >
-                <FilePlus size={11} /> 新建文件
+                <FilePlus size={11} /> {t('filebrowser.newFile')}
               </button>
             </>
           )}
@@ -1501,7 +1504,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                     role="menuitem"
                     onClick={() => handleCtxView(ctxMenu.entry!)}
                   >
-                    <Eye size={11} /> 查看
+                    <Eye size={11} /> {t('filebrowser.view')}
                   </button>
                   <button
                     className="host-menu-item"
@@ -1509,7 +1512,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                     role="menuitem"
                     onClick={() => handleCtxEdit(ctxMenu.entry!)}
                   >
-                    <Pencil size={11} /> 编辑
+                    <Pencil size={11} /> {t('filebrowser.edit')}
                   </button>
                   <div className="host-menu-separator" />
                 </>
@@ -1520,7 +1523,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                 role="menuitem"
                 onClick={() => void handleCtxDownload(ctxMenu.entry!)}
               >
-                <Download size={11} /> 下载到本地
+                <Download size={11} /> {t('filebrowser.downloadToLocal')}
               </button>
               <button
                 className="host-menu-item"
@@ -1528,7 +1531,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                 role="menuitem"
                 onClick={() => void handleCtxCopyPath(ctxMenu.entry!)}
               >
-                <Copy size={11} /> 复制路径
+                <Copy size={11} /> {t('filebrowser.copyPath')}
               </button>
               <button
                 className="host-menu-item"
@@ -1536,7 +1539,7 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                 role="menuitem"
                 onClick={() => handleCtxRename(ctxMenu.entry!)}
               >
-                <Pencil size={11} /> 重命名
+                <Pencil size={11} /> {t('filebrowser.rename')}
               </button>
               <button
                 className="host-menu-item host-menu-danger"
@@ -1546,8 +1549,8 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
               >
                 <Trash2 size={11} />
                 {selectedNames.size > 1 && selectedNames.has(ctxMenu.entry!.name)
-                  ? `删除已选 ${selectedNames.size} 项`
-                  : '删除'}
+                  ? t('filebrowser.deleteSelectedCount', { count: selectedNames.size })
+                  : t('filebrowser.delete')}
               </button>
             </>
           )}
@@ -1606,14 +1609,14 @@ export function FileBrowser({ hostId }: FileBrowserProps) {
                   className="btn btn-ghost"
                   onClick={() => closeMiniDialog()}
                 >
-                  {miniDialog.cancelLabel ?? '取消'}
+                  {miniDialog.cancelLabel ?? t('common.cancel')}
                 </button>
                 <button
                   type="button"
                   className={`btn ${miniDialog.danger ? 'btn-danger' : 'btn-primary'}`}
                   onClick={() => miniDialog.onOk()}
                 >
-                  {miniDialog.okLabel ?? '确定'}
+                  {miniDialog.okLabel ?? t('common.ok')}
                 </button>
               </div>
             </div>
@@ -1836,10 +1839,11 @@ function VirtualList(props: VirtualListProps) {
 // Loading overlay
 // ============================================================
 function Loading() {
+  const { t } = useTranslation();
   return (
     <div className="fb-loading">
       <div className="fb-loading-spinner" />
-      <span>加载中…</span>
+      <span>{t('common.loading')}</span>
     </div>
   );
 }
@@ -1854,19 +1858,20 @@ function ReconnectingOverlay({
   attempt?: number;
   nextDelayMs?: number;
 }) {
+  const { t } = useTranslation();
   const remainingSec = nextDelayMs != null ? Math.max(0, Math.ceil(nextDelayMs / 1000)) : null;
 
   return (
     <div className="fb-reconnecting">
       <RefreshCw size={24} className="fb-reconnecting-icon" />
       <div className="fb-reconnecting-text">
-        <span className="fb-reconnecting-title">尝试重连中…</span>
+        <span className="fb-reconnecting-title">{t('content.reconnecting')}</span>
         {attempt != null && (
           <span className="fb-reconnecting-sub">
-            第 {attempt} 次尝试{remainingSec != null ? ` · ${remainingSec}s 后重试` : ''}
+            {t('content.reconnectAttempt', { attempt })}{remainingSec != null ? ` · ${remainingSec}s ${t('content.retryAfter')}` : ''}
           </span>
         )}
-        <span className="fb-reconnecting-hint">网络恢复后将自动恢复文件浏览</span>
+        <span className="fb-reconnecting-hint">{t('filebrowser.reconnectHint')}</span>
       </div>
     </div>
   );
@@ -1896,9 +1901,9 @@ function iconClass(entry: FileEntry): string {
 }
 
 function typeLabel(entry: FileEntry): string {
-  if (entry.is_dir) return '文件夹';
-  if (entry.file_type === 'symlink') return '链接';
-  return '文件';
+  if (entry.is_dir) return i18n.t('filebrowser.folder');
+  if (entry.file_type === 'symlink') return i18n.t('filebrowser.symlink');
+  return i18n.t('filebrowser.file');
 }
 
 import { formatFileSize } from '../utils/format';

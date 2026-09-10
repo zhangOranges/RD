@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowUp,
   ArrowDown,
@@ -26,6 +27,7 @@ import { version } from '../../package.json';
 import { useAppUpdater } from '../hooks/useAppUpdater';
 
 function UpdateBadge() {
+  const { t } = useTranslation();
   const updater = useAppUpdater();
 
   // dev 模式下 latest.json (GitHub releases/latest) 通常不存在，给一个静态提示不主动触发检查
@@ -33,10 +35,10 @@ function UpdateBadge() {
     return (
       <span
         className="statusbar-item update-badge is-dev"
-        title="开发模式下自动检查会被跳过。需先打 tag + Release 发布后，用打包好的安装包测试更新。"
+        title={t('update.devModeHint')}
       >
         <Sparkles size={11} />
-        <span>更新：仅打包版可用</span>
+        <span>{t('update.devOnly')}</span>
       </span>
     );
   }
@@ -49,10 +51,10 @@ function UpdateBadge() {
           updater.status === 'checking' ? 'is-checking' : ''
         }`}
         onClick={() => updater.check()}
-        title="检查更新（最多等待 8 秒）"
+        title={t('update.checkHint')}
       >
         <RefreshCw size={11} className={updater.status === 'checking' ? 'spin' : ''} />
-        <span>检查更新</span>
+        <span>{t('settings.checkUpdate')}</span>
       </button>
     );
   }
@@ -63,10 +65,10 @@ function UpdateBadge() {
         type="button"
         className="statusbar-item update-badge is-up-to-date"
         onClick={() => updater.check()}
-        title="当前已是最新版本，点击重新检查"
+        title={t('update.upToDateHint')}
       >
         <CheckCircle2 size={11} />
-        <span>当前已是最新版本</span>
+        <span>{t('update.noUpdate')}</span>
       </button>
     );
   }
@@ -77,19 +79,19 @@ function UpdateBadge() {
         type="button"
         className="statusbar-item update-badge is-error"
         onClick={() => updater.showDialog()}
-        title={`更新失败：${updater.errorMsg ?? ''}（点击查看详情）`}
+        title={t('update.checkFailedWithDetail', { msg: updater.errorMsg ?? '' })}
       >
         <AlertTriangle size={11} />
-        <span>更新错误</span>
+        <span>{t('update.error')}</span>
       </button>
     );
   }
 
   if (updater.status === 'done') {
     return (
-      <span className="statusbar-item update-badge is-done" title="已完成更新">
+      <span className="statusbar-item update-badge is-done" title={t('update.done')}>
         <CheckCircle2 size={11} />
-        <span>已更新</span>
+        <span>{t('update.done')}</span>
       </span>
     );
   }
@@ -100,10 +102,10 @@ function UpdateBadge() {
         type="button"
         className="statusbar-item update-badge is-available"
         onClick={() => updater.showDialog()}
-        title={`发现新版本 v${updater.availableVersion}，点击查看更新内容`}
+        title={t('update.availableHint', { version: updater.availableVersion })}
       >
         <Sparkles size={11} />
-        <span>更新 v{updater.availableVersion} 可用</span>
+        <span>{t('update.availableVersion', { version: updater.availableVersion })}</span>
       </button>
     );
   }
@@ -111,8 +113,8 @@ function UpdateBadge() {
   // 下载完成待安装
   if (updater.status === 'downloaded') {
     const title = updater.pendingFromLocal
-      ? `检测到本地已下载 v${updater.availableVersion ?? ''} 更新包，点击立即安装或稍后安装`
-      : `v${updater.availableVersion ?? ''} 已下载完成，点击立即安装或稍后安装`;
+      ? t('update.downloadedLocalHint', { version: updater.availableVersion ?? '' })
+      : t('update.downloadedHint', { version: updater.availableVersion ?? '' });
     return (
       <button
         type="button"
@@ -125,8 +127,8 @@ function UpdateBadge() {
         <CheckCircle2 size={11} />
         <span>
           {updater.pendingFromLocal
-            ? `更新包已就绪 · v${updater.availableVersion ?? ''}`
-            : `已下载 · 点击安装 v${updater.availableVersion ?? ''}`}
+            ? t('update.readyToInstall', { version: updater.availableVersion ?? '' })
+            : t('update.downloadedInstall', { version: updater.availableVersion ?? '' })}
         </span>
       </button>
     );
@@ -139,15 +141,15 @@ function UpdateBadge() {
       : `${updater.downloadedMB || 0}MB`;
     const label =
       updater.status === 'downloading'
-        ? `下载中 ${updater.progressPct || 0}% · ${sizeText}`
-        : '安装中…';
+        ? t('update.downloadingWithSize', { pct: updater.progressPct || 0, size: sizeText })
+        : t('update.installing');
     return (
       <button
         type="button"
         className={`statusbar-item update-badge ${
           updater.status === 'installing' ? 'is-installing' : 'is-downloading'
         }`}
-        title={`${label} · 点击查看详情`}
+        title={`${label} · ${t('update.clickForDetail')}`}
         onClick={() => updater.showDialog()}
       >
         {updater.status === 'installing' ? (
@@ -181,6 +183,7 @@ function formatErr(err: unknown): string {
 
 /** 历史命令按钮 + 下拉菜单 */
 function HistoryButton() {
+  const { t } = useTranslation();
   const entries = useHistoryStore((s) => s.entries);
   const removeCommand = useHistoryStore((s) => s.removeCommand);
   const clearAll = useHistoryStore((s) => s.clearAll);
@@ -251,17 +254,17 @@ function HistoryButton() {
 
   async function sendToTerminal(command: string) {
     if (!selectedHostId) {
-      pushToast('warning', '请先选择并连接主机');
+      pushToast('warning', t('statusbar.selectHostFirst'));
       return;
     }
     const connState = connectionStates[selectedHostId];
     if (connState !== 'connected') {
-      pushToast('warning', '当前主机未连接，无法发送命令');
+      pushToast('warning', t('statusbar.hostNotConnected'));
       return;
     }
     const tabId = activeTerminalTabMap[selectedHostId];
     if (!tabId) {
-      pushToast('warning', '没有可用的终端标签');
+      pushToast('warning', t('statusbar.noTerminalTab'));
       return;
     }
     // 确保终端面板可见
@@ -274,16 +277,16 @@ function HistoryButton() {
       await invoke('pty_write', { hostId: selectedHostId, tabId, data: bytes });
       setOpen(false);
     } catch (err) {
-      pushToast('error', `发送失败：${formatErr(err)}`);
+      pushToast('error', `${t('statusbar.sendFailed')}：${formatErr(err)}`);
     }
   }
 
   async function handleCopy(command: string) {
     try {
       await writeText(command);
-      pushToast('success', '已复制到剪贴板');
+      pushToast('success', t('statusbar.copiedToClipboard'));
     } catch (err) {
-      pushToast('error', `复制失败：${formatErr(err)}`);
+      pushToast('error', `${t('common.copyFailed')}：${formatErr(err)}`);
     }
   }
 
@@ -304,11 +307,11 @@ function HistoryButton() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="历史命令"
-        title="历史命令（按使用频率排序，最多 100 条）"
+        aria-label={t('statusbar.history')}
+        title={t('statusbar.historyHint')}
       >
         <History size={11} />
-        <span>历史</span>
+        <span>{t('statusbar.history')}</span>
         {entries.length > 0 && (
           <span className="statusbar-history-count">{entries.length}</span>
         )}
@@ -319,7 +322,7 @@ function HistoryButton() {
           ref={menuRef}
           className="history-menu tabbar-context-menu host-menu sidebar-context-menu"
           role="menu"
-          aria-label="历史命令列表"
+          aria-label={t('statusbar.historyList')}
           style={{
             position: 'fixed',
             top: 0,
@@ -335,15 +338,15 @@ function HistoryButton() {
           onContextMenu={(e) => e.preventDefault()}
         >
           <div className="history-menu-header">
-            <span className="history-menu-title">历史命令</span>
+            <span className="history-menu-title">{t('statusbar.history')}</span>
             <span className="history-menu-meta">
-              {entries.length > 0 ? `${entries.length} 条 · 按频率排序` : '空'}
+              {entries.length > 0 ? t('statusbar.historyCount', { n: entries.length }) : t('common.none')}
             </span>
           </div>
 
           <div className="history-menu-list">
             {entries.length === 0 ? (
-              <div className="history-menu-empty">暂无历史命令</div>
+              <div className="history-menu-empty">{t('statusbar.noHistory')}</div>
             ) : (
               entries.map((entry) => (
                 <div
@@ -359,13 +362,13 @@ function HistoryButton() {
                     disabled={!canSend}
                     title={
                       canSend
-                        ? '点击发送到当前激活的终端'
-                        : '请先选择并连接主机，并打开终端'
+                        ? t('statusbar.sendToTerminal')
+                        : t('statusbar.connectHostAndOpenTerminal')
                     }
                   >
                     <Send size={11} className="history-menu-send-icon" />
                     <span className="history-menu-cmd-text">{entry.command}</span>
-                    <span className="history-menu-count" aria-label={`使用 ${entry.count} 次`}>
+                    <span className="history-menu-count" aria-label={t('statusbar.usageCount', { n: entry.count })}>
                       ×{entry.count}
                     </span>
                   </button>
@@ -373,8 +376,8 @@ function HistoryButton() {
                     type="button"
                     className="history-menu-action"
                     onClick={() => void handleCopy(entry.command)}
-                    title="复制"
-                    aria-label="复制"
+                    title={t('common.copy')}
+                    aria-label={t('common.copy')}
                   >
                     <Copy size={11} />
                   </button>
@@ -382,8 +385,8 @@ function HistoryButton() {
                     type="button"
                     className="history-menu-action history-menu-action-danger"
                     onClick={() => handleRemove(entry.id)}
-                    title="删除"
-                    aria-label="删除"
+                    title={t('common.delete')}
+                    aria-label={t('common.delete')}
                   >
                     <Trash2 size={11} />
                   </button>
@@ -399,9 +402,9 @@ function HistoryButton() {
                 type="button"
                 className="host-menu-item host-menu-danger history-menu-clear"
                 onClick={handleClearAll}
-                title="清空全部历史命令"
+                title={t('statusbar.clearAllHistory')}
               >
-                <Trash2 size={11} /> 清空全部
+                <Trash2 size={11} /> {t('statusbar.clearAll')}
               </button>
             </>
           )}
@@ -413,6 +416,7 @@ function HistoryButton() {
 }
 
 export function StatusBar() {
+  const { t } = useTranslation();
   const hosts = useHostStore((s) => s.hosts);
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const connectionStates = useHostStore((s) => s.connectionStates);
@@ -428,12 +432,12 @@ export function StatusBar() {
 
   const stateText =
     connState === 'connected'
-      ? '已连接'
+      ? t('statusbar.connected')
       : connState === 'connecting'
-        ? '连接中'
+        ? t('statusbar.connecting')
         : selectedHost
-          ? '未连接'
-          : '空闲';
+          ? t('statusbar.disconnected')
+          : t('statusbar.idle');
 
   const uploadSpeed = tasks
     .filter((t) => t.kind === 'upload' && t.status === 'running')
@@ -487,7 +491,7 @@ export function StatusBar() {
         <span className="statusbar-item statusbar-version">v{version}</span>
         <UpdateBadge />
         <span className="statusbar-item">
-          主机 {connectedCount}/{hosts.length}
+          {t('statusbar.hostCount', { connected: connectedCount, total: hosts.length })}
         </span>
         {selectedHost && (
           <span className="statusbar-item">
@@ -508,13 +512,13 @@ export function StatusBar() {
         )}
         <span className="statusbar-item">{stateText}</span>
         <span className="statusbar-item statusbar-speed">
-          <ArrowUp size={10} /> 上传: {formatSpeed(uploadSpeed)}
+          <ArrowUp size={10} /> {t('statusbar.upload')}: {formatSpeed(uploadSpeed)}
         </span>
         <span className="statusbar-item statusbar-speed">
-          <ArrowDown size={10} /> 下载: {formatSpeed(downloadSpeed)}
+          <ArrowDown size={10} /> {t('statusbar.download')}: {formatSpeed(downloadSpeed)}
         </span>
         <span className={`statusbar-item statusbar-latency ${latencyClass}`}>
-          <Activity size={10} /> 延迟: {latency !== null ? `${latency}ms` : '--'}
+          <Activity size={10} /> {t('statusbar.latency')}: {latency !== null ? `${latency}ms` : '--'}
         </span>
       </div>
     </footer>

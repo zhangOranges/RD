@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
+import i18n from '../i18n';
 import type { RDContext, EventBus, RdEventMap, PluginManifest, ToolbarButtonOption, HostConfigSafe, ThemeInfo, HttpRequestOptions, HttpResponse, SftpFile, CommandResult, SshExecOptions, TransferHandle, TunnelMode, TunnelRule, TunnelStatus, RdTunnelsFile, TunnelConflictStrategy, TunnelImportResult } from '../types/plugin';
 import { RD_TUNNELS_SCHEMA_URL } from '../types/plugin';
 import type { HostConfig, CategoryConfig, ConnectionState, ConnectResult, CredentialType } from '../types';
@@ -36,31 +37,31 @@ function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-/** 权限 ID → 中文说明（与 PluginSandbox / permissions.rs 对齐） */
-const PERM_DESC: Record<string, string> = {
-  'network.http': '发起 HTTP/HTTPS 网络请求',
-  'storage.read': '读取插件持久化存储',
-  'storage.write': '写入插件持久化存储',
-  'file.local.read': '读取本地文件',
-  'file.local.write': '写入本地文件',
-  'server.read': '读取主机配置和连接状态',
-  'server.write': '修改主机配置',
-  'server.manage': '管理主机分类',
-  'ssh.run': '执行 SSH 命令',
-  'sftp.operate': '操作远程文件',
-  'ui.notification': '显示通知',
-  'ui.dialog': '弹出确认/输入对话框',
-  'ui.inject-menu': '注入工具栏/侧边栏菜单项',
-  'theme.read': '读取当前主题信息',
-  'tunnel.manage': '管理端口转发规则',
-  'log.read': '读取内核日志',
-  'updater.manage': '管理应用更新',
+/** 权限 ID → i18n key（与 permissions.rs 对齐） */
+const PERM_DESC_KEY: Record<string, string> = {
+  'network.http': 'plugin.permissionDescNetworkHttp',
+  'storage.read': 'plugin.permissionDescStorageRead',
+  'storage.write': 'plugin.permissionDescStorageWrite',
+  'file.local.read': 'plugin.permissionDescFileLocalRead',
+  'file.local.write': 'plugin.permissionDescFileLocalWrite',
+  'server.read': 'plugin.permissionDescServerRead',
+  'server.write': 'plugin.permissionDescServerWrite',
+  'server.manage': 'plugin.permissionDescServerManage',
+  'ssh.run': 'plugin.permissionDescSshRun',
+  'sftp.operate': 'plugin.permissionDescSftpOperate',
+  'ui.notification': 'plugin.permissionDescUiNotification',
+  'ui.dialog': 'plugin.permissionDescUiDialog',
+  'ui.inject-menu': 'plugin.permissionDescUiInjectMenu',
+  'theme.read': 'plugin.permissionDescThemeRead',
+  'tunnel.manage': 'plugin.permissionDescTunnelManage',
+  'log.read': 'plugin.permissionDescLogRead',
+  'updater.manage': 'plugin.permissionDescUpdaterManage',
 };
 
 /**
  * 客户端层权限校验：调用 Rust 内核 `plugin_assert_perm` 检查插件是否被授予权限。
  * 与内核层共同构成双层校验：前端拦截 + 后端强制。
- * 失败时抛出友好中文错误：`权限不足：缺少「xxx」权限（perm）`。
+ * 失败时抛出友好错误：`权限不足：缺少「xxx」权限（perm）`。
  */
 async function assertPermission(pluginId: string, perm: string): Promise<void> {
   try {
@@ -70,8 +71,9 @@ async function assertPermission(pluginId: string, perm: string): Promise<void> {
     // 仅当内核返回 PERMISSION_DENIED 时才提示"权限不足"；
     // 其他错误（如 store.json 损坏、序列化失败等）原样抛出，避免掩盖真实故障。
     if (msg.includes('PERMISSION_DENIED')) {
-      const desc = PERM_DESC[perm] ?? perm;
-      throw new Error(`权限不足：缺少「${desc}」权限（${perm}）。请在设置 → 插件中重新安装并授予该权限。`);
+      const descKey = PERM_DESC_KEY[perm];
+      const desc = descKey ? i18n.t(descKey) : perm;
+      throw new Error(i18n.t('plugin.permissionDenied', { perm: desc }));
     }
     throw e;
   }
@@ -986,6 +988,16 @@ export function createRDContext(opts: {
         ];
         if (!currentIds.includes(themeId)) throw new Error(`THEME_NOT_FOUND: ${themeId}`);
         useThemeStore.getState().setTheme(themeId);
+      },
+    },
+    i18n: {
+      t: (key: string, params?: Record<string, unknown>) =>
+        i18n.t(key, params as Record<string, string | number> | undefined),
+      getLanguage: () => i18n.language,
+      onLanguageChange: (callback: (lang: string) => void) => {
+        const handler = (lng: string) => callback(lng);
+        i18n.on('languageChanged', handler);
+        return () => i18n.off('languageChanged', handler);
       },
     },
     log: {

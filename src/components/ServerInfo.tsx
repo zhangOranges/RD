@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useTranslation } from 'react-i18next';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
 import { formatDuration } from '../store/transferStore';
@@ -18,14 +19,17 @@ interface ServerStats {
   uptimeSecs: number;
 }
 
-function formatUptime(secs: number): string {
+function formatUptime(secs: number, t: (k: string) => string): string {
   if (!secs || secs <= 0) return '—';
   const d = Math.floor(secs / 86400);
   const h = Math.floor((secs % 86400) / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  if (d > 0) return `${d}天${h}小时`;
-  if (h > 0) return `${h}小时${m}分`;
-  return `${m}分`;
+  const day = t('serverInfo.day');
+  const hour = t('serverInfo.hour');
+  const min = t('serverInfo.minute');
+  if (d > 0) return `${d}${day}${h}${hour}`;
+  if (h > 0) return `${h}${hour}${m}${min}`;
+  return `${m}${min}`;
 }
 
 function formatBytes(mb: number): string {
@@ -48,6 +52,7 @@ function formatPercent(used: number, total: number): string {
  * 展示当前选中主机的连接参数、连接状态、在线时长、服务器硬件信息。
  */
 export function ServerInfo() {
+  const { t } = useTranslation();
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const hosts = useHostStore((s) => s.hosts);
   const connectionStates = useHostStore((s) => s.connectionStates);
@@ -117,8 +122,8 @@ export function ServerInfo() {
   if (!selectedHostId || !host) {
     return (
       <section className="rp-section">
-        <div className="rp-section-title">服务器信息</div>
-        <div className="rp-empty-section">未选择主机</div>
+        <div className="rp-section-title">{t('serverInfo.title')}</div>
+        <div className="rp-empty-section">{t('serverInfo.noHost')}</div>
       </section>
     );
   }
@@ -128,10 +133,10 @@ export function ServerInfo() {
 
   return (
     <section className="rp-section">
-      <div className="rp-section-title">服务器信息</div>
+      <div className="rp-section-title">{t('serverInfo.title')}</div>
       <div className="rp-info-grid">
         <div className="rp-info-item">
-          <span className="rp-info-label">主机</span>
+          <span className="rp-info-label">{t('serverInfo.host')}</span>
           <span
             className={`rp-info-value ${maskMode ? 'mask-sensitive' : ''}`}
             title={`${host.host}:${host.port}`}
@@ -140,7 +145,7 @@ export function ServerInfo() {
           </span>
         </div>
         <div className="rp-info-item">
-          <span className="rp-info-label">用户</span>
+          <span className="rp-info-label">{t('serverInfo.username')}</span>
           <span
             className={`rp-info-value ${maskMode ? 'mask-sensitive' : ''}`}
             title={host.username}
@@ -149,31 +154,31 @@ export function ServerInfo() {
           </span>
         </div>
         <div className="rp-info-item">
-          <span className="rp-info-label">端口</span>
+          <span className="rp-info-label">{t('hostDialog.port')}</span>
           <span className={`rp-info-value ${maskMode ? 'mask-sensitive' : ''}`}>
             {host.port}
           </span>
         </div>
         <div className="rp-info-item">
-          <span className="rp-info-label">协议</span>
+          <span className="rp-info-label">{t('serverInfo.protocol')}</span>
           <span className="rp-info-value">SSH</span>
         </div>
         <div className="rp-info-item">
-          <span className="rp-info-label">系统</span>
+          <span className="rp-info-label">{t('serverInfo.os')}</span>
           <span className="rp-info-value" title={stats?.osInfo ?? ''}>
-            {stats?.osInfo ?? (isConnected ? '获取中…' : 'Linux')}
+            {stats?.osInfo ?? (isConnected ? t('common.loading') : 'Linux')}
           </span>
         </div>
         <div className="rp-info-item">
-          <span className="rp-info-label">在线时长</span>
+          <span className="rp-info-label">{t('serverInfo.onlineDuration')}</span>
           <span className="rp-info-value">{onlineDuration}</span>
         </div>
         <div className="rp-info-item">
-          <span className="rp-info-label">运行时长</span>
-          <span className="rp-info-value">{stats ? formatUptime(stats.uptimeSecs) : '—'}</span>
+          <span className="rp-info-label">{t('serverInfo.uptime')}</span>
+          <span className="rp-info-value">{stats ? formatUptime(stats.uptimeSecs, t) : '—'}</span>
         </div>
         <div className="rp-info-item">
-          <span className="rp-info-label">负载</span>
+          <span className="rp-info-label">{t('serverInfo.load')}</span>
           <span className="rp-info-value">{stats ? stats.loadAvg.toFixed(2) : '—'}</span>
         </div>
       </div>
@@ -182,13 +187,13 @@ export function ServerInfo() {
         <div className="rp-hw">
           <div className="rp-hw-row">
             <div className="rp-hw-row-head">
-              <span className="rp-hw-label">CPU</span>
+              <span className="rp-hw-label">{t('serverInfo.cpu')}</span>
               <span className="rp-hw-sub">
-                {stats ? `${stats.cpuUsage.toFixed(1)}% · ${stats.cpuCores} 核` : '—'}
+                {stats ? `${stats.cpuUsage.toFixed(1)}% · ${stats.cpuCores} ${t('serverInfo.cores')}` : '—'}
               </span>
             </div>
             <div className="rp-hw-detail" title={stats?.cpuModel ?? ''}>
-              {stats?.cpuModel ?? (statsLoading ? '获取中…' : '—')}
+              {stats?.cpuModel ?? (statsLoading ? t('common.loading') : '—')}
             </div>
             <div className="rp-hw-bar">
               <div
@@ -202,7 +207,7 @@ export function ServerInfo() {
 
           <div className="rp-hw-row">
             <div className="rp-hw-row-head">
-              <span className="rp-hw-label">内存</span>
+              <span className="rp-hw-label">{t('serverInfo.memory')}</span>
               <span className="rp-hw-sub">
                 {stats
                   ? `${formatBytes(stats.memUsedMb)} / ${formatBytes(stats.memTotalMb)} · ${memPct}`
@@ -221,7 +226,7 @@ export function ServerInfo() {
 
           <div className="rp-hw-row">
             <div className="rp-hw-row-head">
-              <span className="rp-hw-label">磁盘</span>
+              <span className="rp-hw-label">{t('serverInfo.disk')}</span>
               <span className="rp-hw-sub">
                 {stats
                   ? `${formatGb(stats.diskUsedGb)} / ${formatGb(stats.diskTotalGb)} · ${diskPct}`
@@ -248,12 +253,12 @@ export function ServerInfo() {
         <span className="rp-conn-dot" />
         <span>
           {isConnected
-            ? '已连接'
+            ? t('statusbar.connected')
             : isReconnecting
-              ? '重连中…'
+              ? t('sidebar.reconnecting') + '…'
               : connState === 'connecting'
-                ? '连接中…'
-                : '未连接'}
+                ? t('statusbar.connecting') + '…'
+                : t('statusbar.disconnected')}
         </span>
       </div>
     </section>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { PluginManifest } from '../../types/plugin';
 
 /**
@@ -30,6 +31,7 @@ interface Props {
 }
 
 export function PluginConfigForm({ manifest, initialConfig, onSave, disabled }: Props) {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<Record<string, unknown>>(initialConfig);
   const [saving, setSaving] = useState(false);
 
@@ -50,12 +52,12 @@ export function PluginConfigForm({ manifest, initialConfig, onSave, disabled }: 
 
   const schema = manifest.configSchema as ConfigSchemaGroup | undefined;
   if (!schema || Object.keys(schema).length === 0) {
-    return <div className="settings-empty">该插件无可配置项</div>;
+    return <div className="settings-empty">{t('plugin.noConfigItems')}</div>;
   }
 
   return (
     <div className="settings-pane">
-      <div className="settings-pane-title">插件配置 - {manifest.name}</div>
+      <div className="settings-pane-title">{t('plugin.config')} - {manifest.name}</div>
       {Object.entries(schema).map(([key, field]) =>
         renderField(key, field, config[key], handleChange, disabled),
       )}
@@ -66,7 +68,7 @@ export function PluginConfigForm({ manifest, initialConfig, onSave, disabled }: 
           onClick={handleSave}
           disabled={disabled || saving}
         >
-          {saving ? '保存中…' : '保存配置'}
+          {saving ? t('plugin.saving') : t('plugin.saveConfig')}
         </button>
       </div>
     </div>

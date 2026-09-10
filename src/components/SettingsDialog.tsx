@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { useTranslation } from 'react-i18next';
 import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3, Info, Code2, Sparkles, MessageCircle, Star, ExternalLink, Puzzle } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -35,26 +36,26 @@ type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'plugin' | 'de
 
 interface TabItem {
   id: SettingsTab;
-  label: string;
+  labelKey: string;
   icon: typeof Palette;
 }
 
 const TABS: TabItem[] = [
-  { id: 'general', label: '通用', icon: Sliders },
-  { id: 'theme', label: '主题', icon: Palette },
-  { id: 'update', label: '更新', icon: DownloadCloud },
-  { id: 'shortcuts', label: '快捷键', icon: Keyboard },
-  { id: 'plugin', label: '插件', icon: Puzzle },
-  { id: 'debug', label: '调试', icon: Bug },
-  { id: 'about', label: '关于', icon: Info },
+  { id: 'general', labelKey: 'settings.general', icon: Sliders },
+  { id: 'theme', labelKey: 'settings.theme', icon: Palette },
+  { id: 'update', labelKey: 'settings.update', icon: DownloadCloud },
+  { id: 'shortcuts', labelKey: 'settings.shortcuts', icon: Keyboard },
+  { id: 'plugin', labelKey: 'settings.plugin', icon: Puzzle },
+  { id: 'debug', labelKey: 'settings.debug', icon: Bug },
+  { id: 'about', labelKey: 'settings.about', icon: Info },
 ];
 
 type PluginSubTab = 'installed' | 'market' | 'permissions';
-interface PluginSubTabItem { id: PluginSubTab; label: string; }
+interface PluginSubTabItem { id: PluginSubTab; labelKey: string; }
 const PLUGIN_SUB_TABS: PluginSubTabItem[] = [
-  { id: 'installed', label: '已安装' },
-  { id: 'market', label: '市场' },
-  { id: 'permissions', label: '权限' },
+  { id: 'installed', labelKey: 'settings.installed' },
+  { id: 'market', labelKey: 'settings.market' },
+  { id: 'permissions', labelKey: 'settings.permissions' },
 ];
 
 const GITHUB_REPO = 'https://github.com/zhangOranges/RD';
@@ -81,6 +82,7 @@ const LINK_DISCUSS = `${GITHUB_REPO}/discussions`;
 const FONT_ITEM_HEIGHT = 28;
 
 function TerminalSettingsGroup() {
+  const { t } = useTranslation();
   const settings = useTerminalStore((s) => s.settings);
   const setSettings = useTerminalStore((s) => s.setSettings);
   const pushToast = useToastStore.getState().push;
@@ -245,7 +247,7 @@ function TerminalSettingsGroup() {
   // 应用自定义字体名
   function applyCustomFont() {
     if (!fontSearch.trim()) {
-      pushToast('error', '字体名不能为空');
+      pushToast('error', t('settings.fontNameEmpty'));
       return;
     }
     const name = fontSearch.trim();
@@ -260,15 +262,15 @@ function TerminalSettingsGroup() {
   return (
     <>
       <div className="settings-section-divider">
-        <span>终端外观</span>
+        <span>{t('settings.terminalAppearance')}</span>
       </div>
 
       {/* 字体预览区：放在字体选择上方，方便对比 */}
       <div className="settings-row">
         <div className="settings-row-main">
-          <div className="settings-row-label">字体预览</div>
+          <div className="settings-row-label">{t('settings.fontPreview')}</div>
           <div className="settings-row-desc">
-            预览当前字体的显示效果
+            {t('settings.fontPreviewDesc')}
           </div>
         </div>
         <div className="terminal-font-preview" style={{ fontFamily: previewFontFamily }}>
@@ -290,8 +292,8 @@ function TerminalSettingsGroup() {
 
       <div className="settings-row">
         <div className="settings-row-main">
-          <div className="settings-row-label">字体</div>
-          <div className="settings-row-desc">选择系统中已安装的字体。</div>
+          <div className="settings-row-label">{t('settings.font')}</div>
+          <div className="settings-row-desc">{t('settings.fontDesc')}</div>
         </div>
         <div className="terminal-font-group" ref={dropdownRef}>
           {/* 收起状态：显示当前字体，点击展开 */}
@@ -300,7 +302,7 @@ function TerminalSettingsGroup() {
             className="form-input form-input-compact terminal-font-trigger"
             onClick={() => setDropdownOpen(!dropdownOpen)}
           >
-            <span className="terminal-font-trigger-name">{currentFont || '点击选择字体'}</span>
+            <span className="terminal-font-trigger-name">{currentFont || t('settings.clickToSelectFont')}</span>
             <span className={`terminal-font-trigger-arrow ${dropdownOpen ? 'open' : ''}`}>▾</span>
           </button>
 
@@ -312,21 +314,21 @@ function TerminalSettingsGroup() {
                   <input
                     type="text"
                     className="form-input form-input-compact terminal-font-search"
-                    placeholder="搜索字体... (↑↓ 选择, Enter 确认)"
+                    placeholder={t('settings.searchFont')}
                     value={fontSearch}
                     onChange={(e) => setFontSearch(e.target.value)}
                     autoFocus
                   />
                   {!fontsLoaded ? (
-                    <div className="terminal-font-loading">加载系统字体中...</div>
+                    <div className="terminal-font-loading">{t('settings.loadingFonts')}</div>
                   ) : filteredFonts.length === 0 ? (
                     <div className="terminal-font-empty">
-                      {fontSearch ? '未找到匹配的字体' : '系统中未检测到字体'}
+                      {fontSearch ? t('settings.noMatchingFont') : t('settings.noFontDetected')}
                       <button
                         className="terminal-font-custom-btn"
                         onClick={() => setShowCustomInput(true)}
                       >
-                        手动输入
+                        {t('settings.manualInput')}
                       </button>
                     </div>
                   ) : (
@@ -380,7 +382,7 @@ function TerminalSettingsGroup() {
                       className="terminal-font-custom-btn"
                       onClick={() => setShowCustomInput(true)}
                     >
-                      手动输入字体名...
+                      {t('settings.manualInputFontName')}
                     </button>
                   </div>
                 </>
@@ -389,7 +391,7 @@ function TerminalSettingsGroup() {
                   <input
                     type="text"
                     className="form-input form-input-compact terminal-custom-font-input"
-                    placeholder="输入字体名"
+                    placeholder={t('settings.inputFontName')}
                     value={fontSearch}
                     onChange={(e) => setFontSearch(e.target.value)}
                     onKeyDown={(e) => {
@@ -404,14 +406,14 @@ function TerminalSettingsGroup() {
                       className="btn btn-accent btn-compact"
                       onClick={applyCustomFont}
                     >
-                      应用
+                      {t('common.apply')}
                     </button>
                     <button
                       type="button"
                       className="btn btn-ghost btn-compact"
                       onClick={() => setShowCustomInput(false)}
                     >
-                      取消
+                      {t('common.cancel')}
                     </button>
                   </div>
                 </div>
@@ -423,8 +425,8 @@ function TerminalSettingsGroup() {
 
       <div className="settings-row">
         <div className="settings-row-main">
-          <div className="settings-row-label">字号</div>
-          <div className="settings-row-desc">终端文字大小，单位 px。</div>
+          <div className="settings-row-label">{t('settings.fontSize')}</div>
+          <div className="settings-row-desc">{t('settings.fontSizeDesc')}</div>
         </div>
         <div className="settings-number-control">
           <input
@@ -446,15 +448,15 @@ function TerminalSettingsGroup() {
             className="btn btn-ghost btn-compact"
             onClick={() => setSettings({ fontSize: 14 })}
           >
-            重置
+            {t('settings.reset')}
           </button>
         </div>
       </div>
 
       <div className="settings-row">
         <div className="settings-row-main">
-          <div className="settings-row-label">行高</div>
-          <div className="settings-row-desc">每行之间的垂直间距倍数，影响整体可读性。</div>
+          <div className="settings-row-label">{t('settings.lineHeight')}</div>
+          <div className="settings-row-desc">{t('settings.lineHeightDesc')}</div>
         </div>
         <div className="settings-number-control">
           <input
@@ -475,15 +477,15 @@ function TerminalSettingsGroup() {
             className="btn btn-ghost btn-compact"
             onClick={() => setSettings({ lineHeight: 1.2 })}
           >
-            重置
+            {t('settings.reset')}
           </button>
         </div>
       </div>
 
       <div className="settings-row">
         <div className="settings-row-main">
-          <div className="settings-row-label">字间距</div>
-          <div className="settings-row-desc">字符之间的水平间距，单位 px。</div>
+          <div className="settings-row-label">{t('settings.letterSpacing')}</div>
+          <div className="settings-row-desc">{t('settings.letterSpacingDesc')}</div>
         </div>
         <div className="settings-number-control">
           <input
@@ -505,15 +507,15 @@ function TerminalSettingsGroup() {
             className="btn btn-ghost btn-compact"
             onClick={() => setSettings({ letterSpacing: 0.3 })}
           >
-            重置
+            {t('settings.reset')}
           </button>
         </div>
       </div>
 
       <div className="settings-row settings-row-no-bottom">
         <div className="settings-row-main">
-          <div className="settings-row-label">全部重置</div>
-          <div className="settings-row-desc">将终端外观恢复为默认值。</div>
+          <div className="settings-row-label">{t('settings.resetAll')}</div>
+          <div className="settings-row-desc">{t('settings.resetAllDesc')}</div>
         </div>
         <button
           type="button"
@@ -527,11 +529,11 @@ function TerminalSettingsGroup() {
             });
             setFontSearch('');
             setShowCustomInput(false);
-            pushToast('success', '终端外观已重置为默认值');
+            pushToast('success', t('settings.terminalResetToDefault'));
           }}
         >
           <RotateCcw size={13} />
-          <span>重置终端</span>
+          <span>{t('settings.resetTerminal')}</span>
         </button>
       </div>
     </>
@@ -539,6 +541,7 @@ function TerminalSettingsGroup() {
 }
 
 export function SettingsDialog() {
+  const { t, i18n } = useTranslation();
   const settingsVisible = useUIStore((s) => s.settingsVisible);
   const setSettingsVisible = useUIStore((s) => s.setSettingsVisible);
   const maskMode = useUIStore((s) => s.maskMode);
@@ -555,6 +558,21 @@ export function SettingsDialog() {
   const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
   const [showNewThemeMenu, setShowNewThemeMenu] = useState(false);
 
+  // 语言下拉状态
+  const [langDropdownOpen, setLangDropdownOpen] = useState(false);
+  const langDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!langDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (langDropdownRef.current && !langDropdownRef.current.contains(e.target as Node)) {
+        setLangDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [langDropdownOpen]);
+
   /** 基于某个预设新建自定义主题，并打开编辑器 */
   const handleCreateCustomTheme = useCallback(
     (baseId: PresetThemeId) => {
@@ -563,7 +581,7 @@ export function SettingsDialog() {
       setTheme(newId);
       setEditingThemeId(newId);
       setShowNewThemeMenu(false);
-      pushToast('success', `已创建自定义主题，可在编辑器中调整颜色`);
+      pushToast('success', t('settings.customThemeCreated'));
     },
     [createCustomTheme, setTheme, pushToast]
   );
@@ -571,12 +589,12 @@ export function SettingsDialog() {
   /** 删除自定义主题（带确认） */
   const handleDeleteCustomTheme = useCallback(
     (id: string, name: string) => {
-      if (!window.confirm(`确定删除自定义主题「${name}」吗？`)) return;
+      if (!window.confirm(t('settings.deleteCustomThemeConfirm', { name }))) return;
       deleteCustomTheme(id);
       if (editingThemeId === id) setEditingThemeId(null);
-      pushToast('success', `已删除自定义主题`);
+      pushToast('success', t('settings.customThemeDeleted'));
     },
-    [deleteCustomTheme, editingThemeId, pushToast]
+    [deleteCustomTheme, editingThemeId, pushToast, t]
   );
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
@@ -627,14 +645,14 @@ export function SettingsDialog() {
         await usePluginStore.getState().installFromDir(dirPath);
         await usePluginStore.getState().setGranted(manifest.id, grantedPerms as string[]);
         await usePluginStore.getState().loadPlugins();
-        pushToast('success', `插件「${manifest.name}」安装成功`);
+        pushToast('success', t('plugin.installSuccessWithName', { name: manifest.name }));
       } catch (e) {
-        pushToast('error', `安装失败：${e instanceof Error ? e.message : String(e)}`);
+        pushToast('error', t('plugin.installFailedWithError', { error: e instanceof Error ? e.message : String(e) }));
       } finally {
         setInstallDialog(null);
       }
     },
-    [installDialog, pushToast],
+    [installDialog, pushToast, t],
   );
 
   /** 选择目录并解析 manifest，弹窗确认后安装 */
@@ -646,9 +664,9 @@ export function SettingsDialog() {
         setInstallDialog({ manifest, dirPath: dir });
       }
     } catch (e) {
-      pushToast('error', `读取插件信息失败：${e instanceof Error ? e.message : String(e)}`);
+      pushToast('error', t('plugin.readInfoFailed', { error: e instanceof Error ? e.message : String(e) }));
     }
-  }, [pushToast]);
+  }, [pushToast, t]);
 
   // 录制快捷键：监听按键，按下有效组合键即写入并结束录制
   useEffect(() => {
@@ -698,7 +716,7 @@ export function SettingsDialog() {
         setDebugLogging(debugVal);
       } catch (err) {
         if (!cancelled) {
-          pushToast('error', `读取设置失败：${formatErr(err)}`);
+          pushToast('error', t('settings.readFailed', { error: formatErr(err) }));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -738,11 +756,11 @@ export function SettingsDialog() {
         key: 'remember_dir_global',
         value: checked ? 'true' : 'false',
       });
-      pushToast('success', checked ? '已开启目录记忆' : '已关闭目录记忆');
+      pushToast('success', checked ? t('settings.dirMemoryOn') : t('settings.dirMemoryOff'));
     } catch (err) {
       // 写入失败：回滚 UI 状态
       setRememberDirGlobal(!checked);
-      pushToast('error', `保存设置失败：${formatErr(err)}`);
+      pushToast('error', t('settings.saveFailed', { error: formatErr(err) }));
     } finally {
       setSaving(false);
     }
@@ -870,7 +888,7 @@ export function SettingsDialog() {
                   aria-pressed={active}
                 >
                   <Icon size={15} className="settings-nav-icon" />
-                  <span>{tab.label}</span>
+                  <span>{t(tab.labelKey)}</span>
                 </button>
               );
             })}
@@ -881,13 +899,53 @@ export function SettingsDialog() {
             {/* 通用 */}
             {activeTab === 'general' && (
               <div className="settings-pane">
-                <div className="settings-pane-title">通用设置</div>
+                <div className="settings-pane-title">{t('settings.generalTitle')}</div>
+
+                {/* 语言选择 */}
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <div className="settings-row-label">{t('settings.language')}</div>
+                    <div className="settings-row-desc">{t('settings.languageDesc')}</div>
+                  </div>
+                  <div className="terminal-font-group" ref={langDropdownRef}>
+                    <button
+                      type="button"
+                      className="form-input form-input-compact terminal-font-trigger settings-lang-trigger"
+                      onClick={() => setLangDropdownOpen(!langDropdownOpen)}
+                    >
+                      <span className="terminal-font-trigger-name">
+                        {i18n.language === 'zh' ? t('common.chinese') : t('common.english')}
+                      </span>
+                      <span className={`terminal-font-trigger-arrow ${langDropdownOpen ? 'open' : ''}`}>▾</span>
+                    </button>
+                    {langDropdownOpen && (
+                      <div className="terminal-font-dropdown settings-lang-dropdown">
+                        {([
+                          { value: 'zh', label: t('common.chinese') },
+                          { value: 'en', label: t('common.english') },
+                        ] as const).map((opt) => (
+                          <div
+                            key={opt.value}
+                            className={`terminal-font-item ${i18n.language === opt.value ? 'active' : ''}`}
+                            onClick={() => {
+                              void i18n.changeLanguage(opt.value);
+                              setLangDropdownOpen(false);
+                            }}
+                          >
+                            {opt.label}
+                            {i18n.language === opt.value && <Check size={12} className="terminal-font-item-check" />}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 <div className="settings-row">
                   <div className="settings-row-main">
-                    <div className="settings-row-label">目录记忆（全局默认）</div>
+                    <div className="settings-row-label">{t('settings.rememberDirGlobal')}</div>
                     <div className="settings-row-desc">
-                      关闭后，新建主机的目录记忆默认关闭。已有主机的目录记忆由各自配置决定。
+                      {t('settings.rememberDirGlobalDesc')}
                     </div>
                   </div>
                   <label className="form-switch">
@@ -1171,8 +1229,8 @@ export function SettingsDialog() {
                     const active = pluginSubTab === tab.id;
                     const label =
                       tab.id === 'installed' && plugins.length > 0
-                        ? `${tab.label} (${plugins.length})`
-                        : tab.label;
+                        ? `${t(tab.labelKey)} (${plugins.length})`
+                        : t(tab.labelKey);
                     return (
                       <button
                         key={tab.id}

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { usePluginStore, type PluginInfo } from '../../store/pluginStore';
 import type { PluginPermission } from '../../types/plugin';
 import { Shield, Check, Lock, Globe, Database, FileText, Server, Terminal, FolderOpen, Bell, MessageSquare, Palette, ArrowLeftRight, FileSearch, RefreshCw } from 'lucide-react';
@@ -13,138 +14,139 @@ interface PermissionMeta {
 
 const PERMISSION_META: Record<PluginPermission, PermissionMeta> = {
   'network.http': {
-    category: '网络',
-    label: '发起 HTTP 请求',
-    description: '允许插件通过 HTTP/HTTPS 协议访问外部网络资源',
+    category: 'network',
+    label: 'permLabelNetworkHttp',
+    description: 'permissionDescNetworkHttp',
     icon: Globe,
   },
   'storage.read': {
-    category: '存储',
-    label: '读取插件存储空间',
-    description: '允许插件读取其独立沙箱内的持久化存储数据',
+    category: 'storage',
+    label: 'permLabelStorageRead',
+    description: 'permissionDescStorageRead',
     icon: Database,
   },
   'storage.write': {
-    category: '存储',
-    label: '写入插件存储空间',
-    description: '允许插件向其独立沙箱内写入持久化存储数据',
+    category: 'storage',
+    label: 'permLabelStorageWrite',
+    description: 'permissionDescStorageWrite',
     icon: Database,
   },
   'file.local.read': {
-    category: '本地文件',
-    label: '读取本地文件',
-    description: '允许插件读取用户本地文件系统中的文件内容',
+    category: 'localFile',
+    label: 'permLabelFileLocalRead',
+    description: 'permissionDescFileLocalRead',
     icon: FileText,
   },
   'file.local.write': {
-    category: '本地文件',
-    label: '写入本地文件',
-    description: '允许插件向用户本地文件系统写入或修改文件',
+    category: 'localFile',
+    label: 'permLabelFileLocalWrite',
+    description: 'permissionDescFileLocalWrite',
     icon: FileText,
   },
   'server.read': {
-    category: '主机管理',
-    label: '读取主机配置',
-    description: '允许插件获取已保存的 SSH 主机列表（脱敏后，不含密码/私钥）',
+    category: 'server',
+    label: 'permLabelServerRead',
+    description: 'permissionDescServerRead',
     icon: Server,
   },
   'server.write': {
-    category: '主机管理',
-    label: '新增/修改主机',
-    description: '允许插件创建新的主机配置或修改现有主机信息',
+    category: 'server',
+    label: 'permLabelServerWrite',
+    description: 'permissionDescServerWrite',
     icon: Server,
   },
   'server.manage': {
-    category: '主机管理',
-    label: '管理主机连接',
-    description: '允许插件主动连接、断开主机或测试主机连通性',
+    category: 'server',
+    label: 'permLabelServerManage',
+    description: 'permissionDescServerManage',
     icon: Server,
   },
   'ssh.run': {
-    category: 'SSH',
-    label: '执行 SSH 命令',
-    description: '允许插件在已连接的 SSH 主机上执行 Shell 命令',
+    category: 'ssh',
+    label: 'permLabelSshRun',
+    description: 'permissionDescSshRun',
     icon: Terminal,
   },
   'sftp.operate': {
-    category: 'SFTP',
-    label: '操作远程文件',
-    description: '允许插件通过 SFTP 浏览、上传、下载、重命名远程文件',
+    category: 'sftp',
+    label: 'permLabelSftpOperate',
+    description: 'permissionDescSftpOperate',
     icon: FolderOpen,
   },
   'ui.notification': {
-    category: '界面',
-    label: '发送系统通知',
-    description: '允许插件向用户推送 Toast 通知消息',
+    category: 'ui',
+    label: 'permLabelUiNotification',
+    description: 'permissionDescUiNotification',
     icon: Bell,
   },
   'ui.dialog': {
-    category: '界面',
-    label: '弹出对话框',
-    description: '允许插件弹出确认框、输入框等模态对话框',
+    category: 'ui',
+    label: 'permLabelUiDialog',
+    description: 'permissionDescUiDialog',
     icon: MessageSquare,
   },
   'ui.inject-menu': {
-    category: '界面',
-    label: '注入菜单项',
-    description: '允许插件在侧边栏、右键菜单、工具栏等位置注入自定义按钮',
+    category: 'ui',
+    label: 'permLabelUiInjectMenu',
+    description: 'permissionDescUiInjectMenu',
     icon: Lock,
   },
   'theme.read': {
-    category: '主题',
-    label: '读取主题信息',
-    description: '允许插件获取当前应用主题色板与主题列表',
+    category: 'theme',
+    label: 'permLabelThemeRead',
+    description: 'permissionDescThemeRead',
     icon: Palette,
   },
   'tunnel.manage': {
-    category: '端口转发',
-    label: '管理 SSH 隧道',
-    description: '允许插件创建、启动、停止、删除 SSH 端口转发隧道',
+    category: 'tunnel',
+    label: 'permLabelTunnelManage',
+    description: 'permissionDescTunnelManage',
     icon: ArrowLeftRight,
   },
   'log.read': {
-    category: '日志',
-    label: '读取应用日志',
-    description: '允许插件读取应用日志流，便于监控和调试',
+    category: 'log',
+    label: 'permLabelLogRead',
+    description: 'permissionDescLogRead',
     icon: FileSearch,
   },
   'updater.manage': {
-    category: '更新',
-    label: '管理应用更新',
-    description: '允许插件检查、下载、触发应用版本更新',
+    category: 'updater',
+    label: 'permLabelUpdaterManage',
+    description: 'permissionDescUpdaterManage',
     icon: RefreshCw,
   },
 };
 
 const ALL_CATEGORIES = [
-  '网络',
-  '存储',
-  '本地文件',
-  '主机管理',
-  'SSH',
-  'SFTP',
-  '界面',
-  '主题',
-  '端口转发',
-  '日志',
-  '更新',
+  'network',
+  'storage',
+  'localFile',
+  'server',
+  'ssh',
+  'sftp',
+  'ui',
+  'theme',
+  'tunnel',
+  'log',
+  'updater',
 ] as const;
 
 const CATEGORY_COLORS: Record<string, string> = {
-  网络: '#3b82f6',
-  存储: '#8b5cf6',
-  本地文件: '#06b6d4',
-  主机管理: '#f59e0b',
-  SSH: '#22c55e',
-  SFTP: '#14b8a6',
-  界面: '#ec4899',
-  主题: '#a855f7',
-  端口转发: '#ef4444',
-  日志: '#6b7280',
-  更新: '#10b981',
+  network: '#3b82f6',
+  storage: '#8b5cf6',
+  localFile: '#06b6d4',
+  server: '#f59e0b',
+  ssh: '#22c55e',
+  sftp: '#14b8a6',
+  ui: '#ec4899',
+  theme: '#a855f7',
+  tunnel: '#ef4444',
+  log: '#6b7280',
+  updater: '#10b981',
 };
 
 export function PluginDevConsole() {
+  const { t } = useTranslation();
   const plugins = usePluginStore((s) => s.plugins);
   const [selectedPluginId, setSelectedPluginId] = useState<string | null>(
     plugins[0]?.id ?? null,
@@ -164,7 +166,7 @@ export function PluginDevConsole() {
     const groups = new Map<string, { perm: PluginPermission; granted: boolean }[]>();
     for (const perm of perms) {
       const meta = PERMISSION_META[perm];
-      const category = meta?.category ?? '其他';
+      const category = meta?.category ?? 'other';
       if (!groups.has(category)) groups.set(category, []);
       groups.get(category)!.push({ perm, granted: granted.has(perm) });
     }
@@ -190,12 +192,12 @@ export function PluginDevConsole() {
         }}
       >
         <div>
-          <Shield size={40} style={{ margin: '0 auto 16px', opacity: 0.4 }} />
-          <div>暂无已安装的插件</div>
-          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
-            安装插件后，可在此处查看各插件申请的权限详情
+            <Shield size={40} style={{ margin: '0 auto 16px', opacity: 0.4 }} />
+            <div>{t('plugin.noPlugins')}</div>
+            <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
+              {t('plugin.noPluginsDesc')}
+            </div>
           </div>
-        </div>
       </div>
     );
   }
@@ -228,7 +230,7 @@ export function PluginDevConsole() {
             letterSpacing: 0.3,
           }}
         >
-          插件列表
+          {t('plugin.pluginList')}
         </div>
         {plugins.map((p) => {
           const isActive = selectedPlugin?.id === p.id;
@@ -289,7 +291,7 @@ export function PluginDevConsole() {
               >
                 <span>v{p.version}</span>
                 <span style={{ opacity: 0.5 }}>·</span>
-                <span>{permCount} 项权限</span>
+                <span>{t('plugin.permissionCount', { count: permCount })}</span>
               </div>
             </div>
           );
@@ -347,7 +349,7 @@ export function PluginDevConsole() {
                       color: 'var(--color-success, #22c55e)',
                     }}
                   >
-                    已启用
+                    {t('plugin.enabled')}
                   </span>
                 ) : (
                   <span
@@ -359,7 +361,7 @@ export function PluginDevConsole() {
                       color: 'var(--color-text-muted)',
                     }}
                   >
-                    已禁用
+                    {t('plugin.disabled')}
                   </span>
                 )}
               </div>
@@ -370,7 +372,7 @@ export function PluginDevConsole() {
                   lineHeight: 1.6,
                 }}
               >
-                {selectedPlugin.manifest.description ?? '暂无描述'}
+                {selectedPlugin.manifest.description ?? t('plugin.noDescription')}
               </div>
               <div
                 style={{
@@ -391,11 +393,11 @@ export function PluginDevConsole() {
                 >
                   <Shield size={14} />
                   <span>
-                    申请权限：
+                    {t('plugin.requestedPermissions')}
                     <strong style={{ color: 'var(--text-primary)' }}>
                       {(selectedPlugin.manifest.permissions ?? []).length}
                     </strong>{' '}
-                    项
+                    {t('plugin.items')}
                   </span>
                 </div>
                 <div
@@ -408,11 +410,11 @@ export function PluginDevConsole() {
                 >
                   <Check size={14} style={{ color: 'var(--color-success, #22c55e)' }} />
                   <span>
-                    已授予：
+                    {t('plugin.granted')}
                     <strong style={{ color: 'var(--color-success, #22c55e)' }}>
                       {(selectedPlugin.grantedPermissions ?? []).length}
                     </strong>{' '}
-                    项
+                    {t('plugin.items')}
                   </span>
                 </div>
               </div>
@@ -428,7 +430,7 @@ export function PluginDevConsole() {
                   fontSize: 13,
                 }}
               >
-                该插件未申请任何权限
+                {t('plugin.noPermissionsRequested')}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -458,7 +460,7 @@ export function PluginDevConsole() {
                           color: 'var(--text-primary)',
                         }}
                       >
-                        {group.category}
+                        {t(`plugin.permCategory.${group.category}`)}
                       </span>
                       <span
                         style={{
@@ -535,7 +537,7 @@ export function PluginDevConsole() {
                                       color: 'var(--text-primary)',
                                     }}
                                   >
-                                    {meta?.label ?? perm}
+                                    {meta ? t(`plugin.${meta.label}`) : perm}
                                   </span>
                                   {granted ? (
                                     <span
@@ -552,7 +554,7 @@ export function PluginDevConsole() {
                                       }}
                                     >
                                       <Check size={10} />
-                                      已授予
+                                      {t('plugin.granted')}
                                     </span>
                                   ) : (
                                     <span
@@ -569,7 +571,7 @@ export function PluginDevConsole() {
                                       }}
                                     >
                                       <Lock size={10} />
-                                      未授予
+                                      {t('plugin.notGranted')}
                                     </span>
                                   )}
                                 </div>
@@ -580,7 +582,7 @@ export function PluginDevConsole() {
                                     lineHeight: 1.5,
                                   }}
                                 >
-                                  {meta?.description ?? perm}
+                                  {meta ? t(`plugin.${meta.description}`) : perm}
                                 </div>
                                 <div
                                   style={{

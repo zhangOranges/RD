@@ -1,6 +1,8 @@
 import { X, CheckCircle, AlertCircle, Ban, FolderOpen, Trash2 } from 'lucide-react';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { ask } from '@tauri-apps/plugin-dialog';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useTransferStore, formatBytes, formatSpeed } from '../store/transferStore';
 import { useToastStore } from './Toast';
 import type { TransferTask } from '../types';
@@ -11,6 +13,7 @@ import { logError } from '../utils/log';
  * 上传 / 下载标签切换，按标签过滤展示任务，支持取消与清除已完成。
  */
 export function TransferQueue() {
+  const { t } = useTranslation();
   const tasks = useTransferStore((s) => s.tasks);
   const cancelTask = useTransferStore((s) => s.cancelTask);
   const clearFinished = useTransferStore((s) => s.clearFinished);
@@ -28,7 +31,7 @@ export function TransferQueue() {
 
   return (
     <section className="rp-section" onContextMenu={(e) => e.preventDefault()}>
-      <div className="rp-section-title">传输队列</div>
+      <div className="rp-section-title">{t('transfer.queue')}</div>
       <div className="rp-clear-actions">
         <button
           type="button"
@@ -36,7 +39,7 @@ export function TransferQueue() {
           disabled={!hasFinished}
           onClick={() => clearFinished()}
         >
-          清除已完成
+          {t('transfer.clearCompleted')}
         </button>
         <button
           type="button"
@@ -44,11 +47,11 @@ export function TransferQueue() {
           disabled={tasks.length === 0}
           onClick={async () => {
             if (tasks.some((t) => t.status === 'running' || t.status === 'queued')) {
-              const ok = await ask('有正在进行的传输任务，确定要清空全部吗？', {
-                title: '确认清空全部',
+              const ok = await ask(t('transfer.clearAllConfirm'), {
+                title: t('transfer.clearAllConfirmTitle'),
                 kind: 'warning',
-                okLabel: '确认清空',
-                cancelLabel: '取消',
+                okLabel: t('transfer.clearAllConfirm'),
+                cancelLabel: t('common.cancel'),
               });
               if (!ok) return;
             }
@@ -56,7 +59,7 @@ export function TransferQueue() {
           }}
         >
           <Trash2 size={11} />
-          清空全部
+          {t('transfer.clearAll')}
         </button>
       </div>
       <div className="rp-tabs">
@@ -65,7 +68,7 @@ export function TransferQueue() {
           className={`rp-tab ${activeTab === 'upload' ? 'active' : ''}`}
           onClick={() => setActiveTab('upload')}
         >
-          上传
+          {t('transfer.uploading')}
           <span className="rp-tab-badge">{uploadCount}</span>
         </button>
         <button
@@ -73,14 +76,14 @@ export function TransferQueue() {
           className={`rp-tab ${activeTab === 'download' ? 'active' : ''}`}
           onClick={() => setActiveTab('download')}
         >
-          下载
+          {t('transfer.downloading')}
           <span className="rp-tab-badge">{downloadCount}</span>
         </button>
       </div>
 
       <div className="rp-task-list">
         {filtered.length === 0 ? (
-          <div className="rp-empty">暂无任务</div>
+          <div className="rp-empty">{t('transfer.noItems')}</div>
         ) : (
           filtered.map((t) => (
             <TaskItem key={t.id} task={t} onCancel={() => cancelTask(t.id)} />
@@ -117,18 +120,19 @@ async function revealDownloaded(task: TransferTask) {
     try {
       await revealItemInDir(task.localPath);
       if (!await exists(target)) {
-        pushToast('warning', `文件已被删除，已为你打开所在文件夹：${task.name}`);
+        pushToast('warning', i18n.t('transfer.fileDeleted', { name: task.name }));
         return;
       }
     } catch {
       // ignore second error
     }
     logError(`reveal download failed: ${String(e)} target: ${target}`);
-    pushToast('error', `无法打开文件夹：${task.name}`);
+    pushToast('error', i18n.t('transfer.cannotOpenFolder', { name: task.name }));
   }
 }
 
 function TaskItem({ task, onCancel }: { task: TransferTask; onCancel: () => void }) {
+  const { t } = useTranslation();
   const pct =
     task.totalBytes > 0
       ? Math.min(100, Math.round((task.bytesTransferred / task.totalBytes) * 100))
@@ -139,25 +143,25 @@ function TaskItem({ task, onCancel }: { task: TransferTask; onCancel: () => void
 
   let statusNode: React.ReactNode;
   if (isQueued) {
-    statusNode = <span className="rp-task-status queued">等待中</span>;
+    statusNode = <span className="rp-task-status queued">{t('transfer.pending')}</span>;
   } else if (isRunning) {
     statusNode = <span className="rp-task-status running">{pct}%</span>;
   } else if (task.status === 'completed') {
     statusNode = (
       <span className="rp-task-status completed">
-        <CheckCircle size={11} /> 完成
+        <CheckCircle size={11} /> {t('transfer.completed')}
       </span>
     );
   } else if (task.status === 'error') {
     statusNode = (
       <span className="rp-task-status error" title={task.errorMessage}>
-        <AlertCircle size={11} /> 失败
+        <AlertCircle size={11} /> {t('transfer.failed')}
       </span>
     );
   } else {
     statusNode = (
       <span className="rp-task-status canceled">
-        <Ban size={11} /> 已取消
+        <Ban size={11} /> {t('transfer.cancelled')}
       </span>
     );
   }
@@ -172,7 +176,7 @@ function TaskItem({ task, onCancel }: { task: TransferTask; onCancel: () => void
           <button
             type="button"
             className="rp-task-reveal"
-            title="在文件夹中显示"
+            title={t('transfer.revealInFolder')}
             onClick={() => void revealDownloaded(task)}
           >
             <FolderOpen size={12} />
@@ -182,7 +186,7 @@ function TaskItem({ task, onCancel }: { task: TransferTask; onCancel: () => void
           <button
             type="button"
             className="rp-task-cancel"
-            title="取消传输"
+            title={t('transfer.cancel')}
             onClick={onCancel}
           >
             <X size={12} />

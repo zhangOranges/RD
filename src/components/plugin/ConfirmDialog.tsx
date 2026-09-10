@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   title: string;
@@ -14,6 +15,7 @@ interface Props {
  * 通过 createPortal 渲染到 document.body，避免被父容器的层级/overflow 影响。
  */
 export function ConfirmDialog({ title, message, onConfirm, onCancel }: Props) {
+  const { t } = useTranslation();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCancel();
@@ -35,7 +37,7 @@ export function ConfirmDialog({ title, message, onConfirm, onCancel }: Props) {
         <div className="dialog-footer">
           <div className="dialog-footer-center">
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
-              取消
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -43,7 +45,7 @@ export function ConfirmDialog({ title, message, onConfirm, onCancel }: Props) {
               onClick={onConfirm}
               autoFocus
             >
-              确认
+              {t('common.confirm')}
             </button>
           </div>
         </div>

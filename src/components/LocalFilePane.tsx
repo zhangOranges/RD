@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import i18n from '../i18n';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { createPortal } from 'react-dom';
@@ -40,9 +41,9 @@ function formatTime(unixSec: number): string {
 
 /** 文件类型显示文本。 */
 function typeLabel(fileType: 'dir' | 'file' | 'symlink'): string {
-  if (fileType === 'dir') return '文件夹';
-  if (fileType === 'symlink') return '链接';
-  return '文件';
+  if (fileType === 'dir') return i18n.t('filebrowser.folder');
+  if (fileType === 'symlink') return i18n.t('filebrowser.symlink');
+  return i18n.t('filebrowser.file');
 }
 
 /** 将路径拆分为面包屑分段，每段带可跳转的完整路径。跨平台兼容。 */

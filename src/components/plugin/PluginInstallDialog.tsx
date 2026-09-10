@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import type { PluginManifest, PluginPermission } from '../../types/plugin';
 
 interface Props {
@@ -29,43 +30,43 @@ const RISK_COLORS: Record<'high' | 'medium' | 'low', string> = {
   low: 'var(--color-success, #22c55e)',
 };
 
-const RISK_LABELS: Record<'high' | 'medium' | 'low', string> = {
-  high: '高危',
-  medium: '中风险',
-  low: '低风险',
+const RISK_LABEL_KEYS: Record<'high' | 'medium' | 'low', string> = {
+  high: 'riskHigh',
+  medium: 'riskMedium',
+  low: 'riskLow',
 };
 
-// 高危权限后果说明
-const HIGH_RISK_CONSEQUENCES: Record<string, string> = {
-  'ssh.run': '插件可在远程服务器上执行任意命令，包括读取/修改/删除文件、安装软件、创建后门等。',
-  'server.write':
-    '插件可修改你的主机配置，包括更改密码/密钥/端口，可能导致你无法连接或被中间人攻击。',
-  'sftp.operate': '插件可上传/下载/删除远程文件，可能覆盖关键系统文件或窃取敏感数据。',
-  'tunnel.manage':
-    '插件可创建端口转发规则，可能将内网服务暴露到公网或在服务器上开放端口。',
+// 高危权限后果说明（i18n key）
+const HIGH_RISK_CONSEQUENCE_KEYS: Record<string, string> = {
+  'ssh.run': 'highRiskSshRun',
+  'server.write': 'highRiskServerWrite',
+  'sftp.operate': 'highRiskSftpOperate',
+  'tunnel.manage': 'highRiskTunnelManage',
 };
 
-const PERMISSION_DESCRIPTIONS: Record<string, string> = {
-  'network.http': '发起 HTTP/HTTPS 网络请求',
-  'storage.read': '读取插件持久化存储',
-  'storage.write': '写入插件持久化存储',
-  'file.local.read': '读取本地文件',
-  'file.local.write': '写入本地文件',
-  'server.read': '读取主机配置和连接状态',
-  'server.write': '修改主机配置（增删改）',
-  'server.manage': '管理主机分类和全局开关',
-  'ssh.run': '在远程主机上执行 SSH 命令',
-  'sftp.operate': '操作远程文件（上传/下载/删除/重命名）',
-  'ui.notification': '显示通知提示',
-  'ui.dialog': '弹出确认/输入对话框',
-  'ui.inject-menu': '注入工具栏/侧边栏菜单项',
-  'theme.read': '读取当前主题信息',
-  'tunnel.manage': '管理端口转发规则（含远程转发）',
-  'log.read': '读取内核日志',
-  'updater.manage': '管理应用更新',
+// 权限描述 i18n key 映射
+const PERMISSION_DESC_KEYS: Record<string, string> = {
+  'network.http': 'permissionDescNetworkHttp',
+  'storage.read': 'permissionDescStorageRead',
+  'storage.write': 'permissionDescStorageWrite',
+  'file.local.read': 'permissionDescFileLocalRead',
+  'file.local.write': 'permissionDescFileLocalWrite',
+  'server.read': 'permissionDescServerRead',
+  'server.write': 'permissionDescServerWrite',
+  'server.manage': 'permissionDescServerManage',
+  'ssh.run': 'permissionDescSshRun',
+  'sftp.operate': 'permissionDescSftpOperate',
+  'ui.notification': 'permissionDescUiNotification',
+  'ui.dialog': 'permissionDescUiDialog',
+  'ui.inject-menu': 'permissionDescUiInjectMenu',
+  'theme.read': 'permissionDescThemeRead',
+  'tunnel.manage': 'permissionDescTunnelManage',
+  'log.read': 'permissionDescLogRead',
+  'updater.manage': 'permissionDescUpdaterManage',
 };
 
 export function PluginInstallDialog({ manifest, onConfirm, onCancel }: Props) {
+  const { t } = useTranslation();
   const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export function PluginInstallDialog({ manifest, onConfirm, onCancel }: Props) {
       >
         {/* 头部 */}
         <div className="dialog-header">
-          <h2 className="dialog-title">安装插件确认</h2>
+          <h2 className="dialog-title">{t('plugin.installConfirm')}</h2>
         </div>
 
         <div className="dialog-body" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
@@ -148,7 +149,7 @@ export function PluginInstallDialog({ manifest, onConfirm, onCancel }: Props) {
                   color: 'var(--color-danger, #ef4444)',
                 }}
               >
-                ⚠ 该插件请求高危权限
+                ⚠ {t('plugin.highRiskWarning')}
               </div>
               <div
                 style={{
@@ -157,20 +158,22 @@ export function PluginInstallDialog({ manifest, onConfirm, onCancel }: Props) {
                   marginTop: 4,
                 }}
               >
-                授予高危权限意味着插件可以在远程服务器上执行任意操作，请确认你信任该插件的来源。
+                {t('plugin.highRiskWarningDesc')}
               </div>
             </div>
           )}
 
           {/* 权限清单 */}
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>请求的权限</div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('plugin.requestedPermissions')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {manifest.permissions.map((perm) => {
               const risk = riskLevel(perm);
               const color = RISK_COLORS[risk];
-              const label = RISK_LABELS[risk];
-              const desc = PERMISSION_DESCRIPTIONS[perm] ?? perm;
-              const consequence = HIGH_RISK_CONSEQUENCES[perm];
+              const label = t(`plugin.${RISK_LABEL_KEYS[risk]}`);
+              const descKey = PERMISSION_DESC_KEYS[perm];
+              const desc = descKey ? t(`plugin.${descKey}`) : perm;
+              const consequenceKey = HIGH_RISK_CONSEQUENCE_KEYS[perm];
+              const consequence = consequenceKey ? t(`plugin.${consequenceKey}`) : undefined;
               return (
                 <div
                   key={perm}
@@ -249,7 +252,7 @@ export function PluginInstallDialog({ manifest, onConfirm, onCancel }: Props) {
                 checked={acknowledged}
                 onChange={(e) => setAcknowledged(e.target.checked)}
               />
-              <span>我已阅读并理解以上风险</span>
+              <span>{t('plugin.acknowledgeRisk')}</span>
             </label>
           )}
         </div>
@@ -260,7 +263,7 @@ export function PluginInstallDialog({ manifest, onConfirm, onCancel }: Props) {
           style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}
         >
           <button type="button" className="btn btn-secondary" onClick={onCancel}>
-            取消
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -268,7 +271,7 @@ export function PluginInstallDialog({ manifest, onConfirm, onCancel }: Props) {
             onClick={handleConfirm}
             disabled={hasHighRisk && !acknowledged}
           >
-            确认授予权限并安装
+            {t('plugin.confirmInstall')}
           </button>
         </div>
       </div>

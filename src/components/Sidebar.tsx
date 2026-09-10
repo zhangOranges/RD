@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { useTranslation } from 'react-i18next';
 import {
   Plus,
   Pencil,
@@ -36,6 +37,7 @@ interface ContextMenuState {
 }
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const hosts = useHostStore((s) => s.hosts);
   const categories = useHostStore((s) => s.categories);
   const expandedCategories = useHostStore((s) => s.expandedCategories);
@@ -460,7 +462,7 @@ export function Sidebar() {
   return (
     <aside
       className="sidebar"
-      aria-label="主机侧边栏"
+      aria-label={t('sidebar.host')}
       onContextMenu={(e) => {
         // 最外层兜底：任何没被子元素拦截的右键都当做空白区处理
         e.preventDefault();
@@ -468,13 +470,13 @@ export function Sidebar() {
       }}
     >
       <div className="sidebar-header">
-        <span className="sidebar-title">连接管理</span>
+        <span className="sidebar-title">{t('sidebar.connect')}</span>
         <div className="sidebar-header-actions">
           <button
             className="sidebar-add-btn"
             type="button"
-            aria-label="新增分类"
-            title="新增分类"
+            aria-label={t('sidebar.newCategory')}
+            title={t('sidebar.newCategory')}
             onClick={() => {
               setNewCategoryOpen(true);
               setNewCategoryName('');
@@ -485,8 +487,8 @@ export function Sidebar() {
           <button
             className="sidebar-add-btn"
             type="button"
-            aria-label="新增主机"
-            title="新增主机"
+            aria-label={t('sidebar.addHost')}
+            title={t('sidebar.addHost')}
             onClick={() => handleAdd('default')}
           >
             <Plus size={14} />
@@ -501,7 +503,7 @@ export function Sidebar() {
             ref={searchInputRef}
             className="sidebar-search-input"
             type="text"
-            placeholder="搜索主机或 IP (Ctrl+K)"
+            placeholder={t('sidebar.searchPlaceholder')}
             value={sidebarSearch}
             onChange={(e) => setSidebarSearch(e.target.value)}
             onClick={(e) => e.stopPropagation()}
@@ -531,7 +533,7 @@ export function Sidebar() {
             }}
           >
             <Server size={28} className="sidebar-empty-icon" />
-            <p>暂无主机，点击 + 添加</p>
+            <p>{t('sidebar.uncategorized')}</p>
           </div>
         ) : (
           grouped.map(({ category, hosts: catHosts }) => {
@@ -588,7 +590,7 @@ export function Sidebar() {
                               setMenuCategoryId(null);
                             }}
                           >
-                            <Pencil size={12} /> 重命名
+                            <Pencil size={12} /> {t('common.rename')}
                           </button>
                           <button
                             className="host-menu-item host-menu-danger"
@@ -600,7 +602,7 @@ export function Sidebar() {
                               setMenuCategoryId(null);
                             }}
                           >
-                            <Trash2 size={12} /> 删除
+                            <Trash2 size={12} /> {t('common.delete')}
                           </button>
                         </div>
                       )}
@@ -638,7 +640,7 @@ export function Sidebar() {
                           });
                         }}
                       >
-                        暂无主机
+                        {t('common.none')}
                       </div>
                     ) : (
                       catHosts.map((host) => {
@@ -682,8 +684,8 @@ export function Sidebar() {
                               <button
                                 className="host-action-btn"
                                 type="button"
-                                aria-label="更多操作"
-                                title="更多操作"
+                                aria-label={t('common.actions')}
+                                title={t('common.actions')}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setMenuHostId((cur) =>
@@ -705,8 +707,8 @@ export function Sidebar() {
                                     }}
                                   >
                                     {state === 'connected' || state === 'connecting'
-                                      ? '断开连接'
-                                      : '发起连接'}
+                                      ? t('sidebar.disconnect')
+                                      : t('sidebar.connect')}
                                   </button>
                                   <button
                                     className="host-menu-item"
@@ -717,7 +719,7 @@ export function Sidebar() {
                                       handleEdit(host);
                                     }}
                                   >
-                                    <Pencil size={12} /> 编辑
+                                    <Pencil size={12} /> {t('common.edit')}
                                   </button>
                                   <button
                                     className="host-menu-item host-menu-danger"
@@ -728,7 +730,7 @@ export function Sidebar() {
                                       void handleDelete(host);
                                     }}
                                   >
-                                    <Trash2 size={12} /> 删除
+                                    <Trash2 size={12} /> {t('common.delete')}
                                   </button>
                                 </div>
                               )}
@@ -761,7 +763,7 @@ export function Sidebar() {
             className="sidebar-new-category-input"
             value={newCategoryName}
             onChange={(e) => setNewCategoryName(e.target.value)}
-            placeholder="分类名称"
+            placeholder={t('sidebar.newCategoryPlaceholder')}
             onClick={(e) => e.stopPropagation()}
           />
           <button
@@ -772,7 +774,7 @@ export function Sidebar() {
               void handleAddCategory();
             }}
           >
-            确定
+            {t('common.ok')}
           </button>
           <button
             className="sidebar-new-category-btn sidebar-new-category-cancel"
@@ -783,7 +785,7 @@ export function Sidebar() {
               setNewCategoryName('');
             }}
           >
-            取消
+            {t('common.cancel')}
           </button>
         </div>
       )}
@@ -813,7 +815,7 @@ export function Sidebar() {
                   handleAdd('default');
                 }}
               >
-                <Plus size={11} /> 新增主机
+                <Plus size={11} /> {t('sidebar.addHost')}
               </button>
               <button
                 className="host-menu-item"
@@ -825,7 +827,7 @@ export function Sidebar() {
                   setNewCategoryName('');
                 }}
               >
-                <Tag size={11} /> 新增分类
+                <Tag size={11} /> {t('sidebar.newCategory')}
               </button>
             </>
           )}
@@ -841,7 +843,7 @@ export function Sidebar() {
                   handleAdd(ctxCategory.id);
                 }}
               >
-                <Plus size={11} /> 新增主机到此分类
+                <Plus size={11} /> {t('sidebar.addHost')}
               </button>
               <div className="host-menu-separator" />
               {ctxCategory.id !== 'default' && (
@@ -855,7 +857,7 @@ export function Sidebar() {
                       void handleRenameCategory(ctxCategory);
                     }}
                   >
-                    <Pencil size={11} /> 重命名分类
+                    <Pencil size={11} /> {t('sidebar.renameCategory')}
                   </button>
                   <button
                     className="host-menu-item host-menu-danger"
@@ -866,7 +868,7 @@ export function Sidebar() {
                       void handleDeleteCategory(ctxCategory);
                     }}
                   >
-                    <Trash2 size={11} /> 删除分类
+                    <Trash2 size={11} /> {t('sidebar.deleteCategory')}
                   </button>
                 </>
               )}
@@ -877,7 +879,7 @@ export function Sidebar() {
                   role="menuitem"
                   disabled
                 >
-                  （默认分类不可重命名或删除）
+                  {t('sidebar.uncategorized')}
                 </button>
               )}
             </>
@@ -895,7 +897,7 @@ export function Sidebar() {
                     cancelReconnect(ctxHost.id);
                   }}
                 >
-                  <AlertTriangle size={11} /> 取消重连
+                  <AlertTriangle size={11} /> {t('sidebar.cancelReconnect')}
                 </button>
               ) : connectionStates[ctxHost.id] === 'connected' ||
                 connectionStates[ctxHost.id] === 'connecting' ? (
@@ -908,7 +910,7 @@ export function Sidebar() {
                     void handleToggleConnect(ctxHost);
                   }}
                 >
-                  <PowerOff size={11} /> 断开连接
+                  <PowerOff size={11} /> {t('sidebar.disconnect')}
                 </button>
               ) : (
                 <button
@@ -920,7 +922,7 @@ export function Sidebar() {
                     void handleToggleConnect(ctxHost);
                   }}
                 >
-                  <Power size={11} /> 发起连接
+                  <Power size={11} /> {t('sidebar.connect')}
                 </button>
               )}
               <button
@@ -932,7 +934,7 @@ export function Sidebar() {
                   handleEdit(ctxHost);
                 }}
               >
-                <Pencil size={11} /> 编辑
+                <Pencil size={11} /> {t('common.edit')}
               </button>
               <button
                 className="host-menu-item"
@@ -943,7 +945,7 @@ export function Sidebar() {
                   void handleDuplicate(ctxHost);
                 }}
               >
-                <Copy size={11} /> 复制主机
+                <Copy size={11} /> {t('sidebar.duplicateHost')}
               </button>
               <button
                 className="host-menu-item host-menu-danger"
@@ -954,7 +956,7 @@ export function Sidebar() {
                   void handleDelete(ctxHost);
                 }}
               >
-                <Trash2 size={11} /> 删除
+                <Trash2 size={11} /> {t('common.delete')}
               </button>
             </>
           )}

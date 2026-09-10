@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import {
   ServerCog,
   FolderTree,
@@ -20,6 +22,7 @@ import { logInfo, logWarn } from '../utils/log';
 const initializedHosts = new Set<string>();
 
 export function ContentArea() {
+  const { t } = useTranslation();
   const selectedHostId = useHostStore((s) => s.selectedHostId);
   const hosts = useHostStore((s) => s.hosts);
   const connectionStates = useHostStore((s) => s.connectionStates);
@@ -132,7 +135,7 @@ export function ContentArea() {
       }
       if (!ok && isValidAbsPath(cachedPath) && isValidAbsPath(home) && cachedPath !== home) {
         logWarn(`[remote-dir] 缓存路径失效，降级到家目录: cached=${JSON.stringify(cachedPath)} home=${JSON.stringify(home)}`);
-        pushToast('warning', `上次路径已失效，已切换到家目录：${home}`);
+        pushToast('warning', t('contentArea.pathExpired', { home }));
         await navigate(hostId, home);
       }
 
@@ -221,7 +224,7 @@ export function ContentArea() {
 
       const localDir = useLocalFileStore.getState().currentPath;
       if (!localDir) {
-        pushToast('warning', '本地未打开目录，无法下载');
+        pushToast('warning', t('contentArea.noLocalDir'));
         return;
       }
 
@@ -249,7 +252,7 @@ export function ContentArea() {
 
         try {
           // 1. 远程压缩
-          useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${payload.name} (压缩中...)` });
+          useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${payload.name} (${i18n.t('transfer.compressing')})` });
           await invoke('ssh_exec', {
             hostId: payload.hostId,
             command: `tar -czf "${remoteTmpPath}" -C "$(dirname "${payload.path}")" "${payload.name}"`,
@@ -272,7 +275,7 @@ export function ContentArea() {
           });
 
           // 4. 本地解压
-          useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${payload.name} (解压中...)` });
+          useTransferStore.getState().setTaskStatus(taskId, 'running', { name: `${payload.name} (${i18n.t('transfer.decompressing')})` });
           await invoke('extract_local_archive', {
             archivePath: localTarballFinalPath,
             destDir: localDir,
@@ -287,9 +290,9 @@ export function ContentArea() {
         } catch (err) {
           const msg = String(err);
           if (msg.startsWith('Cancelled:')) {
-            pushToast('info', `已取消下载：${payload.name}`);
+            pushToast('info', t('contentArea.downloadCancelled', { name: payload.name }));
           } else {
-            pushToast('error', `下载失败：${msg}`);
+            pushToast('error', t('contentArea.downloadFailed', { msg }));
           }
         } finally {
           // 7. 清理临时文件
@@ -322,9 +325,9 @@ export function ContentArea() {
       } catch (err) {
         const msg = String(err);
         if (msg.startsWith('Cancelled:')) {
-          pushToast('info', `已取消下载：${payload.name}`);
+          pushToast('info', t('contentArea.downloadCancelled', { name: payload.name }));
         } else {
-          pushToast('error', `下载失败：${msg}`);
+          pushToast('error', t('contentArea.downloadFailed', { msg }));
         }
       }
     },
@@ -338,9 +341,9 @@ export function ContentArea() {
     return (
       <div className="content-placeholder">
         <FolderTree size={48} className="content-placeholder-icon" />
-        <p className="content-placeholder-title">请选择或连接一台主机</p>
+        <p className="content-placeholder-title">{t('content.selectHost')}</p>
         <p className="content-placeholder-sub">
-          在左侧侧边栏点击主机发起连接，或点击 + 新增主机。
+          {t('content.selectHostDesc')}
         </p>
       </div>
     );
@@ -357,7 +360,7 @@ export function ContentArea() {
         <ServerCog size={48} className="content-placeholder-icon" />
         <p className="content-placeholder-title">{selectedHost.name}</p>
         <p className="content-placeholder-sub">
-          {connState === 'connecting' ? '正在连接…' : '尚未连接，点击主机项发起连接'}
+          {connState === 'connecting' ? t('statusbar.connecting') + '…' : t('content.notConnectedClickToConnect')}
         </p>
       </div>
     );
@@ -368,7 +371,7 @@ export function ContentArea() {
   const remainingSec = meta?.nextDelayMs != null ? Math.max(0, Math.ceil(meta.nextDelayMs / 1000)) : null;
   return (
     <div className="dual-pane" style={{ position: 'relative' }}>
-      <div className="dual-pane-section-title">SFTP 文件管理器</div>
+      <div className="dual-pane-section-title">{t('content.sftpManager')}</div>
       <div className="dual-pane-body">
         <div
           className={`dual-pane-left${localDragOver ? ' drag-over' : ''}`}
@@ -388,13 +391,13 @@ export function ContentArea() {
         <div className="sftp-reconnecting-overlay">
           <RefreshCw size={28} className="sftp-reconnecting-icon" />
           <div className="sftp-reconnecting-text">
-            <span className="sftp-reconnecting-title">尝试重连中…</span>
+            <span className="sftp-reconnecting-title">{t('content.reconnecting')}</span>
             {meta?.attempt != null && (
               <span className="sftp-reconnecting-sub">
-                第 {meta.attempt} 次尝试{remainingSec != null ? ` · ${remainingSec}s 后重试` : ''}
+                {t('content.reconnectAttempt', { attempt: meta.attempt })}{remainingSec != null ? ` · ${remainingSec}s ${t('content.retryAfter')}` : ''}
               </span>
             )}
-            <span className="sftp-reconnecting-hint">网络恢复后将自动恢复连接</span>
+            <span className="sftp-reconnecting-hint">{t('content.reconnectHint')}</span>
           </div>
         </div>
       )}

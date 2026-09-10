@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { useTranslation } from 'react-i18next';
 import { usePluginStore, type PluginInfo } from '../../store/pluginStore';
 import { useToastStore } from '../Toast';
 import { PluginConfigForm } from './PluginConfigForm';
@@ -19,33 +20,29 @@ function riskColor(perm: string): string {
   return '#22c55e';
 }
 
-function riskLabel(perm: string): string {
-  if (HIGH_RISK.includes(perm)) return '高危';
-  if (MEDIUM_RISK.includes(perm)) return '中风险';
-  return '低风险';
-}
-
-const PERM_DESC: Record<string, string> = {
-  'network.http': '发起 HTTP/HTTPS 网络请求',
-  'storage.read': '读取插件持久化存储',
-  'storage.write': '写入插件持久化存储',
-  'file.local.read': '读取本地文件',
-  'file.local.write': '写入本地文件',
-  'server.read': '读取主机配置和连接状态',
-  'server.write': '修改主机配置',
-  'server.manage': '管理主机分类',
-  'ssh.run': '执行 SSH 命令',
-  'sftp.operate': '操作远程文件',
-  'ui.notification': '显示通知',
-  'ui.dialog': '弹出对话框',
-  'ui.inject-menu': '注入菜单项',
-  'theme.read': '读取主题信息',
-  'tunnel.manage': '管理端口转发',
-  'log.read': '读取内核日志',
-  'updater.manage': '管理应用更新',
+/** 权限 ID → i18n key（与 permissions.rs 对齐） */
+const PERM_DESC_KEY: Record<string, string> = {
+  'network.http': 'plugin.permissionDescNetworkHttp',
+  'storage.read': 'plugin.permissionDescStorageRead',
+  'storage.write': 'plugin.permissionDescStorageWrite',
+  'file.local.read': 'plugin.permissionDescFileLocalRead',
+  'file.local.write': 'plugin.permissionDescFileLocalWrite',
+  'server.read': 'plugin.permissionDescServerRead',
+  'server.write': 'plugin.permissionDescServerWrite',
+  'server.manage': 'plugin.permissionDescServerManage',
+  'ssh.run': 'plugin.permissionDescSshRun',
+  'sftp.operate': 'plugin.permissionDescSftpOperate',
+  'ui.notification': 'plugin.permissionDescUiNotification',
+  'ui.dialog': 'plugin.permissionDescUiDialog',
+  'ui.inject-menu': 'plugin.permissionDescUiInjectMenu',
+  'theme.read': 'plugin.permissionDescThemeRead',
+  'tunnel.manage': 'plugin.permissionDescTunnelManage',
+  'log.read': 'plugin.permissionDescLogRead',
+  'updater.manage': 'plugin.permissionDescUpdaterManage',
 };
 
 export function PluginDetail() {
+  const { t } = useTranslation();
   const plugins = usePluginStore((s) => s.plugins);
   const togglePlugin = usePluginStore((s) => s.togglePlugin);
   const uninstallComplete = usePluginStore((s) => s.uninstallComplete);
@@ -80,9 +77,9 @@ export function PluginDetail() {
       try {
         await setGranted(plugin.id, current);
         await loadPlugins();
-        pushToast('success', granted ? `已授予 ${perm}` : `已撤销 ${perm}`);
+        pushToast('success', granted ? t('plugin.permGranted', { perm }) : t('plugin.permRevoked', { perm }));
       } catch (e) {
-        pushToast('error', `操作失败：${e instanceof Error ? e.message : String(e)}`);
+        pushToast('error', `${t('common.failed')}：${e instanceof Error ? e.message : String(e)}`);
       }
     },
     [setGranted, loadPlugins, pushToast],
@@ -98,10 +95,10 @@ export function PluginDetail() {
       const zipPath = selected;
       const info = await installFromFile(zipPath);
       if (info) {
-        pushToast('success', `安装成功：${info.name}`);
+        pushToast('success', t('plugin.installSuccessWithName', { name: info.name }));
       }
     } catch (e) {
-      pushToast('error', `安装失败：${e instanceof Error ? e.message : String(e)}`);
+      pushToast('error', `${t('plugin.installFailed')}：${e instanceof Error ? e.message : String(e)}`);
     }
   }, [installFromFile, pushToast]);
 
@@ -116,12 +113,12 @@ export function PluginDetail() {
           try {
             const info = await installFromFile(path);
             if (info) {
-              pushToast('success', `安装成功：${info.name}`);
+              pushToast('success', t('plugin.installSuccessWithName', { name: info.name }));
             }
           } catch (err) {
             pushToast(
               'error',
-              `拖拽安装失败：${err instanceof Error ? err.message : String(err)}`,
+              `${t('plugin.dragInstallFailed')}：${err instanceof Error ? err.message : String(err)}`,
             );
           }
         }
@@ -135,9 +132,9 @@ export function PluginDetail() {
       <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
         <div className="settings-row" style={{ marginBottom: 16 }}>
           <div className="settings-row-main">
-            <div className="settings-row-label">安装 .rdplugin 文件</div>
+            <div className="settings-row-label">{t('plugin.installFromZip')}</div>
             <div className="settings-row-desc">
-              选择或拖拽 .rdplugin / .zip 压缩包进行安装
+              {t('plugin.installHint')}
             </div>
           </div>
           <button
@@ -146,7 +143,7 @@ export function PluginDetail() {
             onClick={() => void handleInstallFromFile()}
           >
             <Package size={12} style={{ marginRight: 4 }} />
-            选择文件安装
+            {t('plugin.selectFileToInstall')}
           </button>
         </div>
         <div
@@ -157,7 +154,7 @@ export function PluginDetail() {
             fontSize: 13,
           }}
         >
-          尚未安装任何插件
+          {t('plugin.noPlugins')}
         </div>
       </div>
     );
@@ -167,9 +164,9 @@ export function PluginDetail() {
     <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
       <div className="settings-row" style={{ marginBottom: 16 }}>
         <div className="settings-row-main">
-          <div className="settings-row-label">安装 .rdplugin 文件</div>
+          <div className="settings-row-label">{t('plugin.installFromZip')}</div>
           <div className="settings-row-desc">
-            选择或拖拽 .rdplugin / .zip 压缩包进行安装
+            {t('plugin.installHint')}
           </div>
         </div>
         <button
@@ -178,7 +175,7 @@ export function PluginDetail() {
           onClick={() => void handleInstallFromFile()}
         >
           <Package size={12} style={{ marginRight: 4 }} />
-          选择文件安装
+          {t('plugin.selectFileToInstall')}
         </button>
       </div>
       <div style={{ display: 'flex', gap: 12, minHeight: 400 }}>
@@ -257,7 +254,7 @@ export function PluginDetail() {
                   e.stopPropagation();
                   void uninstallComplete(plugin.id);
                 }}
-                title="卸载插件"
+                title={t('plugin.uninstall')}
                 style={{
                   padding: '2px 6px',
                   fontSize: 12,
@@ -315,7 +312,7 @@ export function PluginDetail() {
                 style={{ fontSize: 12, padding: '4px 10px' }}
               >
                 <Settings size={12} style={{ marginRight: 4 }} />
-                配置
+                {t('plugin.config')}
               </button>
             )}
             <button
@@ -329,7 +326,7 @@ export function PluginDetail() {
               }}
             >
               <Trash2 size={12} style={{ marginRight: 4 }} />
-              卸载
+              {t('plugin.uninstall')}
             </button>
           </div>
 
@@ -342,12 +339,12 @@ export function PluginDetail() {
               lineHeight: 1.7,
             }}
           >
-            <div>作者：{selected.author || '未知'}</div>
-            <div>分类：{selected.category}</div>
-            <div>API 版本：{selected.apiVersion}</div>
+            <div>{t('plugin.author')}：{selected.author || t('common.unknown')}</div>
+            <div>{t('plugin.category')}：{selected.category}</div>
+            <div>{t('plugin.apiVersion')}：{selected.apiVersion}</div>
             {selected.loadError && (
               <div style={{ color: 'var(--color-danger, #ef4444)' }}>
-                加载错误：{selected.loadError}
+                {t('plugin.loadError')}：{selected.loadError}
               </div>
             )}
           </div>
@@ -361,7 +358,7 @@ export function PluginDetail() {
                 onSave={async (newConfig) => {
                   await setConfig(selected.id, newConfig);
                   setConfigState(newConfig);
-                  pushToast('success', '配置已保存');
+                  pushToast('success', t('plugin.configSaved'));
                 }}
               />
             </div>
@@ -379,7 +376,7 @@ export function PluginDetail() {
             }}
           >
             <Shield size={14} />
-            权限管理
+            {t('plugin.permissions')}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {selected.grantedPermissions.length === 0 && (
@@ -390,7 +387,7 @@ export function PluginDetail() {
                   padding: '8px 0',
                 }}
               >
-                该插件未授予任何权限
+                {t('plugin.noGrantedPermissions')}
               </div>
             )}
             {selected.grantedPermissions.map((perm) => (
@@ -423,7 +420,7 @@ export function PluginDetail() {
                       marginLeft: 8,
                     }}
                   >
-                    {riskLabel(perm)} · {PERM_DESC[perm] ?? perm}
+                    {t(HIGH_RISK.includes(perm) ? 'plugin.riskHigh' : MEDIUM_RISK.includes(perm) ? 'plugin.riskMedium' : 'plugin.riskLow')} · {t(PERM_DESC_KEY[perm] ?? '') || perm}
                   </span>
                 </div>
                 <label className="form-switch" style={{ flexShrink: 0 }}>
@@ -450,7 +447,7 @@ export function PluginDetail() {
                   marginBottom: 4,
                 }}
               >
-                未授予的权限：
+                {t('plugin.notGrantedPermissions')}
               </div>
               {selected.manifest.permissions
                 .filter((p) => !selected.grantedPermissions.includes(p))
@@ -484,7 +481,7 @@ export function PluginDetail() {
                         opacity: 0.6,
                       }}
                     >
-                      {PERM_DESC[perm] ?? perm}
+                      {t(PERM_DESC_KEY[perm] ?? '') || perm}
                     </span>
                     <div style={{ flex: 1 }} />
                     <button
@@ -493,7 +490,7 @@ export function PluginDetail() {
                       onClick={() => void handleTogglePerm(selected, perm, true)}
                       style={{ fontSize: 11, padding: '2px 8px' }}
                     >
-                      授予
+                      {t('plugin.grant')}
                     </button>
                   </div>
                 ))}

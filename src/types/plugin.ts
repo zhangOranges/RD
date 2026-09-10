@@ -495,6 +495,15 @@ export interface TunnelApi {
   importRules(file: RdTunnelsFile, onConflict?: TunnelConflictStrategy): Promise<TunnelImportResult>;
 }
 
+export interface I18nApi {
+  /** 翻译指定 key，支持插值参数 */
+  t(key: string, params?: Record<string, unknown>): string;
+  /** 获取当前语言代码（zh / en） */
+  getLanguage(): string;
+  /** 监听语言切换，返回取消订阅函数 */
+  onLanguageChange(callback: (lang: string) => void): () => void;
+}
+
 export interface RDContext {
   readonly pluginId: string;
   readonly manifest: PluginManifest;
@@ -506,6 +515,7 @@ export interface RDContext {
   readonly http: HttpApi;
   readonly tunnel: TunnelApi;
   readonly theme: ThemeApi;
+  readonly i18n: I18nApi;
   readonly log: {
     info(msg: string, ...args: unknown[]): void;
     warn(msg: string, ...args: unknown[]): void;

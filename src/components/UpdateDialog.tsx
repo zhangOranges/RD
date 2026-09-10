@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import {
   X,
   Sparkles,
@@ -105,6 +106,7 @@ function renderNotes(notes: string | null): string {
 }
 
 export function UpdateDialog() {
+  const { t } = useTranslation();
   const updater = useAppUpdater();
   const [mirrorOptions, setMirrorOptions] = useState<MirrorOption[]>([]);
 
@@ -125,11 +127,11 @@ export function UpdateDialog() {
   const isError = status === 'error';
 
   // 标题
-  let title = '发现新版本';
-  if (isDownloading) title = '正在下载更新';
-  else if (isDownloaded) title = '更新包已下载完成';
-  else if (isInstalling) title = '正在安装更新';
-  else if (isError) title = '更新失败';
+  let title = t('update.title');
+  if (isDownloading) title = t('update.downloadingTitle');
+  else if (isDownloaded) title = t('update.downloadedTitle');
+  else if (isInstalling) title = t('update.installingTitle');
+  else if (isError) title = t('update.errorTitle');
 
   // 安装中禁用关闭按钮（安装过程不可打断）；下载中允许关闭，继续后台下载
   const closeDisabled = isInstalling;
@@ -194,7 +196,7 @@ export function UpdateDialog() {
           <button
             type="button"
             className="dialog-close"
-            aria-label="关闭"
+            aria-label={t('update.close')}
             onClick={handleClose}
             disabled={closeDisabled}
             style={closeDisabled ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
@@ -209,8 +211,8 @@ export function UpdateDialog() {
             <div className="update-banner update-banner-error">
               <AlertTriangle size={14} />
               <div className="update-banner-error-detail">
-                <div className="update-banner-error-title">检查或下载更新时出错：</div>
-                <pre className="update-banner-error-msg">{updater.errorMsg ?? '未知错误'}</pre>
+                <div className="update-banner-error-title">{t('update.errorBannerTitle')}</div>
+                <pre className="update-banner-error-msg">{updater.errorMsg ?? t('update.unknownError')}</pre>
               </div>
             </div>
           )}
@@ -221,8 +223,8 @@ export function UpdateDialog() {
               <RefreshCw size={14} className="spin" />
               <span>
                 {updater.progressPct === 0
-                  ? '正在获取下载地址，请稍候…可关闭此对话框继续使用。'
-                  : '正在后台下载更新，可关闭此对话框继续使用。下载进度可在右下角状态栏查看，下载完成后将自动弹出确认。'}
+                  ? t('update.gettingDownloadUrl')
+                  : t('update.backgroundDownloading')}
               </span>
             </div>
           )}
@@ -239,8 +241,8 @@ export function UpdateDialog() {
               <PackageCheck size={14} />
               <span>
                 {updater.pendingFromLocal
-                  ? '检测到上次已下载的更新包，版本匹配，可直接安装。'
-                  : '更新包已下载完成，安装后程序将自动重启。请选择安装时机。'}
+                  ? t('update.pendingFromLocal')
+                  : t('update.downloadedReady')}
               </span>
             </div>
           )}
@@ -249,34 +251,34 @@ export function UpdateDialog() {
           {isInstalling && (
             <div className="update-banner update-banner-installing">
               <DownloadCloud size={14} />
-              <span>正在安装新版本，请不要关闭程序，完成后将自动重启。</span>
+              <span>{t('update.installingHint')}</span>
             </div>
           )}
 
           <div className="update-version-row">
             <div className="update-version-block">
-              <div className="update-version-label">当前版本</div>
+              <div className="update-version-label">{t('update.currentVersion')}</div>
               <div className="update-version-value update-version-current">
                 v{updater.currentVersion ?? '--'}
               </div>
             </div>
             <ChevronRight size={20} className="update-version-arrow" />
             <div className="update-version-block">
-              <div className="update-version-label">最新版本</div>
+              <div className="update-version-label">{t('update.latestVersion')}</div>
               <div className="update-version-value update-version-latest">
                 v{updater.availableVersion ?? '--'}
               </div>
             </div>
             {hasRealTotal && (
               <div className="update-version-block update-version-size">
-                <div className="update-version-label">安装包大小</div>
+                <div className="update-version-label">{t('update.packageSize')}</div>
                 <div className="update-version-value">{updater.totalMB} MB</div>
               </div>
             )}
           </div>
 
           <div className="update-notes-section">
-            <div className="update-notes-title">本次更新内容</div>
+            <div className="update-notes-title">{t('update.notesTitle')}</div>
             {notesHTML ? (
               <div
                 className="update-notes-content markdown-body"
@@ -285,9 +287,9 @@ export function UpdateDialog() {
               />
             ) : (
               <div className="update-notes-empty">
-                该版本暂无详细更新说明，或更新说明正在同步中。
+                {t('update.notesEmpty')}
                 <br />
-                可前往 GitHub Release 页面查看更多细节。
+                {t('update.notesEmptyGithub')}
               </div>
             )}
           </div>
@@ -295,7 +297,7 @@ export function UpdateDialog() {
           {/* 仅"有新版本可用"且尚未开始下载时显示镜像选择 */}
           {isAvailable && (
             <div className="update-mirror-section">
-              <div className="update-mirror-title">下载源（国内网络建议选择镜像加速）</div>
+              <div className="update-mirror-title">{t('update.mirrorTitle')}</div>
               <div className="update-mirror-grid">
                 {mirrorOptions.map((opt) => {
                   const selected = updater.mirror === opt.id;
@@ -303,10 +305,10 @@ export function UpdateDialog() {
                   let delayLabel: string;
                   let delayClass: string;
                   if (delay === undefined || delay === null) {
-                    delayLabel = '不可达';
+                    delayLabel = t('update.mirrorUnreachable');
                     delayClass = 'mirror-delay mirror-delay-bad';
                   } else if (delay < 0) {
-                    delayLabel = '超时';
+                    delayLabel = t('update.mirrorTimeout');
                     delayClass = 'mirror-delay mirror-delay-bad';
                   } else if (delay < 300) {
                     delayLabel = `${delay} ms`;
@@ -348,7 +350,7 @@ export function UpdateDialog() {
           {isAvailable && (
             <>
               <button type="button" className="btn btn-ghost" onClick={handleClose}>
-                稍后再说
+                {t('update.laterBtn')}
               </button>
               <button
                 type="button"
@@ -356,7 +358,7 @@ export function UpdateDialog() {
                 onClick={handleDownload}
               >
                 <Download size={14} />
-                <span>后台下载更新</span>
+                <span>{t('update.backgroundDownload')}</span>
               </button>
             </>
           )}
@@ -366,13 +368,13 @@ export function UpdateDialog() {
             <div className="update-footer-busy update-footer-downloading">
               <RefreshCw size={12} className="spin" />
               <span>
-                下载中 {updater.progressPct || 0}%
+                {t('update.downloadingPct', { pct: updater.progressPct || 0 })}
                 {hasRealTotal
                   ? ` · ${updater.downloadedMB || 0}/${updater.totalMB} MB`
                   : ` · ${updater.downloadedMB || 0} MB`}
               </span>
               <button type="button" className="btn btn-ghost btn-sm" onClick={handleClose}>
-                后台下载
+                {t('update.backgroundDownloadBtn')}
               </button>
             </div>
           )}
@@ -384,18 +386,18 @@ export function UpdateDialog() {
                 type="button"
                 className="btn btn-ghost"
                 onClick={handleOpenFolder}
-                title="在文件管理器中打开安装包所在目录"
+                title={t('update.openFolderTitle')}
               >
                 <FolderOpen size={14} />
-                <span>打开文件夹</span>
+                <span>{t('update.openFolder')}</span>
               </button>
               <button
                 type="button"
                 className="btn btn-ghost"
                 onClick={handleInstallLater}
-                title="保留已下载的更新包，下次启动时再次提示安装"
+                title={t('update.installLaterTitle')}
               >
-                下次启动时安装
+                {t('update.installLater')}
               </button>
               <button
                 type="button"
@@ -403,7 +405,7 @@ export function UpdateDialog() {
                 onClick={handleInstall}
               >
                 <PackageCheck size={14} />
-                <span>立即安装并重启</span>
+                <span>{t('update.installAndRestart')}</span>
               </button>
             </>
           )}
@@ -412,7 +414,7 @@ export function UpdateDialog() {
           {isInstalling && (
             <div className="update-footer-busy update-footer-installing">
               <DownloadCloud size={12} />
-              <span>安装中，完成后程序将自动退出…</span>
+              <span>{t('update.installingExit')}</span>
             </div>
           )}
 
@@ -420,7 +422,7 @@ export function UpdateDialog() {
           {isError && (
             <>
               <button type="button" className="btn btn-ghost" onClick={handleClose}>
-                关闭
+                {t('update.close')}
               </button>
               <button
                 type="button"
@@ -428,7 +430,7 @@ export function UpdateDialog() {
                 onClick={handleErrorRetry}
               >
                 <RefreshCw size={14} />
-                <span>{updater.availableVersion ? '重新下载' : '重试'}</span>
+                <span>{updater.availableVersion ? t('update.redownload') : t('update.retry')}</span>
               </button>
             </>
           )}

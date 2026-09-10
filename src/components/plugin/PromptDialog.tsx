@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   title: string;
@@ -15,6 +16,7 @@ interface Props {
  * 通过 createPortal 渲染到 document.body；Enter 提交、Escape 取消。
  */
 export function PromptDialog({ title, message, defaultValue = '', onConfirm, onCancel }: Props) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(defaultValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -51,14 +53,14 @@ export function PromptDialog({ title, message, defaultValue = '', onConfirm, onC
         <div className="dialog-footer">
           <div className="dialog-footer-center">
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
-              取消
+              {t('common.cancel')}
             </button>
             <button
               type="button"
               className="btn btn-primary"
               onClick={() => onConfirm(value)}
             >
-              确认
+              {t('common.confirm')}
             </button>
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { useTranslation } from 'react-i18next';
 import {
   X,
   Minus,
@@ -33,6 +34,7 @@ interface ContextMenuState {
 }
 
 export function TabBar() {
+  const { t } = useTranslation();
   const hosts = useHostStore((s) => s.hosts);
   const categories = useHostStore((s) => s.categories);
   const connectionStates = useHostStore((s) => s.connectionStates);
@@ -288,9 +290,9 @@ export function TabBar() {
     const text = `${host.username}@${host.host}:${host.port}`;
     try {
       await writeText(text);
-      pushToast('success', `已复制：${text}`);
+      pushToast('success', t('tabbar.copiedConnection', { text }));
     } catch (err) {
-      pushToast('error', `复制失败：${formatErr(err)}`);
+      pushToast('error', `${t('common.copyFailed')}：${formatErr(err)}`);
     }
   }
 
@@ -304,8 +306,8 @@ export function TabBar() {
         <button
           type="button"
           className="tabbar-win-btn tabbar-win-close"
-          title="关闭"
-          aria-label="关闭窗口"
+          title={t('window.close')}
+          aria-label={t('window.closeWindow')}
           onClick={() => void handleClose()}
         >
           <X size={12} />
@@ -313,8 +315,8 @@ export function TabBar() {
         <button
           type="button"
           className="tabbar-win-btn tabbar-win-minimize"
-          title="最小化"
-          aria-label="最小化窗口"
+          title={t('window.minimize')}
+          aria-label={t('window.minimizeWindow')}
           onClick={() => void handleMinimize()}
         >
           <Minus size={12} />
@@ -322,8 +324,8 @@ export function TabBar() {
         <button
           type="button"
           className="tabbar-win-btn tabbar-win-maximize"
-          title={isMaximized ? '还原' : '最大化'}
-          aria-label="最大化/还原窗口"
+          title={isMaximized ? t('window.restore') : t('window.maximize')}
+          aria-label={t('window.maximizeWindow')}
           onClick={() => void handleMaximize()}
         >
           {isMaximized ? <Copy size={11} /> : <Square size={10} />}
@@ -331,7 +333,7 @@ export function TabBar() {
       </div>
 
       {/* 品牌标识「RD」 */}
-      <div className="tabbar-brand" aria-label="RD 远程文件管理器">
+      <div className="tabbar-brand" aria-label={t('app.tagline')}>
         RD
       </div>
 
@@ -356,7 +358,7 @@ export function TabBar() {
               aria-selected={active}
               title={
                 isReconnecting
-                  ? `${host.username}@${host.host}:${host.port} — 重连中（第 ${meta?.attempt ?? 1} 次，${countdownSec}s 后重试）`
+                  ? t('tabbar.reconnectAttempt', { n: meta?.attempt ?? 1, sec: countdownSec })
                   : `${host.username}@${host.host}:${host.port}`
               }
               onClick={() => handleTabClick(host)}
@@ -375,21 +377,21 @@ export function TabBar() {
               <span className="tabbar-tab-name">
                 {host.name}
                 {isReconnecting && meta && (
-                  <span className="tabbar-reconnect-count" title={`${countdownSec}s 后第 ${meta.attempt} 次重试`}>
+                  <span className="tabbar-reconnect-count" title={t('tabbar.retryCountdown', { n: meta.attempt, sec: countdownSec })}>
                     {meta.attempt}
                   </span>
                 )}
               </span>
               <span className={`tabbar-tab-addr ${maskMode ? 'mask-sensitive' : ''}`}>
                 {isReconnecting
-                  ? `重连中 · ${countdownSec}s`
+                  ? t('tabbar.reconnectingLabel', { sec: countdownSec })
                   : `${host.username}@${host.host}`}
               </span>
               <button
                 type="button"
                 className="tabbar-tab-close"
-                aria-label="关闭标签"
-                title={isReconnecting ? '取消重连并关闭' : '关闭标签'}
+                aria-label={t('tabbar.closeTab')}
+                title={isReconnecting ? t('tabbar.cancelReconnectClose') : t('tabbar.closeTab')}
                 onClick={(e) => void handleTabClose(host, e)}
               >
                 <X size={12} />
@@ -400,8 +402,8 @@ export function TabBar() {
         <button
           type="button"
           className="tabbar-add"
-          aria-label="新建主机标签"
-          title="新建主机"
+          aria-label={t('tabbar.newHostTab')}
+          title={t('tabbar.newHost')}
           onClick={() => setDialogOpen(true)}
         >
           <Plus size={14} />
@@ -417,8 +419,8 @@ export function TabBar() {
             className={`tabbar-plugin-trigger ${
               pluginMenuOpen ? 'tabbar-plugin-trigger-active' : ''
             }`}
-            title="插件"
-            aria-label="插件"
+            title={t('tabbar.plugin')}
+            aria-label={t('tabbar.plugin')}
             aria-haspopup="menu"
             aria-expanded={pluginMenuOpen}
             onClick={() => setPluginMenuOpen((v) => !v)}
@@ -472,9 +474,9 @@ export function TabBar() {
                   );
                 })
               ) : pluginsLoading ? (
-                <div className="tabbar-plugin-menu-hint">插件加载中…</div>
+                <div className="tabbar-plugin-menu-hint">{t('tabbar.pluginsLoading')}</div>
               ) : (
-                <div className="tabbar-plugin-menu-hint">暂无已启用的插件</div>
+                <div className="tabbar-plugin-menu-hint">{t('tabbar.noEnabledPlugins')}</div>
               )}
             </div>
           )}
@@ -484,8 +486,8 @@ export function TabBar() {
           className={`tabbar-action-btn ${
             terminalVisible ? 'tabbar-action-btn-active' : ''
           }`}
-          aria-label="切换终端"
-          title="显示/隐藏终端"
+          aria-label={t('tabbar.toggleTerminal')}
+          title={t('tabbar.showHideTerminal')}
           onClick={handleTerminalToggle}
           disabled={!selectedHostId}
         >
@@ -497,8 +499,8 @@ export function TabBar() {
           className={`tabbar-action-btn ${
             themeMenuOpen ? 'tabbar-action-btn-active' : ''
           }`}
-          aria-label="切换主题"
-          title="切换主题"
+          aria-label={t('tabbar.switchTheme')}
+          title={t('tabbar.switchTheme')}
           aria-haspopup="menu"
           aria-expanded={themeMenuOpen}
           onClick={() => setThemeMenuOpen((v) => !v)}
@@ -508,8 +510,8 @@ export function TabBar() {
         <button
           type="button"
           className="tabbar-action-btn"
-          aria-label="设置"
-          title="设置"
+          aria-label={t('tabbar.settings')}
+          title={t('tabbar.settings')}
           onClick={handleSettings}
         >
           <Settings size={15} />
@@ -522,7 +524,7 @@ export function TabBar() {
           ref={themeMenuRef}
           className="theme-menu tabbar-context-menu host-menu sidebar-context-menu"
           role="menu"
-          aria-label="选择主题"
+          aria-label={t('tabbar.selectTheme')}
           style={{
             position: 'fixed',
             top: themeBtnRef.current
@@ -584,7 +586,7 @@ export function TabBar() {
             role="menuitem"
             onClick={() => void closeTab(ctxHost.id)}
           >
-            <X size={11} /> 关闭当前
+            <X size={11} /> {t('tabbar.closeCurrent')}
           </button>
           <button
             className="host-menu-item"
@@ -592,7 +594,7 @@ export function TabBar() {
             role="menuitem"
             onClick={() => void closeOthers(ctxHost.id)}
           >
-            <Power size={11} /> 关闭其他
+            <Power size={11} /> {t('tabbar.closeOthers')}
           </button>
           <button
             className="host-menu-item"
@@ -600,7 +602,7 @@ export function TabBar() {
             role="menuitem"
             onClick={() => void closeToRight(ctxHost.id)}
           >
-            <Power size={11} /> 关闭右侧
+            <Power size={11} /> {t('tabbar.closeRight')}
           </button>
           <div className="host-menu-separator" />
           <button
@@ -609,7 +611,7 @@ export function TabBar() {
             role="menuitem"
             onClick={() => void copyConnectionInfo(ctxHost.id)}
           >
-            <Copy size={11} /> 复制连接信息
+            <Copy size={11} /> {t('tabbar.copyConnectionInfo')}
           </button>
         </div>,
         document.body,

@@ -1,45 +1,56 @@
 import { useImperativeHandle, useLayoutEffect, useRef, useState, forwardRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { PluginManifest, RDContext, RdEventMap } from '../../types/plugin';
 import { kernelEventBus } from '../../utils/eventBus';
 import { usePluginStore } from '../../store/pluginStore';
 import { usePluginUiStore } from '../../store/pluginUiStore';
 import { logInfo, logWarn, logError } from '../../utils/log';
+import i18n from '../../i18n';
 
-/** 权限 ID → 中文说明（与 PluginInstallDialog / permissions.rs 对齐） */
-const PERMISSION_LABEL: Record<string, string> = {
-  'network.http': '发起 HTTP/HTTPS 网络请求',
-  'storage.read': '读取插件持久化存储',
-  'storage.write': '写入插件持久化存储',
-  'file.local.read': '读取本地文件',
-  'file.local.write': '写入本地文件',
-  'server.read': '读取主机配置和连接状态',
-  'server.write': '修改主机配置',
-  'server.manage': '管理主机分类',
-  'ssh.run': '执行 SSH 命令',
-  'sftp.operate': '操作远程文件',
-  'ui.notification': '显示通知',
-  'ui.dialog': '弹出确认/输入对话框',
-  'ui.inject-menu': '注入工具栏/侧边栏菜单项',
-  'theme.read': '读取当前主题信息',
-  'tunnel.manage': '管理端口转发规则',
-  'log.read': '读取内核日志',
-  'updater.manage': '管理应用更新',
+/** Escape special regex chars in a string for use in RegExp. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 权限 ID → i18n key（与 pluginSdk PERM_DESC_KEY 对齐） */
+const PERMISSION_DESC_KEY: Record<string, string> = {
+  'network.http': 'permissionDescNetworkHttp',
+  'storage.read': 'permissionDescStorageRead',
+  'storage.write': 'permissionDescStorageWrite',
+  'file.local.read': 'permissionDescFileLocalRead',
+  'file.local.write': 'permissionDescFileLocalWrite',
+  'server.read': 'permissionDescServerRead',
+  'server.write': 'permissionDescServerWrite',
+  'server.manage': 'permissionDescServerManage',
+  'ssh.run': 'permissionDescSshRun',
+  'sftp.operate': 'permissionDescSftpOperate',
+  'ui.notification': 'permissionDescUiNotification',
+  'ui.dialog': 'permissionDescUiDialog',
+  'ui.inject-menu': 'permissionDescUiInjectMenu',
+  'theme.read': 'permissionDescThemeRead',
+  'tunnel.manage': 'permissionDescTunnelManage',
+  'log.read': 'permissionDescLogRead',
+  'updater.manage': 'permissionDescUpdaterManage',
 };
 
-/** 把权限拒绝错误转换成友好中文提示（兼容 SDK 层中文和后端原始格式） */
+/** 把权限拒绝错误转换成友好提示（兼容 SDK 层和后端原始格式） */
 function friendlyPermissionError(message: string): { title: string; body: string } | null {
-  // 兼容 SDK 层的中文格式："权限不足：缺少「xxx」权限（perm）..."
-  if (message.startsWith('权限不足')) {
-    return { title: '权限不足', body: message.replace(/^权限不足[：:]/, '') };
+  const permPrefix = i18n.t('plugin.permissionDeniedPrefix');
+  const permTitle = i18n.t('plugin.permissionDeniedTitle');
+  // Backwards compat: SDK may send Chinese "权限不足" or the i18n-translated prefix
+  if (message.startsWith('权限不足') || message.startsWith(permPrefix)) {
+    const stripped = message.replace(/^权限不足[：:]/, '').replace(new RegExp(`^${escapeRegExp(permPrefix)}[：:]`), '');
+    return { title: permTitle, body: stripped };
   }
-  // 兼容后端原始格式："PERMISSION_DENIED: perm"
+  // Backend raw format: "PERMISSION_DENIED: perm"
   const m = message.match(/^PERMISSION_DENIED:\s*(.+)/);
   if (!m) return null;
   const perm = m[1].trim();
-  const desc = PERMISSION_LABEL[perm] ?? perm;
+  const descKey = PERMISSION_DESC_KEY[perm];
+  const desc = descKey ? i18n.t(`plugin.${descKey}`) : perm;
   return {
-    title: '权限不足',
-    body: `插件缺少「${desc}」权限（${perm}）。\n请在设置 → 插件中重新安装或在开发者控制台授予该权限。`,
+    title: permTitle,
+    body: i18n.t('plugin.permissionDeniedBody', { desc, perm }),
   };
 }
 
@@ -150,7 +161,7 @@ function sendLifecycle(
       window.clearTimeout(timer);
       if (settled) return;
       settled = true;
-      console.warn('[PluginSandbox] postMessage 异常:', e);
+      console.warn('[PluginSandbox] postMessage error:', e);
       resolve();
     }
   });
@@ -160,6 +171,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
   { pluginId, manifest, src, ctx, onReady },
   ref,
 ) {
+  const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const loadedRef = useRef(false);
   /** 该插件专属 owner，用于在 kernelEventBus 上批量移除该插件所有监听器 */
@@ -295,7 +307,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
           rej: (e) => done('rej', e),
         });
         timer = setTimeout(() => {
-          done('rej', new Error('CALLBACK_PENDING_TIMEOUT: 插件响应超时（60s）'));
+          done('rej', new Error(`CALLBACK_PENDING_TIMEOUT: ${i18n.t('plugin.callbackTimeout')}`));
         }, 60_000);
         try { send(); } catch (e) {
           done('rej', e instanceof Error ? e : new Error(String(e)));
@@ -421,9 +433,9 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
             }
             // 检查上次 pong 是否超过 5s
             if (Date.now() - lastPongRef.current > 5_000) {
-              const msg = `插件疑似卡死（5s 无 pong），已自动停止`;
+              const msg = i18n.t('plugin.watchdogDead');
               console.warn(
-                `[PluginSandbox] 插件 ${pluginId} 疑似卡死（5s 无 pong），自动禁用`,
+                `[PluginSandbox] Plugin ${pluginId} appears frozen (no pong for 5s), auto-disabled`,
               );
               usePluginUiStore
                 .getState()
@@ -454,9 +466,9 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
             if (!perf.memory) return; // 非 Chrome 环境降级
             const usedMB = perf.memory.usedJSHeapSize / 1024 / 1024;
             if (usedMB > 200) {
-              const memMsg = `内存超限: ${usedMB.toFixed(1)}MB，已自动停止`;
+              const memMsg = i18n.t('plugin.memoryExceeded', { mb: usedMB.toFixed(1) });
               console.warn(
-                `[PluginSandbox] 插件 ${pluginId} 内存超限: ${usedMB.toFixed(1)}MB`,
+                `[PluginSandbox] Plugin ${pluginId} memory exceeded: ${usedMB.toFixed(1)}MB`,
               );
               usePluginUiStore
                 .getState()
@@ -501,7 +513,9 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
           ? `${permFriendly.title}\n${permFriendly.body}`
           : message;
         const panelMsg =
-          `插件${kind === 'unhandledrejection' ? '未捕获 Promise' : ''}错误: ${displayMessage}` +
+          (kind === 'unhandledrejection'
+            ? i18n.t('plugin.pluginAsyncErrorPrefix', { message: displayMessage })
+            : i18n.t('plugin.pluginErrorPrefix', { message: displayMessage })) +
           (src ? ` （${src}:${line}:${col}）` : line ? ` （:${line}:${col}）` : '') +
           (stack ? '\n' + stack : '');
         usePluginUiStore.getState().addLog(pluginId, 'error', panelMsg);
@@ -659,7 +673,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
       const pending = Array.from(cbPendingRef.current.entries());
       cbPendingRef.current.clear();
       for (const [, p] of pending) {
-        try { p.rej(new Error('PLUGIN_UNLOADED: 插件已卸载或组件销毁')); } catch { /* promise 没 catch 时屏蔽 */ }
+        try { p.rej(new Error(`PLUGIN_UNLOADED: ${i18n.t('plugin.pluginUnloaded')}`)); } catch { /* promise not caught, swallow */ }
       }
       if (watchdogRef.current) {
         clearInterval(watchdogRef.current);
@@ -697,28 +711,38 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
         >
           <span aria-hidden style={{ flexShrink: 0, marginTop: 1, fontSize: 16 }}>⚠️</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>
-              {pluginError.message.startsWith('权限不足')
-                ? '权限不足'
-                : `插件运行时${pluginError.kind === 'unhandledrejection' ? '异步异常（未捕获 Promise）' : '错误'}`}
-            </div>
-            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {pluginError.message.startsWith('权限不足')
-                ? pluginError.message.replace(/^权限不足\n/, '')
-                : pluginError.message}
-              {!pluginError.message.startsWith('权限不足') && pluginError.src
-                ? `\n位置: ${pluginError.src}:${pluginError.line}:${pluginError.col}`
-                : !pluginError.message.startsWith('权限不足') && pluginError.line
-                  ? `\n位置: :${pluginError.line}:${pluginError.col}`
-                  : ''}
-              {pluginError.stack ? `\n${pluginError.stack}` : ''}
-            </div>
+            {(() => {
+              const permTitle = i18n.t('plugin.permissionDeniedTitle');
+              const isPermErr = pluginError.message.startsWith(permTitle) || pluginError.message.startsWith('权限不足');
+              return (
+                <>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    {isPermErr
+                      ? t('plugin.permissionDeniedTitle')
+                      : pluginError.kind === 'unhandledrejection'
+                        ? t('plugin.runtimeAsyncError')
+                        : t('plugin.runtimeError')}
+                  </div>
+                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {isPermErr
+                      ? pluginError.message.replace(new RegExp(`^${escapeRegExp(permTitle)}\\n`), '').replace(/^权限不足[：:]?\n?/, '')
+                      : pluginError.message}
+                    {!isPermErr && pluginError.src
+                      ? `\n${t('plugin.errorLocation')}: ${pluginError.src}:${pluginError.line}:${pluginError.col}`
+                      : !isPermErr && pluginError.line
+                        ? `\n${t('plugin.errorLocation')}: :${pluginError.line}:${pluginError.col}`
+                        : ''}
+                    {pluginError.stack ? `\n${pluginError.stack}` : ''}
+                  </div>
+                </>
+              );
+            })()}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
             <button
               type="button"
               onClick={() => setPluginError(null)}
-              title="关闭错误提示"
+              title={t('plugin.closeErrorTip')}
               style={{
                 padding: '4px 10px',
                 borderRadius: 6,
@@ -729,7 +753,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
                 fontSize: 12,
               }}
             >
-              关闭
+              {t('common.close')}
             </button>
             <button
               type="button"
@@ -756,7 +780,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
                 (iframeRef as React.MutableRefObject<HTMLIFrameElement | null>).current = newIf;
                 loadedRef.current = false;
               }}
-              title="重新加载插件（尝试恢复）"
+              title={t('plugin.reloadPluginTip')}
               style={{
                 padding: '4px 10px',
                 borderRadius: 6,
@@ -767,7 +791,7 @@ export const PluginSandbox = forwardRef<PluginSandboxHandle, Props>(function Plu
                 fontSize: 12,
               }}
             >
-              重启插件
+              {t('plugin.restartPlugin')}
             </button>
           </div>
         </div>

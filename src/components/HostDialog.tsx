@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { X, PlugZap, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { useTranslation } from 'react-i18next';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
 import { useToastStore } from './Toast';
@@ -65,6 +66,7 @@ function fromHost(host: HostConfig): HostFormValues {
 }
 
 export function HostDialog({ host, categories, presetCategoryId = 'default', initialValues, onClose }: HostDialogProps) {
+  const { t } = useTranslation();
   const isEdit = !!host;
   const addHost = useHostStore((s) => s.addHost);
   const updateHost = useHostStore((s) => s.updateHost);
@@ -92,13 +94,13 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
   }
 
   function validate(): string | null {
-    if (!form.name.trim()) return '请填写名称';
-    if (!form.host.trim()) return '请填写主机地址';
-    if (!form.port || form.port < 1 || form.port > 65535) return '端口范围 1-65535';
-    if (!form.username.trim()) return '请填写用户名';
+    if (!form.name.trim()) return t('hostDialog.nameRequired');
+    if (!form.host.trim()) return t('hostDialog.hostRequired');
+    if (!form.port || form.port < 1 || form.port > 65535) return t('hostDialog.portRange');
+    if (!form.username.trim()) return t('hostDialog.usernameRequired');
     if (!isEdit) {
-      if (form.auth_type === 'password' && !form.password) return '请填写密码';
-      if (form.auth_type === 'key' && !form.private_key.trim()) return '请粘贴私钥内容';
+      if (form.auth_type === 'password' && !form.password) return t('hostDialog.password');
+      if (form.auth_type === 'key' && !form.private_key.trim()) return t('hostDialog.privateKeyRequired');
     }
     return null;
   }
@@ -136,14 +138,14 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
     try {
       if (isEdit) {
         await updateHost(config, credential);
-        pushToast('success', '已保存主机');
+        pushToast('success', t('hostDialog.save'));
       } else {
         await addHost(config, credential);
-        pushToast('success', '已新增主机');
+        pushToast('success', t('hostDialog.save'));
       }
       onClose();
     } catch (err) {
-      pushToast('error', `保存失败：${formatErr(err)}`);
+      pushToast('error', `${t('common.failed')}：${formatErr(err)}`);
     } finally {
       setSaving(false);
     }
@@ -151,7 +153,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
 
   async function handleTestConnection() {
     if (!form.host.trim() || !form.username.trim()) {
-      pushToast('warning', '请先填写主机地址和用户名');
+      pushToast('warning', t('hostDialog.hostRequired'));
       return;
     }
     // 编辑模式下凭据可能留空（表示不修改），此时尝试用已保存的凭据测试
@@ -174,16 +176,16 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
         // ignore
       }
       if (!password && !privateKey) {
-        pushToast('warning', '请填写密码或私钥后再测试');
+        pushToast('warning', t('hostDialog.privateKeyRequired'));
         return;
       }
     } else if (!isEdit) {
       if (form.auth_type === 'password' && !password) {
-        pushToast('warning', '请填写密码后再测试');
+        pushToast('warning', t('hostDialog.password'));
         return;
       }
       if (form.auth_type === 'key' && !privateKey?.trim()) {
-        pushToast('warning', '请粘贴私钥后再测试');
+        pushToast('warning', t('hostDialog.privateKeyRequired'));
         return;
       }
     }
@@ -203,9 +205,9 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
         },
       });
       const latency = Math.round(performance.now() - t0);
-      pushToast('success', `连接成功，延迟 ${latency}ms`);
+      pushToast('success', `${t('hostDialog.testSuccess')}，${latency}ms`);
     } catch (err) {
-      pushToast('error', `连接失败：${formatErr(err)}`);
+      pushToast('error', `${t('hostDialog.testFailed')}：${formatErr(err)}`);
     } finally {
       setTesting(false);
     }
@@ -225,12 +227,12 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
       >
         <div className="dialog-header">
           <h2 id="host-dialog-title" className="dialog-title">
-            {isEdit ? '编辑主机' : '新增主机'}
+            {isEdit ? t('hostDialog.editHost') : t('hostDialog.newHost')}
           </h2>
           <button
             type="button"
             className="dialog-close"
-            aria-label="关闭"
+            aria-label={t('common.close')}
             onClick={onClose}
           >
             <X size={16} />
@@ -240,7 +242,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
         <form className="dialog-body" onSubmit={handleSubmit}>
           <div className="form-row">
             <label className="form-label" htmlFor="f-name">
-              名称 <span className="required">*</span>
+              {t('hostDialog.name')} <span className="required">*</span>
             </label>
             <input
               id="f-name"
@@ -248,7 +250,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               type="text"
               value={form.name}
               onChange={(e) => update('name', e.target.value)}
-              placeholder="例如：生产服务器"
+              placeholder={t('hostDialog.namePlaceholder')}
               autoFocus
             />
           </div>
@@ -256,7 +258,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
           <div className="form-row form-row-2">
             <div className="form-cell">
               <label className="form-label" htmlFor="f-host">
-                主机地址 <span className="required">*</span>
+                {t('hostDialog.host')} <span className="required">*</span>
               </label>
               <input
                 id="f-host"
@@ -264,12 +266,12 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
                 type="text"
                 value={form.host}
                 onChange={(e) => update('host', e.target.value)}
-                placeholder="IP 或域名"
+                placeholder={t('hostDialog.hostPlaceholder')}
               />
             </div>
             <div className="form-cell form-cell-port">
               <label className="form-label" htmlFor="f-port">
-                端口
+                {t('hostDialog.port')}
               </label>
               <input
                 id="f-port"
@@ -285,7 +287,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
 
           <div className="form-row">
             <label className="form-label" htmlFor="f-username">
-              用户名 <span className="required">*</span>
+              {t('hostDialog.username')} <span className="required">*</span>
             </label>
             <input
               id="f-username"
@@ -293,13 +295,13 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               type="text"
               value={form.username}
               onChange={(e) => update('username', e.target.value)}
-              placeholder="root / ubuntu 等"
+              placeholder="root / ubuntu"
             />
           </div>
 
           <div className="form-row">
             <label className="form-label" htmlFor="f-category">
-              分类
+              {t('hostDialog.category')}
             </label>
             <select
               id="f-category"
@@ -316,7 +318,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
           </div>
 
           <div className="form-row">
-            <label className="form-label">认证方式</label>
+            <label className="form-label">{t('hostDialog.credentialType')}</label>
             <div className="form-radio-group">
               <label className="form-radio">
                 <input
@@ -326,7 +328,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
                   checked={form.auth_type === 'password'}
                   onChange={() => update('auth_type', 'password' as AuthType)}
                 />
-                <span>密码</span>
+                <span>{t('hostDialog.password')}</span>
               </label>
               <label className="form-radio">
                 <input
@@ -336,7 +338,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
                   checked={form.auth_type === 'key'}
                   onChange={() => update('auth_type', 'key' as AuthType)}
                 />
-                <span>私钥</span>
+                <span>{t('hostDialog.privateKey')}</span>
               </label>
             </div>
           </div>
@@ -344,8 +346,8 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
           {form.auth_type === 'password' ? (
             <div className="form-row">
               <label className="form-label" htmlFor="f-password">
-                密码
-                {isEdit && <span className="form-hint">（留空表示不修改）</span>}
+                {t('hostDialog.password')}
+                {isEdit && <span className="form-hint">（{t('common.none')}）</span>}
               </label>
               <input
                 id="f-password"
@@ -353,15 +355,15 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
                 type="password"
                 value={form.password}
                 onChange={(e) => update('password', e.target.value)}
-                placeholder={isEdit ? '留空不修改' : '请输入密码'}
+                placeholder={isEdit ? t('common.none') : t('hostDialog.password')}
                 autoComplete="new-password"
               />
             </div>
           ) : (
             <div className="form-row">
               <label className="form-label" htmlFor="f-key">
-                私钥内容
-                {isEdit && <span className="form-hint">（留空表示不修改）</span>}
+                {t('hostDialog.privateKey')}
+                {isEdit && <span className="form-hint">（{t('common.none')}）</span>}
               </label>
               <textarea
                 id="f-key"
@@ -383,13 +385,13 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
                 onChange={(e) => update('remember_dir', e.target.checked)}
               />
               <span className="form-switch-track" aria-hidden="true" />
-              <span className="form-switch-label">目录记忆</span>
+              <span className="form-switch-label">{t('hostDialog.rememberDir')}</span>
             </label>
           </div>
 
           <div className="form-row">
             <label className="form-label" htmlFor="f-remark">
-              备注
+              {t('common.name')}
             </label>
             <input
               id="f-remark"
@@ -397,7 +399,7 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               type="text"
               value={form.remark}
               onChange={(e) => update('remark', e.target.value)}
-              placeholder="可选"
+              placeholder={t('common.none')}
             />
           </div>
 
@@ -407,17 +409,17 @@ export function HostDialog({ host, categories, presetCategoryId = 'default', ini
               className="btn btn-secondary"
               onClick={handleTestConnection}
               disabled={testing || saving}
-              title="测试是否能连接到该主机"
+              title={t('hostDialog.testConnection')}
             >
               {testing ? <Loader2 size={14} className="is-spin" /> : <PlugZap size={14} />}
-              {testing ? '测试中…' : '测试连接'}
+              {testing ? t('hostDialog.testing') : t('hostDialog.testConnection')}
             </button>
             <div className="dialog-footer-right">
               <button type="button" className="btn btn-secondary" onClick={onClose}>
-                取消
+                {t('common.cancel')}
               </button>
               <button type="submit" className="btn btn-primary" disabled={saving || testing}>
-                {saving ? '保存中…' : '保存'}
+                {saving ? t('common.saving') : t('common.save')}
               </button>
             </div>
           </div>

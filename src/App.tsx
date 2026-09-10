@@ -15,11 +15,13 @@ import { useFileStore } from './store/fileStore';
 import { matchShortcut } from './store/shortcutStore';
 import { bindTransferProgressListener } from './store/transferStore';
 import { initPluginEventListeners, usePluginStore } from './store/pluginStore';
+import { useTranslation } from 'react-i18next';
 import './styles/finder.css';
 import './styles/tabbar.css';
 import './styles/rightpanel.css';
 
 function App() {
+  const { t } = useTranslation();
   const loadHosts = useHostStore((s) => s.loadHosts);
   const loadCategories = useHostStore((s) => s.loadCategories);
   const initEventListeners = useHostStore((s) => s.initEventListeners);
@@ -215,7 +217,7 @@ function App() {
           onMouseDown={onSidebarMouseDown}
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整侧边栏宽度"
+          aria-label={t('app.resizeSidebar')}
         />
 
         <div className="main-wrap">
@@ -228,7 +230,7 @@ function App() {
             onMouseDown={onTerminalMouseDown}
             role="separator"
             aria-orientation="horizontal"
-            aria-label="调整终端高度"
+            aria-label={t('app.resizeTerminal')}
             style={{ display: terminalVisible ? '' : 'none' }}
           />
           <div
@@ -248,7 +250,7 @@ function App() {
           onMouseDown={onRightPanelMouseDown}
           role="separator"
           aria-orientation="vertical"
-          aria-label="调整右侧面板宽度"
+          aria-label={t('app.resizeRightPanel')}
           style={{ display: rightPanelVisible ? '' : 'none' }}
         />
         {/* 右侧面板区 */}
@@ -272,7 +274,7 @@ function App() {
         <div className={`app-splash ${fadeOut ? 'app-splash-fadeout' : ''}`}>
           <div className="app-splash-logo">RD</div>
           <div className="app-slash-spinner" />
-          <div className="app-splash-text">正在加载…</div>
+          <div className="app-splash-text">{t('app.loading')}</div>
         </div>
       )}
     </div>
