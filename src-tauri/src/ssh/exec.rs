@@ -128,7 +128,12 @@ pub async fn ssh_exec(
         Some(ms) if ms > 0 => {
             match tokio::time::timeout(std::time::Duration::from_millis(ms), fut).await {
                 Ok(res) => res.map_err(|e| e.to_string()),
-                Err(_) => Err(format!("ssh_exec 超时（{}ms）：host_id={} cmd={}", ms, host_id, cmd_preview(&command))),
+                Err(_) => Err(format!(
+                    "ssh_exec 超时（{}ms）：host_id={} cmd={}",
+                    ms,
+                    host_id,
+                    cmd_preview(&command)
+                )),
             }
         }
         _ => fut.await.map_err(|e| e.to_string()),

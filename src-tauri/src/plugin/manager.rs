@@ -320,17 +320,32 @@ pub fn enable_disable(app_data_dir: &Path, id: &str, enabled: bool) -> Result<()
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn make_temp_dir() -> PathBuf {
+        let unique = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         let mut dir = std::env::temp_dir();
-        dir.push(format!("rd-plugin-test-{}", now_ms()));
+        dir.push(format!(
+            "rd-plugin-test-{}-{}-{}",
+            std::process::id(),
+            nanos,
+            unique
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
 
     fn create_plugin_structure(app_data_dir: &Path, id: &str, version: &str) {
         // plugins/{id}@{version}/manifest.json
-        let plugin_dir = app_data_dir.join("plugins").join(format!("{}@{}", id, version));
+        let plugin_dir = app_data_dir
+            .join("plugins")
+            .join(format!("{}@{}", id, version));
         fs::create_dir_all(&plugin_dir).unwrap();
         let manifest = serde_json::json!({
             "id": id,
@@ -373,7 +388,11 @@ mod tests {
         create_plugin_structure(&dir, id, "1.0.0");
 
         let result = uninstall(&dir, id);
-        assert!(result.is_ok(), "uninstall should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "uninstall should succeed: {:?}",
+            result.err()
+        );
 
         // 插件目录应被删除
         let plugin_dir = dir.join("plugins").join(format!("{}@1.0.0", id));
@@ -381,7 +400,10 @@ mod tests {
 
         // store 条目应被删除
         let items = load_store(&dir).unwrap();
-        assert!(items.iter().all(|i| i.id != id), "store entry should be removed");
+        assert!(
+            items.iter().all(|i| i.id != id),
+            "store entry should be removed"
+        );
 
         // 清理临时目录
         let _ = fs::remove_dir_all(&dir);
@@ -396,7 +418,10 @@ mod tests {
         create_plugin_structure(&dir, id, "1.0.0");
 
         let data_dir = dir.join("plugin-data").join(id);
-        assert!(data_dir.exists(), "plugin-data should exist before uninstall");
+        assert!(
+            data_dir.exists(),
+            "plugin-data should exist before uninstall"
+        );
 
         let result = uninstall(&dir, id);
         assert!(result.is_ok());
