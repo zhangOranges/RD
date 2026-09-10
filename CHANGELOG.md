@@ -8,6 +8,29 @@
 
 ---
 
+## [0.1.101] - 2026-09-11
+
+### 新增
+- **国际化（i18n）基础设施**：安装 `i18next` / `react-i18next` / `i18next-browser-languagedetector`；`src/i18n/index.ts` 配置语言检测顺序 `localStorage('rd_lang') → navigator → fallback 'zh'`，支持中英文切换并持久化用户选择
+- **双语翻译字典**：`src/i18n/locales/zh.json` + `en.json` 各 300+ key，按功能域分组（`common` / `settings` / `filebrowser` / `plugin` / `transfer` / `update` / `statusbar` / `serverInfo` 等），支持 `{{var}}` 插值
+- **设置面板语言切换器**：SettingsDialog 通用 tab 新增语言选择下拉（中文 / English），与字体选择器使用完全一致的自定义下拉样式（`terminal-font-group` / `terminal-font-trigger` / `terminal-font-dropdown` / `terminal-font-item`），切换后即时生效并写入 localStorage
+- **插件 i18n API**：`RDContext.i18n` 提供 `t(key, vars?)` / `getLanguage()` / `onLanguageChange(cb)` 三个方法；插件可读取当前界面语言并在语言切换时收到通知
+- **英文 README**：新增 `README_en.md`，与中文版内容完全对应
+- **AI 编码规范文档**：新增 `AI_CODING_GUIDE.md`，约束 AI 代码生成风格（CSS class 复用、i18n 规范、审查 checklist 等）
+
+### 变更
+- **核心组件全面接入 i18n**：`ServerInfo` / `TransferQueue` / `SettingsDialog` / `FileBrowser` / `LocalFilePane` / `TerminalPanel` / `ContentArea` / `App` / `UpdateDialog` / `HostDialog` / `TabBar` / `Sidebar` / `StatusBar` / `RightPanel` / `TextEditorDialog` / `ThemeEditor` / `Toast` 及全部 `plugin/*` 组件的用户可见文本全部改为 `t()` 调用，无硬编码中文
+- **插件权限错误提示国际化**：`pluginSdk.ts` 的 `assertPermission` 抛出的错误消息从硬编码中文改为 `i18n.t('plugin.permissionDenied', { perm: desc })`；`PluginSandbox.friendlyPermissionError` 改用新增的 `plugin.permissionDeniedPrefix`（无插值）做前缀匹配，`plugin.permissionDeniedTitle` 做标题，zh/en 均能正确识别权限错误
+- **CSS 变量修复**：`finder.css` 中 4 处不存在的 `var(--bg-elevated)` 全部替换为 `var(--bg-input)`（主题系统已定义），修复下拉/输入框背景色导致文字看不清的问题
+- **下拉选择样式统一**：语言选择从原生 `<select class="form-select">`（无样式）改为 `form-input-compact` + 自定义下拉模式，与字体选择器视觉一致
+
+### 修复
+- **权限错误前缀匹配失败**：原 `friendlyPermissionError` 用 `i18n.t('plugin.permissionDenied')` 取前缀，但该 key 含 `{{perm}}` 插值变量，未传参时输出字面 `{{perm}}`，导致 zh 日志泄露占位符、en 完全无法匹配权限错误。新增 `plugin.permissionDeniedPrefix` key（纯前缀，无插值）解决
+- **`common.apply` key 缺失**：SettingsDialog 自定义字体对话框的「应用」按钮调用 `t('common.apply')` 但 key 不存在，显示原始 key 字符串；在 zh.json / en.json 中补充
+- **废弃 CSS 清理**：删除不再使用的 `.settings-lang-select` class
+
+---
+
 ## [0.1.92] - 2026-08-18
 
 ### 新增
