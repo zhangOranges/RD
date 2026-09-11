@@ -8,7 +8,7 @@
 
 ---
 
-## [0.1.101] - 2026-09-11
+## [0.1.102] - 2026-09-11
 
 ### 新增
 - **国际化（i18n）基础设施**：安装 `i18next` / `react-i18next` / `i18next-browser-languagedetector`；`src/i18n/index.ts` 配置语言检测顺序 `localStorage('rd_lang') → navigator → fallback 'zh'`，支持中英文切换并持久化用户选择
