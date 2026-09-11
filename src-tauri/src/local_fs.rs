@@ -12,6 +12,12 @@ use std::io::Read;
 
 use crate::{debug_log, LogLevel};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalFileEntry {
@@ -291,21 +297,22 @@ pub async fn compress_local_dir(
         ),
     );
 
-    let output = std::process::Command::new("tar")
-        .args(["-czf", &output_str, "-C", &dir_path, &dir_name])
-        .output()
-        .map_err(|e| {
-            let msg = format!("Failed to run tar: {e}");
-            debug_log(
-                &app,
-                LogLevel::Error,
-                &format!(
-                    "compress_local_dir: {} dir_path={} dir_name={}",
-                    msg, dir_path, dir_name
-                ),
-            );
-            msg
-        })?;
+    let mut cmd = std::process::Command::new("tar");
+    cmd.args(["-czf", &output_str, "-C", &dir_path, &dir_name]);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output().map_err(|e| {
+        let msg = format!("Failed to run tar: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "compress_local_dir: {} dir_path={} dir_name={}",
+                msg, dir_path, dir_name
+            ),
+        );
+        msg
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let msg = format!("tar compress failed: {stderr}");
@@ -369,21 +376,22 @@ pub async fn extract_local_archive(
         msg
     })?;
 
-    let output = std::process::Command::new("tar")
-        .args(["-xzf", &archive_path, "-C", &dest_dir])
-        .output()
-        .map_err(|e| {
-            let msg = format!("Failed to run tar: {e}");
-            debug_log(
-                &app,
-                LogLevel::Error,
-                &format!(
-                    "extract_local_archive: {} archive={} dest={}",
-                    msg, archive_path, dest_dir
-                ),
-            );
-            msg
-        })?;
+    let mut cmd = std::process::Command::new("tar");
+    cmd.args(["-xzf", &archive_path, "-C", &dest_dir]);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output().map_err(|e| {
+        let msg = format!("Failed to run tar: {e}");
+        debug_log(
+            &app,
+            LogLevel::Error,
+            &format!(
+                "extract_local_archive: {} archive={} dest={}",
+                msg, archive_path, dest_dir
+            ),
+        );
+        msg
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let msg = format!("tar extract failed: {stderr}");

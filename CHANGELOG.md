@@ -8,6 +8,13 @@
 
 ---
 
+## [0.1.103] - 2026-09-11
+
+### 修复
+- **文件夹上传 CMD 窗口闪烁**：`local_fs.rs` 中 `compress_local_dir` 和 `extract_local_archive` 调用系统 `tar` 命令时，Windows 上会弹出 CMD 窗口一闪而过。为 `std::process::Command` 添加 `CREATE_NO_WINDOW`（`0x08000000`）标志，通过 `#[cfg(windows)]` 条件编译仅影响 Windows 平台
+
+---
+
 ## [0.1.102] - 2026-09-11
 
 ### 新增
