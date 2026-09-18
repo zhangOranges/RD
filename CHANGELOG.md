@@ -8,6 +8,15 @@
 
 ---
 
+## [0.1.104] - 2026-09-18
+
+### 新增
+- **AI 终端智能体**：在终端工具栏新增 AI 入口，点击后从右侧滑出对话抽屉；用户用自然语言描述需求，AI 返回可执行的 shell 命令（支持多轮对话与流式打字机输出），每条命令可一键复制或直接在当前 SSH 会话执行，危险命令（`rm -rf /`、`mkfs` 等）执行前二次确认
+- **AI 模型管理**：设置面板新增「AI 智能体」Tab，支持添加/编辑/删除/设为默认 AI 模型；v1 仅支持 OpenAI 兼容协议（DeepSeek / 通义 / Kimi / OpenAI 等），可配置 Base URL、API Key、模型名、Temperature、Max Tokens，并提供「测试连接」验证可用性
+- **AI 后端模块**：`src-tauri/src/ai/` 新增 `models.rs`（模型配置持久化到 `ai-models.json`，API Key base64 存储且日志脱敏）、`chat.rs`（调用 OpenAI 兼容 `/chat/completions` 流式接口，逐 token 通过 `ai:token` / `ai:done` / `ai:error` Tauri 事件推送给前端）、`prompt.rs`（system prompt 拼接主机名/OS/Shell/当前目录上下文）
+
+---
+
 ## [0.1.103] - 2026-09-11
 
 ### 修复

@@ -9,6 +9,7 @@ import { UpdateDialog } from './components/UpdateDialog';
 import { ToastContainer } from './components/Toast';
 import { PluginViewHost } from './components/plugin/PluginViewHost';
 import { RightPanel } from './components/RightPanel';
+import { AiPanel } from './components/AiPanel';
 import { useHostStore } from './store/hostStore';
 import { useUIStore } from './store/uiStore';
 import { useFileStore } from './store/fileStore';
@@ -268,6 +269,7 @@ function App() {
       <SettingsDialog />
       <UpdateDialog />
       <PluginViewHost />
+      <AiPanel />
 
       {/* 启动加载遮罩 */}
       {!appReady && (

@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+pub mod ai;
 pub mod fonts;
 pub mod local_fs;
 pub mod plugin;
@@ -639,6 +640,7 @@ pub fn run() {
         .manage(storage::new_state())
         .manage(plugin::new_state())
         .manage(tunnel::new_state())
+        .manage(ai::new_state())
         .manage(DebugLogState::new(false))
         .setup(|app| {
             // 从 settings.json 读取调试日志开关初始值
@@ -647,6 +649,12 @@ pub fn run() {
                     if let Ok(val) = storage::settings::get_setting(&base_dir, "debug_logging") {
                         debug_state.set(val == "true");
                     }
+                }
+            }
+            // 设置 AI 模型存储 base_dir
+            if let Some(ai_state) = app.try_state::<ai::AiModelState>() {
+                if let Ok(base_dir) = app.path().app_data_dir() {
+                    ai::models::set_base_dir(&ai_state, &base_dir);
                 }
             }
             // 首次启动注册内置插件（幂等）：端口转发插件随应用打包自动安装
@@ -763,6 +771,13 @@ pub fn run() {
             tunnel::tunnel_stop_all_for_host,
             tunnel::tunnel_export_rules,
             tunnel::tunnel_import_rules,
+            ai::models::ai_list_models,
+            ai::models::ai_save_model,
+            ai::models::ai_delete_model,
+            ai::models::ai_set_default_model,
+            ai::models::ai_test_model,
+            ai::chat::ai_chat_stream,
+            ai::chat::ai_chat_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

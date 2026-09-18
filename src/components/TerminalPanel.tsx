@@ -13,6 +13,7 @@ import {
   Plus,
   Maximize2,
   Minimize2,
+  Bot,
 } from 'lucide-react';
 import { useHostStore } from '../store/hostStore';
 import { useUIStore } from '../store/uiStore';
@@ -20,6 +21,7 @@ import { useFileStore, lastPtyCdPath } from '../store/fileStore';
 import { useHistoryStore } from '../store/historyStore';
 import { matchShortcut, useShortcut } from '../store/shortcutStore';
 import { useTerminalStore, getTerminalSettings } from '../store/terminalStore';
+import { useAiStore } from '../store/aiStore';
 import { logInfo } from '../utils/log';
 import { useToastStore } from './Toast';
 import '@xterm/xterm/css/xterm.css';
@@ -273,6 +275,8 @@ export function TerminalPanel() {
   const setTerminalFullscreen = useUIStore((s) => s.setTerminalFullscreen);
   const terminalTabsMap = useUIStore((s) => s.terminalTabs);
   const activeTerminalTabMap = useUIStore((s) => s.activeTerminalTab);
+  const aiPanelOpen = useAiStore((s) => s.isPanelOpen);
+  const toggleAiPanel = useAiStore((s) => s.togglePanel);
   const addTerminalTab = useUIStore((s) => s.addTerminalTab);
   const removeTerminalTab = useUIStore((s) => s.removeTerminalTab);
   const setActiveTerminalTab = useUIStore((s) => s.setActiveTerminalTab);
@@ -1203,6 +1207,15 @@ export function TerminalPanel() {
               已断线
             </span>
           )}
+          <button
+            className={`terminal-titlebar-btn ${aiPanelOpen ? 'is-active' : ''}`}
+            type="button"
+            aria-label="AI 智能体"
+            title="AI 智能体"
+            onClick={toggleAiPanel}
+          >
+            <Bot size={13} />
+          </button>
           <button
             className="terminal-titlebar-btn"
             type="button"

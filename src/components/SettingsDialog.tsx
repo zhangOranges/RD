@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
-import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3, Info, Code2, Sparkles, MessageCircle, Star, ExternalLink, Puzzle } from 'lucide-react';
+import { X, Check, Palette, Sliders, DownloadCloud, RefreshCw, Gauge, Plus, Trash2, FolderOpen, Eraser, Bug, Keyboard, RotateCcw, Edit3, Info, Code2, Sparkles, MessageCircle, Star, ExternalLink, Puzzle, Bot } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useUIStore } from '../store/uiStore';
@@ -17,6 +17,7 @@ import type { PresetThemeId } from '../theme/palette';
 import { ThemeEditor } from './ThemeEditor';
 import { useShortcutStore, SHORTCUTS, eventToShortcut } from '../store/shortcutStore';
 import { useTerminalStore } from '../store/terminalStore';
+import { AiModelManager } from './AiModelManager';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { logInfo, logWarn } from '../utils/log';
 import {
@@ -32,7 +33,7 @@ import {
   type MirrorOption,
 } from '../hooks/useAppUpdater';
 
-type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'plugin' | 'debug' | 'about';
+type SettingsTab = 'general' | 'theme' | 'update' | 'shortcuts' | 'plugin' | 'ai' | 'debug' | 'about';
 
 interface TabItem {
   id: SettingsTab;
@@ -46,6 +47,7 @@ const TABS: TabItem[] = [
   { id: 'update', labelKey: 'settings.update', icon: DownloadCloud },
   { id: 'shortcuts', labelKey: 'settings.shortcuts', icon: Keyboard },
   { id: 'plugin', labelKey: 'settings.plugin', icon: Puzzle },
+  { id: 'ai', labelKey: 'settings.ai', icon: Bot },
   { id: 'debug', labelKey: 'settings.debug', icon: Bug },
   { id: 'about', labelKey: 'settings.about', icon: Info },
 ];
@@ -1289,6 +1291,17 @@ export function SettingsDialog() {
                 {pluginSubTab === 'permissions' && (
                   <PluginDevConsole />
                 )}
+              </div>
+            )}
+
+            {/* AI 智能体 */}
+            {activeTab === 'ai' && (
+              <div className="settings-pane">
+                <div className="settings-pane-title">{t('ai.settingsTitle')}</div>
+                <div className="settings-row-desc" style={{ marginBottom: 16 }}>
+                  {t('ai.settingsDesc')}
+                </div>
+                <AiModelManager />
               </div>
             )}
 
