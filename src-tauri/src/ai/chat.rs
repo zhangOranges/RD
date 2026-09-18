@@ -5,9 +5,9 @@
 //! - `ai:done`   payload: { stream_id }
 //! - `ai:error`  payload: { stream_id, error }
 
-use std::sync::{Arc, Mutex};
-use std::collections::HashSet;
 use futures_util::StreamExt;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 use super::models::{decode_key, get_model, AiModelState};
@@ -45,7 +45,15 @@ pub async fn ai_chat_stream(
 
     // 在后台任务中执行流式请求，主命令立即返回 stream_id
     tauri::async_runtime::spawn(async move {
-        let result = stream_chat(&app_clone, &stream_id_clone, &model_clone, &msgs, &ctx, &active_streams).await;
+        let result = stream_chat(
+            &app_clone,
+            &stream_id_clone,
+            &model_clone,
+            &msgs,
+            &ctx,
+            &active_streams,
+        )
+        .await;
         // 无论成功或失败，移除活跃标记
         active_streams.lock().unwrap().remove(&stream_id_clone);
         match result {
@@ -149,7 +157,11 @@ async fn stream_chat(
     while let Some(chunk_result) = stream.next().await {
         // 检查是否被用户取消
         if !active_streams.lock().unwrap().contains(stream_id) {
-            debug_log(app, LogLevel::Info, &format!("ai stream 被取消: {}", stream_id));
+            debug_log(
+                app,
+                LogLevel::Info,
+                &format!("ai stream 被取消: {}", stream_id),
+            );
             return Ok(false);
         }
 
