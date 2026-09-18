@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useAiStore, extractCommands, isDangerousCommand } from '../aiStore';
 
 // Mock Tauri invoke and event listen
@@ -32,8 +32,8 @@ const localStorageMock = (() => {
   };
 })();
 
-// 注入到 global 作为 localStorage
-(global as Record<string, unknown>).localStorage = localStorageMock;
+// 注入到 globalThis 作为 localStorage
+(globalThis as Record<string, unknown>).localStorage = localStorageMock;
 
 // ============ extractCommands ============
 
@@ -173,7 +173,7 @@ describe('AiStore 会话管理', () => {
     }));
 
     // 切换到另一个会话再切回来
-    const id2 = useAiStore.getState().createSession();
+    useAiStore.getState().createSession();
     expect(useAiStore.getState().messages).toEqual([]);
 
     useAiStore.getState().switchSession(id);
